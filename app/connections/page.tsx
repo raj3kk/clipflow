@@ -37,7 +37,8 @@ function IgCookiesForm({ save }: { save: SaveFn }) {
     await save({
       method: "session-cookie",
       label,
-      secret: { cookies: rows.filter((r) => r.name && r.value).map((r) => ({ name: r.name, value: r.value })) },
+      // Worker expects kind:"web" (see WebPoster.login in worker/pipeline_worker.py).
+      secret: { kind: "web", cookies: rows.filter((r) => r.name && r.value).map((r) => ({ name: r.name, value: r.value })) },
     });
     setBusy(false);
   };
@@ -77,26 +78,17 @@ function IgCookiesForm({ save }: { save: SaveFn }) {
 }
 
 // ---------- Instagram: Meta Accounts Center / API ----------
-function IgMetaApiForm({ save }: { save: SaveFn }) {
-  const [busy, setBusy] = useState(false);
+function IgMetaApiForm() {
   return (
     <div className="grid gap-3">
       <p className="text-sm text-slate-400">
-        Meta app authorization via the Accounts Center link. Note: the connect
-        flow currently dead-ends at “already added” in the Accounts Center —
-        use session cookies or username+password until Meta fixes it.
+        Meta app authorization is <span className="text-amber-300 font-medium">not available</span>:
+        the Accounts Center flow dead-ends at “already added” and there is no
+        Meta developer app connected to ClipFlow, so there is nothing to
+        authorize against. Use <span className="font-medium">Session cookies</span> or{" "}
+        <span className="font-medium">Username + password</span> instead — both are
+        real, encrypted, and worker-verified.
       </p>
-      <button
-        className={`${btnPrimary} justify-self-start`}
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true);
-          await save({ method: "meta-api", label: "Meta API", secret: null });
-          setBusy(false);
-        }}
-      >
-        {busy ? "Working…" : "Reconnect Meta API"}
-      </button>
     </div>
   );
 }
@@ -112,7 +104,12 @@ function IgUserPassForm({ save }: { save: SaveFn }) {
       onSubmit={async (e) => {
         e.preventDefault();
         setBusy(true);
-        await save({ method: "username-password", label: username, secret: { username, password } });
+        await save({
+          method: "username-password",
+          label: username,
+          // Worker expects kind:"credentials" (see WebPoster.login).
+          secret: { kind: "credentials", username, password },
+        });
         setBusy(false);
         setPassword("");
       }}
@@ -134,83 +131,89 @@ function IgUserPassForm({ save }: { save: SaveFn }) {
   );
 }
 
-// ---------- Whop: Google OAuth ----------
-function WhopGoogleForm({ save, status }: { save: SaveFn; status?: string }) {
-  const [busy, setBusy] = useState(false);
-  return (
-    <div className="grid gap-3">
-      <p className="text-sm text-slate-400">
-        Sign in to Whop with your Google account (flipify.com@gmail.com). The
-        OAuth window opens in your browser; the worker reuses the session.
-      </p>
-      <div className="flex items-center gap-3">
-        <button
-          className={btnPrimary}
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true);
-            await save({ method: "google-oauth", label: "Google OAuth", secret: null });
-            setBusy(false);
-          }}
-        >
-          {busy ? "Working…" : "Connect with Google"}
-        </button>
-        {status && <StatusPill status={status} />}
-      </div>
-    </div>
-  );
-}
+// ---------- Whop: Google session cookies (what the worker actually uses) ----------
+const WHOP_COOKIES = ["session", "whop_session", "__Secure-next-auth.session-token"];
 
-// ---------- Whop: email OTP ----------
-function WhopEmailOtpForm({ save }: { save: SaveFn }) {
-  const [email, setEmail] = useState("");
+function WhopCookiesForm({ save }: { save: SaveFn }) {
+  const [label, setLabel] = useState("Whop Google session");
+  const [rows, setRows] = useState(WHOP_COOKIES.map((name) => ({ name, value: "" })));
   const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    await save({
+      method: "google-oauth",
+      label,
+      // Worker expects kind:"google_oauth" + cookies (see submit_step in worker/pipeline_worker.py).
+      secret: { kind: "google_oauth", cookies: rows.filter((r) => r.name && r.value).map((r) => ({ name: r.name, value: r.value })) },
+    });
+    setBusy(false);
+  };
+
   return (
-    <form
-      className="grid gap-3"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        setBusy(true);
-        await save({ method: "email-otp", label: email, secret: null });
-        setBusy(false);
-      }}
-    >
-      <label className="text-sm block">Email
-        <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} />
-      </label>
-      <p className="text-xs text-slate-500">
-        The sign-in code is handled via the Interventions tab — fill it in there
-        when it arrives.
+    <form onSubmit={submit} className="grid gap-2">
+      <p className="text-xs text-slate-500 mb-1">
+        Whop sign-in normally needs Google prompts on your phone, so there is no
+        one-click OAuth here. Paste the session cookies from a desktop browser
+        where you are already signed in to Whop via Google — the worker reuses
+        that session to submit clips.
       </p>
-      <button type="submit" disabled={busy} className={`${btnPrimary} justify-self-start`}>
-        {busy ? "Saving…" : "Register email for OTP"}
+      <LabelField value={label} onChange={setLabel} placeholder="Label" />
+      {rows.map((r, i) => (
+        <div key={i} className="grid grid-cols-5 gap-2">
+          <input
+            value={r.name}
+            onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
+            placeholder="cookie name"
+            className={`${inputCls} col-span-2 !mt-0`}
+          />
+          <input
+            value={r.value}
+            onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
+            placeholder="cookie value"
+            type="password"
+            className={`${inputCls} col-span-3 !mt-0`}
+          />
+        </div>
+      ))}
+      <button
+        type="button"
+        className={`${btnGhost} justify-self-start`}
+        onClick={() => setRows([...rows, { name: "", value: "" }])}
+      >
+        + Add custom cookie
+      </button>
+      <button type="submit" disabled={busy} className={`${btnPrimary} justify-self-start mt-2`}>
+        {busy ? "Saving…" : "Save Whop session"}
       </button>
     </form>
   );
 }
 
-// ---------- Gmail: OAuth ----------
-function GmailOAuthForm({ save, status }: { save: SaveFn; status?: string }) {
-  const [busy, setBusy] = useState(false);
+// ---------- Whop: email OTP (not wired worker-side yet) ----------
+function WhopEmailOtpForm() {
   return (
     <div className="grid gap-3">
       <p className="text-sm text-slate-400">
-        Connect the Gmail account used for OTP auto-read (flipify.com@gmail.com).
+        Email-OTP sign-in is <span className="text-amber-300 font-medium">not wired yet</span>:
+        the worker cannot request or enter Whop codes on its own. Use{" "}
+        <span className="font-medium">Google session cookies</span> above for now.
       </p>
-      <div className="flex items-center gap-3">
-        <button
-          className={btnPrimary}
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true);
-            await save({ method: "oauth", label: "Gmail OAuth", secret: null });
-            setBusy(false);
-          }}
-        >
-          {busy ? "Working…" : "Connect Gmail"}
-        </button>
-        {status && <StatusPill status={status} />}
-      </div>
+    </div>
+  );
+}
+
+// ---------- Gmail: OAuth (needs a Google Cloud client — not set up) ----------
+function GmailOAuthForm() {
+  return (
+    <div className="grid gap-3">
+      <p className="text-sm text-slate-400">
+        Google OAuth is <span className="text-amber-300 font-medium">not available</span>:
+        it needs a Google Cloud OAuth client registered for ClipFlow, which does
+        not exist. Use <span className="font-medium">App password</span> below —
+        it is real, encrypted, and the worker reads OTP codes with it today.
+      </p>
     </div>
   );
 }
@@ -226,7 +229,12 @@ function GmailAppPassForm({ save }: { save: SaveFn }) {
       onSubmit={async (e) => {
         e.preventDefault();
         setBusy(true);
-        await save({ method: "app-password", label: email, secret: { app_password: pass } });
+        await save({
+          method: "app-password",
+          label: email,
+          // Worker expects kind:"app_password" + email (see worker/gmail.py).
+          secret: { kind: "app_password", email, app_password: pass },
+        });
         setBusy(false);
         setPass("");
       }}
@@ -437,7 +445,7 @@ export default function ConnectionsPage() {
       service: "instagram",
       methods: [
         { key: "session-cookie", title: "Session cookies", desc: "Paste sessionid, csrftoken…", form: (p) => <IgCookiesForm {...p} /> },
-        { key: "meta-api", title: "Meta Accounts Center / API", desc: "App authorization flow", form: (p) => <IgMetaApiForm {...p} /> },
+        { key: "meta-api", title: "Meta Accounts Center / API", desc: "Not available — see note", form: () => <IgMetaApiForm /> },
         { key: "username-password", title: "Username + password", desc: "Encrypted; 2FA via Interventions", form: (p) => <IgUserPassForm {...p} /> },
       ],
     },
@@ -445,15 +453,15 @@ export default function ConnectionsPage() {
       title: "Whop",
       service: "whop",
       methods: [
-        { key: "google-oauth", title: "Continue with Google", desc: "OAuth sign-in", form: (p) => <WhopGoogleForm {...p} /> },
-        { key: "email-otp", title: "Email OTP", desc: "Code handled via Interventions", form: (p) => <WhopEmailOtpForm {...p} /> },
+        { key: "google-oauth", title: "Google session cookies", desc: "Paste Whop session cookies", form: (p) => <WhopCookiesForm {...p} /> },
+        { key: "email-otp", title: "Email OTP", desc: "Not wired yet — see note", form: () => <WhopEmailOtpForm /> },
       ],
     },
     {
       title: "Gmail",
       service: "gmail",
       methods: [
-        { key: "oauth", title: "Google OAuth", desc: "For OTP auto-read", form: (p) => <GmailOAuthForm {...p} /> },
+        { key: "oauth", title: "Google OAuth", desc: "Not available — see note", form: () => <GmailOAuthForm /> },
         { key: "app-password", title: "App password", desc: "16-char app password", form: (p) => <GmailAppPassForm {...p} /> },
       ],
     },
