@@ -1,47 +1,80 @@
-"use client";
+import { getDashboard, statusPill } from "@/lib/state";
 
-import { useEffect, useState } from "react";
-import { Submission } from "@/lib/types";
+export const dynamic = "force-dynamic";
 
-export default function SubmissionsPage() {
-  const [subs, setSubs] = useState<Submission[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch("/api/submissions")
-      .then((r) => r.json())
-      .then((d) => setSubs(d.submissions ?? []))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <p className="text-slate-400">Loading submissions…</p>;
+export default async function Submissions() {
+  const d = await getDashboard();
+  const subs = d?.submissions ?? [];
+  const prot = d?.protected_urls ?? [];
 
   return (
     <div>
       <h1 className="text-2xl font-bold mb-1">Submissions</h1>
-      <p className="text-slate-400 text-sm mb-6">Whop ko bheje gaye clips</p>
-      {subs.length === 0 && (
-        <p className="text-slate-500 text-sm">Abhi koi submission nahi hai.</p>
-      )}
-      <div className="grid gap-4">
-        {subs.map((s) => (
-          <div key={s.id} className="rounded-xl border border-line bg-panel p-5 flex items-start justify-between gap-4">
-            <div>
-              <div className="font-semibold text-sm">{s.campaign_name ?? s.clip_id}</div>
-              <a href={s.instagram_url} target="_blank" rel="noreferrer" className="text-xs text-accent underline break-all">
-                {s.instagram_url}
+      <p className="text-slate-400 text-sm mb-6">
+        Whop pe submit kiye gaye clips — status Whop ke review ke hisaab se.
+      </p>
+
+      <div className="rounded-xl border border-line bg-panel overflow-hidden mb-8">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-slate-500 border-b border-line">
+              <th className="p-4 font-medium">Campaign</th>
+              <th className="p-4 font-medium">Reel</th>
+              <th className="p-4 font-medium">Submitted</th>
+              <th className="p-4 font-medium">Views</th>
+              <th className="p-4 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {subs.map((s, i) => (
+              <tr key={i} className="border-b border-line last:border-0">
+                <td className="p-4">{s.campaign}</td>
+                <td className="p-4">
+                  <a
+                    href={s.instagram_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-accent underline"
+                  >
+                    Open
+                  </a>
+                </td>
+                <td className="p-4 text-slate-400">{s.submitted_at}</td>
+                <td className="p-4 text-slate-400">
+                  {s.views == null ? "—" : s.views.toLocaleString()}
+                </td>
+                <td className="p-4">{statusPill(s.status)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {subs.length === 0 && (
+          <p className="p-4 text-sm text-slate-500">Koi submission nahi.</p>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-gold/40 bg-gold/10 p-5">
+        <h2 className="font-semibold mb-2 text-gold">
+          Protected reels — kabhi delete mat karo
+        </h2>
+        <p className="text-sm text-slate-300 mb-3">
+          In reels ka Whop submission hai. Delete karne se submission reject ho
+          jata hai (14 Sep ko aisa ho chuka hai).
+        </p>
+        <ul className="text-sm space-y-1">
+          {prot.map((u) => (
+            <li key={u}>
+              <a
+                href={u}
+                target="_blank"
+                rel="noreferrer"
+                className="text-accent underline break-all"
+              >
+                {u}
               </a>
-              <div className="text-xs text-slate-400 mt-1">
-                {s.submitted_at ? new Date(s.submitted_at).toLocaleString("en-IN") : "—"}
-                {s.views != null && <> · {s.views.toLocaleString()} views</>}
-                {s.earnings_usd != null && <> · ${s.earnings_usd.toFixed(2)}</>}
-              </div>
-            </div>
-            <span className="rounded bg-emerald-900 px-2 py-1 text-xs text-emerald-200 shrink-0">
-              {s.whop_status}
-            </span>
-          </div>
-        ))}
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   );
