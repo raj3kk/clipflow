@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useApi } from "../components/useApi";
 import SetupBanner from "../components/SetupBanner";
 import StatusPill from "@/lib/status-pill";
@@ -204,16 +204,55 @@ function WhopEmailOtpForm() {
   );
 }
 
-// ---------- Gmail: OAuth (needs a Google Cloud client — not set up) ----------
-function GmailOAuthForm() {
+// ---------- Gmail: Google OAuth (REAL — needs server-side client configured) ----------
+function GmailOAuthForm({ onMsg }: { onMsg: (m: string) => void }) {
+  const [status, setStatus] = useState<"checking" | "ready" | "missing">("checking");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/oauth/google/status")
+      .then((r) => r.json())
+      .then((d) => setStatus(d.configured ? "ready" : "missing"))
+      .catch(() => setStatus("missing"));
+  }, []);
+
+  if (status === "checking") {
+    return <p className="text-sm text-slate-500">Checking Google OAuth setup…</p>;
+  }
+
+  if (status === "missing") {
+    return (
+      <div className="grid gap-3">
+        <p className="text-sm text-slate-400">
+          Google OAuth is <span className="text-amber-300 font-medium">not set up yet</span>:
+          it needs a Google Cloud OAuth client for ClipFlow (one-time setup, ~5 min).
+          Until then, use <span className="font-medium">App password</span> below —
+          it works today. Ask in chat for the setup steps.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-3">
       <p className="text-sm text-slate-400">
-        Google OAuth is <span className="text-amber-300 font-medium">not available</span>:
-        it needs a Google Cloud OAuth client registered for ClipFlow, which does
-        not exist. Use <span className="font-medium">App password</span> below —
-        it is real, encrypted, and the worker reads OTP codes with it today.
+        Real Google sign-in for the Gmail account used for OTP auto-read
+        (flipify.com@gmail.com). Google asks you to approve; ClipFlow stores only
+        a refresh token, encrypted — never your password.
       </p>
+      <div>
+        <button
+          className={btnPrimary}
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            onMsg("Opening Google sign-in…");
+            window.location.href = "/api/oauth/google/start";
+          }}
+        >
+          {busy ? "Opening…" : "Connect with Google"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -421,6 +460,23 @@ export default function ConnectionsPage() {
   const { data, loading, error, reload } = useApi<Resp>("/api/connections");
   const [msg, setMsg] = useState("");
 
+  // Show OAuth redirect results (e.g. ?oauth=ok / ?oauth=error&detail=...).
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const r = q.get("oauth");
+    if (r === "ok") {
+      setMsg(`✅ Google sign-in successful — Gmail connected${q.get("service") ? ` (${q.get("service")})` : ""}.`);
+      reload();
+    } else if (r === "error") {
+      setMsg(`Google sign-in failed: ${q.get("detail") ?? "unknown error"}`);
+    }
+    if (r) {
+      q.delete("oauth"); q.delete("detail"); q.delete("service");
+      const rest = q.toString();
+      window.history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : ""));
+    }
+  }, []);
+
   if (loading) return <p className="text-slate-400">Loading connections…</p>;
   if (error) {
     return (
@@ -461,7 +517,7 @@ export default function ConnectionsPage() {
       title: "Gmail",
       service: "gmail",
       methods: [
-        { key: "oauth", title: "Google OAuth", desc: "Not available — see note", form: () => <GmailOAuthForm /> },
+        { key: "oauth", title: "Google OAuth", desc: "Real Google sign-in", form: () => <GmailOAuthForm onMsg={setMsg} /> },
         { key: "app-password", title: "App password", desc: "16-char app password", form: (p) => <GmailAppPassForm {...p} /> },
       ],
     },
