@@ -1,0 +1,32 @@
+import Link from "next/link";
+
+/** Prominent setup banner — shown when the backend API reports configured:false.
+ *  Never shows fake numbers; only setup steps. */
+export default function SetupBanner() {
+  const steps = [
+    "Create a NEW Supabase project at supabase.com (free tier is fine).",
+    "In the Supabase SQL editor, run supabase/schema.sql from the clipflow folder.",
+    "Set Vercel env vars: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY.",
+    "Run worker/render_worker.py on the VM with CLIPFLOW_URL + SUPABASE_URL + SUPABASE_SERVICE_KEY.",
+  ];
+  return (
+    <div className="mb-6 rounded-xl border border-gold/40 bg-gold/10 p-5">
+      <h2 className="font-bold text-gold text-lg mb-1">Supabase not configured</h2>
+      <p className="text-sm text-slate-300 mb-3">
+        The database is not connected yet, so all numbers below are hidden —
+        nothing is faked. Complete the setup to see live data:
+      </p>
+      <ol className="text-sm text-slate-300 space-y-1.5 list-decimal list-inside">
+        {steps.map((s, i) => (
+          <li key={i}>{s}</li>
+        ))}
+      </ol>
+      <Link
+        href="/settings"
+        className="inline-block mt-4 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-ink"
+      >
+        Go to Settings
+      </Link>
+    </div>
+  );
+}

@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { getSupabase, isConfigured } from "@/lib/supabase";
+import { requireWorkerAuth } from "@/lib/worker_auth";
 
 /**
  * Worker endpoint: fetch render jobs waiting in the queue.
  * The VM render worker polls GET /api/jobs?status=queued
  */
 export async function GET(req: Request) {
+  const denied = requireWorkerAuth(req);
+  if (denied) return denied;
   const sb = getSupabase();
   if (!sb || !isConfigured()) {
     return NextResponse.json({ jobs: [], configured: false });

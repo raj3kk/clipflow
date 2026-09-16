@@ -1,79 +1,498 @@
-import { getDashboard } from "@/lib/state";
+"use client";
+
+import { useState } from "react";
+import { useApi } from "../components/useApi";
+import SetupBanner from "../components/SetupBanner";
 import StatusPill from "@/lib/status-pill";
+import { Msg, age, btnDanger, btnGhost, btnPrimary, cardCls, inputCls } from "../components/ui";
+import { Connection, ConnectionService } from "@/lib/types";
 
-export const dynamic = "force-dynamic";
+interface Resp {
+  connections: Connection[];
+  configured: boolean;
+  error?: string;
+}
 
-export default async function Connections() {
-  const d = await getDashboard();
-  const ig = d?.connections.instagram;
-  const whop = d?.connections.whop;
+type SaveFn = (payload: { method: string; label: string; secret: Record<string, unknown> | null }) => Promise<void>;
 
-  const card = (
-    title: string,
-    c?: { account: string; status: string; last_verified: string; note: string }
-  ) => (
-    <div className="rounded-xl border border-line bg-panel p-5">
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="font-semibold">{title}</h2>
-        {c && <StatusPill status={c.status} />}
+function LabelField({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  return (
+    <label className="text-sm block">Label
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={inputCls} />
+    </label>
+  );
+}
+
+// ---------- Instagram: session-cookie paste ----------
+const IG_COOKIES = ["sessionid", "csrftoken", "ds_user_id", "datr", "ig_did", "mid"];
+
+function IgCookiesForm({ save }: { save: SaveFn }) {
+  const [label, setLabel] = useState("@viralshortz_45");
+  const [rows, setRows] = useState(IG_COOKIES.map((name) => ({ name, value: "" })));
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    await save({
+      method: "session-cookie",
+      label,
+      secret: { cookies: rows.filter((r) => r.name && r.value).map((r) => ({ name: r.name, value: r.value })) },
+    });
+    setBusy(false);
+  };
+
+  return (
+    <form onSubmit={submit} className="grid gap-2">
+      <LabelField value={label} onChange={setLabel} placeholder="@handle" />
+      {rows.map((r, i) => (
+        <div key={i} className="grid grid-cols-5 gap-2">
+          <input
+            value={r.name}
+            onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
+            placeholder="cookie name"
+            className={`${inputCls} col-span-2 !mt-0`}
+          />
+          <input
+            value={r.value}
+            onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
+            placeholder="cookie value"
+            type="password"
+            className={`${inputCls} col-span-3 !mt-0`}
+          />
+        </div>
+      ))}
+      <button
+        type="button"
+        className={`${btnGhost} justify-self-start`}
+        onClick={() => setRows([...rows, { name: "", value: "" }])}
+      >
+        + Add custom cookie
+      </button>
+      <button type="submit" disabled={busy} className={`${btnPrimary} justify-self-start mt-2`}>
+        {busy ? "Saving…" : "Save session cookies"}
+      </button>
+    </form>
+  );
+}
+
+// ---------- Instagram: Meta Accounts Center / API ----------
+function IgMetaApiForm({ save }: { save: SaveFn }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="grid gap-3">
+      <p className="text-sm text-slate-400">
+        Meta app authorization via the Accounts Center link. Note: the connect
+        flow currently dead-ends at “already added” in the Accounts Center —
+        use session cookies or username+password until Meta fixes it.
+      </p>
+      <button
+        className={`${btnPrimary} justify-self-start`}
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          await save({ method: "meta-api", label: "Meta API", secret: null });
+          setBusy(false);
+        }}
+      >
+        {busy ? "Working…" : "Reconnect Meta API"}
+      </button>
+    </div>
+  );
+}
+
+// ---------- Instagram: username + password ----------
+function IgUserPassForm({ save }: { save: SaveFn }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <form
+      className="grid gap-3"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        await save({ method: "username-password", label: username, secret: { username, password } });
+        setBusy(false);
+        setPassword("");
+      }}
+    >
+      <label className="text-sm block">Username
+        <input required value={username} onChange={(e) => setUsername(e.target.value)} className={inputCls} />
+      </label>
+      <label className="text-sm block">Password
+        <input required type="password" value={password} onChange={(e) => setPassword(e.target.value)} className={inputCls} />
+      </label>
+      <p className="text-xs text-slate-500">
+        Encrypted server-side with the server key — never stored in the repo.
+        If Instagram asks for 2FA, the code request appears under Interventions.
+      </p>
+      <button type="submit" disabled={busy} className={`${btnPrimary} justify-self-start`}>
+        {busy ? "Saving…" : "Save credentials"}
+      </button>
+    </form>
+  );
+}
+
+// ---------- Whop: Google OAuth ----------
+function WhopGoogleForm({ save, status }: { save: SaveFn; status?: string }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="grid gap-3">
+      <p className="text-sm text-slate-400">
+        Sign in to Whop with your Google account (flipify.com@gmail.com). The
+        OAuth window opens in your browser; the worker reuses the session.
+      </p>
+      <div className="flex items-center gap-3">
+        <button
+          className={btnPrimary}
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            await save({ method: "google-oauth", label: "Google OAuth", secret: null });
+            setBusy(false);
+          }}
+        >
+          {busy ? "Working…" : "Connect with Google"}
+        </button>
+        {status && <StatusPill status={status} />}
       </div>
-      {c ? (
-        <>
-          <div className="text-sm text-slate-300">{c.account}</div>
-          <div className="text-xs text-slate-500 mt-1">
-            Last verified: {c.last_verified.replace("T", " ").slice(0, 16)}
-          </div>
-          <p className="text-sm text-slate-400 mt-3">{c.note}</p>
-        </>
+    </div>
+  );
+}
+
+// ---------- Whop: email OTP ----------
+function WhopEmailOtpForm({ save }: { save: SaveFn }) {
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <form
+      className="grid gap-3"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        await save({ method: "email-otp", label: email, secret: null });
+        setBusy(false);
+      }}
+    >
+      <label className="text-sm block">Email
+        <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} />
+      </label>
+      <p className="text-xs text-slate-500">
+        The sign-in code is handled via the Interventions tab — fill it in there
+        when it arrives.
+      </p>
+      <button type="submit" disabled={busy} className={`${btnPrimary} justify-self-start`}>
+        {busy ? "Saving…" : "Register email for OTP"}
+      </button>
+    </form>
+  );
+}
+
+// ---------- Gmail: OAuth ----------
+function GmailOAuthForm({ save, status }: { save: SaveFn; status?: string }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="grid gap-3">
+      <p className="text-sm text-slate-400">
+        Connect the Gmail account used for OTP auto-read (flipify.com@gmail.com).
+      </p>
+      <div className="flex items-center gap-3">
+        <button
+          className={btnPrimary}
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            await save({ method: "oauth", label: "Gmail OAuth", secret: null });
+            setBusy(false);
+          }}
+        >
+          {busy ? "Working…" : "Connect Gmail"}
+        </button>
+        {status && <StatusPill status={status} />}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Gmail: app password ----------
+function GmailAppPassForm({ save }: { save: SaveFn }) {
+  const [email, setEmail] = useState("flipify.com@gmail.com");
+  const [pass, setPass] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <form
+      className="grid gap-3"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        await save({ method: "app-password", label: email, secret: { app_password: pass } });
+        setBusy(false);
+        setPass("");
+      }}
+    >
+      <label className="text-sm block">Account email
+        <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} />
+      </label>
+      <label className="text-sm block">App password
+        <input required type="password" value={pass} onChange={(e) => setPass(e.target.value)} className={inputCls} />
+      </label>
+      <button type="submit" disabled={busy} className={`${btnPrimary} justify-self-start`}>
+        {busy ? "Saving…" : "Save app password"}
+      </button>
+    </form>
+  );
+}
+
+// ---------- Content Rewards: cookie paste ----------
+function ContentRewardsForm({ save }: { save: SaveFn }) {
+  const [label, setLabel] = useState("Content Rewards session");
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <form
+      className="grid gap-3"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        await save({ method: "session-cookie", label, secret: { cookie_text: text } });
+        setBusy(false);
+        setText("");
+      }}
+    >
+      <LabelField value={label} onChange={setLabel} />
+      <label className="text-sm block">Session / cookie paste
+        <textarea required rows={5} value={text} onChange={(e) => setText(e.target.value)}
+          placeholder="Paste the full Cookie header or session JSON here…"
+          className={inputCls} />
+      </label>
+      <button type="submit" disabled={busy} className={`${btnPrimary} justify-self-start`}>
+        {busy ? "Saving…" : "Save session"}
+      </button>
+    </form>
+  );
+}
+
+// ---------- Service section ----------
+interface MethodDef {
+  key: string;
+  title: string;
+  desc: string;
+  form: (p: { save: SaveFn; status?: Connection["status"] }) => React.ReactNode;
+}
+
+function ServiceSection({
+  title,
+  service,
+  methods,
+  connections,
+  onSaved,
+  onDeleted,
+  onTested,
+}: {
+  title: string;
+  service: ConnectionService;
+  methods: MethodDef[];
+  connections: Connection[];
+  onSaved: (msg: string) => void;
+  onDeleted: (msg: string) => void;
+  onTested: (msg: string) => void;
+}) {
+  const [activeMethod, setActiveMethod] = useState<string | null>(null);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const own = connections.filter((c) => c.service === service);
+
+  const save: SaveFn = async ({ method, label, secret }) => {
+    const res = await fetch("/api/connections", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ service, method, label, secret }),
+    });
+    const d = await res.json();
+    onSaved(res.ok ? `${title}: connection saved.` : `Error: ${d.error ?? res.status}`);
+  };
+
+  const del = async (id: string) => {
+    if (!confirm("Delete this connection?")) return;
+    const res = await fetch(`/api/connections/${id}`, { method: "DELETE" });
+    const d = await res.json();
+    onDeleted(res.ok ? "Connection deleted." : `Error: ${d.error ?? res.status}`);
+  };
+
+  const test = async (id: string) => {
+    setTestingId(id);
+    const res = await fetch(`/api/connections/${id}/test`, { method: "POST" });
+    const d = await res.json();
+    setTestingId(null);
+    if (!res.ok) onTested(`Test error: ${d.error ?? res.status}`);
+    else if (d.ok) onTested(`Test passed — fields present. Real verification happens worker-side.`);
+    else onTested(`Test failed: ${d.detail ?? "missing fields"}`);
+  };
+
+  const active = methods.find((m) => m.key === activeMethod);
+
+  return (
+    <div className={`${cardCls} mb-6`}>
+      <h2 className="font-semibold text-lg mb-4">{title}</h2>
+
+      {own.length > 0 ? (
+        <div className="space-y-2 mb-5">
+          {own.map((c) => (
+            <div key={c.id} className="flex items-center justify-between gap-3 rounded-lg border border-line p-3">
+              <div className="min-w-0">
+                <div className="text-sm font-medium truncate">
+                  {c.label} <span className="text-slate-500 font-normal">· {c.method}</span>
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5">
+                  last verified {c.last_verified ? age(c.last_verified) : "never"}
+                  {" · "}
+                  {c.has_secret ? (
+                    <span className="text-emerald-300">🔒 secret stored</span>
+                  ) : (
+                    <span className="text-slate-500">○ no secret</span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <StatusPill status={c.status} />
+                <button
+                  className={btnGhost}
+                  disabled={testingId === c.id}
+                  onClick={() => test(c.id)}
+                  title="Field validation — real verification happens worker-side"
+                >
+                  {testingId === c.id ? "Testing…" : "Test"}
+                </button>
+                <button
+                  className={btnGhost}
+                  onClick={() => setActiveMethod(c.method)}
+                  title="Reconnect / update this connection"
+                >
+                  Reconnect
+                </button>
+                <button className={btnDanger} onClick={() => del(c.id)}>
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
-        <p className="text-sm text-slate-500">No data yet.</p>
+        <p className="text-sm text-slate-500 mb-5">No {title} connection yet — pick a method below.</p>
+      )}
+
+      <div className="text-xs text-slate-500 mb-2">Connection method</div>
+      <div className="grid sm:grid-cols-3 gap-2 mb-4">
+        {methods.map((m) => (
+          <button
+            key={m.key}
+            onClick={() => setActiveMethod(activeMethod === m.key ? null : m.key)}
+            className={`rounded-lg border p-3 text-left transition-colors ${
+              activeMethod === m.key
+                ? "border-accent bg-accent/10"
+                : "border-line hover:border-slate-500"
+            }`}
+          >
+            <div className="text-sm font-semibold">{m.title}</div>
+            <div className="text-xs text-slate-500 mt-1">{m.desc}</div>
+          </button>
+        ))}
+      </div>
+
+      {active && (
+        <div className="rounded-lg border border-line p-4 bg-ink/40">
+          <div className="text-sm font-semibold mb-3">{active.title}</div>
+          {active.form({ save, status: own.find((c) => c.method === active.key)?.status })}
+        </div>
       )}
     </div>
   );
+}
+
+export default function ConnectionsPage() {
+  const { data, loading, error, reload } = useApi<Resp>("/api/connections");
+  const [msg, setMsg] = useState("");
+
+  if (loading) return <p className="text-slate-400">Loading connections…</p>;
+  if (error) {
+    return (
+      <div>
+        <h1 className="text-2xl font-bold mb-4">Connections</h1>
+        <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-5 text-sm text-red-200">
+          API error: {error}
+        </div>
+      </div>
+    );
+  }
+
+  const connections = data?.connections ?? [];
+  const handled = (m: string) => {
+    setMsg(m);
+    reload();
+  };
+
+  const services: { title: string; service: ConnectionService; methods: MethodDef[] }[] = [
+    {
+      title: "Instagram",
+      service: "instagram",
+      methods: [
+        { key: "session-cookie", title: "Session cookies", desc: "Paste sessionid, csrftoken…", form: (p) => <IgCookiesForm {...p} /> },
+        { key: "meta-api", title: "Meta Accounts Center / API", desc: "App authorization flow", form: (p) => <IgMetaApiForm {...p} /> },
+        { key: "username-password", title: "Username + password", desc: "Encrypted; 2FA via Interventions", form: (p) => <IgUserPassForm {...p} /> },
+      ],
+    },
+    {
+      title: "Whop",
+      service: "whop",
+      methods: [
+        { key: "google-oauth", title: "Continue with Google", desc: "OAuth sign-in", form: (p) => <WhopGoogleForm {...p} /> },
+        { key: "email-otp", title: "Email OTP", desc: "Code handled via Interventions", form: (p) => <WhopEmailOtpForm {...p} /> },
+      ],
+    },
+    {
+      title: "Gmail",
+      service: "gmail",
+      methods: [
+        { key: "oauth", title: "Google OAuth", desc: "For OTP auto-read", form: (p) => <GmailOAuthForm {...p} /> },
+        { key: "app-password", title: "App password", desc: "16-char app password", form: (p) => <GmailAppPassForm {...p} /> },
+      ],
+    },
+    {
+      title: "Content Rewards",
+      service: "content_rewards",
+      methods: [
+        { key: "session-cookie", title: "Session / cookie paste", desc: "Paste session text", form: (p) => <ContentRewardsForm {...p} /> },
+      ],
+    },
+  ];
 
   return (
     <div>
       <h1 className="text-2xl font-bold mb-1">Connections</h1>
       <p className="text-slate-400 text-sm mb-6">
-        Instagram + Whop login health — autopilot har run me verify karta hai.
+        Instagram + Whop + Gmail + Content Rewards login health — worker har run me verify karta hai.
       </p>
 
-      <div className="grid md:grid-cols-2 gap-4 mb-8">
-        {card("Instagram", ig)}
-        {card("Whop", whop)}
+      {data && !data.configured && <SetupBanner />}
+      <Msg msg={msg} />
+
+      <div className="mb-6 rounded-xl border border-line bg-panel p-4 text-xs text-slate-400">
+        🔐 Secrets are encrypted with the server key and never stored in the repo.
+        Secret values are never rendered back to this UI.
       </div>
 
-      <div className="rounded-xl border border-line bg-panel p-5 mb-6">
-        <h2 className="font-semibold mb-3">Login kaise kaam karta hai</h2>
-        <ol className="text-sm text-slate-300 space-y-2 list-decimal list-inside">
-          <li>
-            Passwords website ke database me <b>save nahi hote</b> — wo secure
-            vault me rehte hain, sirf automation browser use karta hai.
-          </li>
-          <li>
-            Har autopilot run se pehle dono sessions check hote hain. Agar
-            session toot jaye to run ruk jata hai aur owner ko notify hota hai —
-            adhoora kaam nahi hota.
-          </li>
-          <li>
-            Google ka 2-step verification hataya ja raha hai, taaki phone tap ke
-            bina sign-in ho sake.
-          </li>
-        </ol>
-      </div>
-
-      {d && d.guards.length > 0 && (
-        <div className="rounded-xl border border-line bg-panel p-5">
-          <h2 className="font-semibold mb-3">
-            Safety guards — galtiyon se seekha hua
-          </h2>
-          <ul className="text-sm text-slate-300 space-y-2 list-disc list-inside">
-            {d.guards.map((g, i) => (
-              <li key={i}>{g}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {services.map((s) => (
+        <ServiceSection
+          key={s.service}
+          title={s.title}
+          service={s.service}
+          methods={s.methods}
+          connections={connections}
+          onSaved={handled}
+          onDeleted={handled}
+          onTested={handled}
+        />
+      ))}
     </div>
   );
 }

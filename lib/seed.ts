@@ -23,6 +23,11 @@ export const SEED_CAMPAIGNS: Campaign[] = [
     campaign_url:
       "https://contentrewards.com/discover/00aa48e9-dc39-45f5-8c28-3d5821713826/preview",
     joined: true,
+    join_status: "joined",
+    min_payout_usd: null,
+    max_payout_usd: null,
+    scout_score: null,
+    notes: null,
     active: true,
   },
   {
@@ -40,6 +45,11 @@ export const SEED_CAMPAIGNS: Campaign[] = [
     brief_url: null,
     campaign_url: null,
     joined: true,
+    join_status: "joined",
+    min_payout_usd: null,
+    max_payout_usd: null,
+    scout_score: null,
+    notes: null,
     active: true,
   },
   {
@@ -58,6 +68,11 @@ export const SEED_CAMPAIGNS: Campaign[] = [
     brief_url: null,
     campaign_url: null,
     joined: true,
+    join_status: "joined",
+    min_payout_usd: null,
+    max_payout_usd: null,
+    scout_score: null,
+    notes: null,
     active: true,
   },
 ];

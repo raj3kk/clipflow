@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { getSupabase, isConfigured } from "@/lib/supabase";
 import { requireWorkerAuth } from "@/lib/worker_auth";
 
+const ALLOWED = ["instagram_url", "posted_at", "verify_status", "verify_detail"];
+
 /**
- * Worker endpoint: update a job (status, video_url, preview_urls, error).
- * Body: { status, video_url?, preview_urls?, error?, instagram_url?, posted_at?,
- *         scheduled_for?, verification?, qa_result? }
+ * Worker endpoint: update a post after it actually goes live
+ * (fills instagram_url + posted_at, updates verification state).
  */
 export async function PATCH(
   req: Request,
@@ -18,29 +19,22 @@ export async function PATCH(
     return NextResponse.json({ error: "Supabase not configured." }, { status: 503 });
   }
   const body = await req.json();
-  const allowed: Record<string, unknown> = {};
-  for (const k of [
-    "status",
-    "video_url",
-    "preview_urls",
-    "error",
-    "instagram_url",
-    "posted_at",
-    "scheduled_for",
-    "verification",
-    "qa_result",
-  ]) {
-    if (body[k] !== undefined) allowed[k] = body[k];
+  const patch: Record<string, unknown> = {};
+  for (const k of ALLOWED) {
+    if (body[k] !== undefined) patch[k] = body[k];
   }
-  if (!allowed.status) {
-    return NextResponse.json({ error: "status is required." }, { status: 400 });
+  if (Object.keys(patch).length === 0) {
+    return NextResponse.json(
+      { error: `Nothing to update. Allowed fields: ${ALLOWED.join(", ")}.` },
+      { status: 400 }
+    );
   }
   const { data, error } = await sb
-    .from("clips")
-    .update(allowed)
+    .from("posts")
+    .update(patch)
     .eq("id", params.id)
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ clip: data });
+  return NextResponse.json({ post: data });
 }
