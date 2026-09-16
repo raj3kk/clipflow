@@ -2,22 +2,22 @@
   "campaigns": [
     {
       "budget_remaining_usd": 14962,
-      "caption_template": "Joe Rogan: \"I just ask Perplexity\" instead of sifting through Google searches 🤯 #PerplexityPartner",
+      "caption_template": "Joe Rogan: \"I just ask Perplexity\" instead of sifting through Google searches \ud83e\udd2f #PerplexityPartner",
       "hashtags": [
         "#PerplexityPartner"
       ],
       "id": "perplexity-jre",
       "max_payout_usd": 450,
       "min_payout_usd": 150,
-      "name": "Perplexity JRE Clipping — ClipFarm",
+      "name": "Perplexity JRE Clipping \u2014 ClipFarm",
       "payout_per_1k_usd": 1.5,
-      "requirements": "15–60s. Only listed brief moments. Perplexity clearly heard AND seen. No fake screens. Caption must include #PerplexityPartner. Likes visible. ≥0.20% engagement. ≥40% views from US/UK/CA/AU. Keep live 30 days. No boosting/bots.",
+      "requirements": "15\u201360s. Only listed brief moments. Perplexity clearly heard AND seen. No fake screens. Caption must include #PerplexityPartner. Likes visible. \u22650.20% engagement. \u226540% views from US/UK/CA/AU. Keep live 30 days. No boosting/bots.",
       "sponsor": "Perplexity",
       "status": "active"
     },
     {
       "budget_remaining_usd": 0,
-      "caption_template": "The Diablo V reveal is here 🔥 #BlizzardPartner #DiabloV",
+      "caption_template": "The Diablo V reveal is here \ud83d\udd25 #BlizzardPartner #DiabloV",
       "hashtags": [
         "#BlizzardPartner",
         "#DiabloV"
@@ -25,7 +25,7 @@
       "id": "blizzard-blizzcon",
       "name": "Blizzard BlizzCon 2026 Trailer Clipping",
       "payout_per_1k_usd": 1.5,
-      "requirements": "Official trailer-folder footage only. Caption #BlizzardPartner + franchise hashtag. Keep live 30 days. [2026-09-16: Submissions CLOSED — budget $41.6K/$41.6K 100% used. Submit button disabled.]",
+      "requirements": "Official trailer-folder footage only. Caption #BlizzardPartner + franchise hashtag. Keep live 30 days. [2026-09-16: Submissions CLOSED \u2014 budget $41.6K/$41.6K 100% used. Submit button disabled.]",
       "sponsor": "Blizzard",
       "status": "closed"
     },
@@ -39,29 +39,42 @@
       "requirements": "Follow the campaign brief moments. Keep live 30 days.",
       "sponsor": "MoonPay",
       "status": "active"
+    },
+    {
+      "id": "syberjet-speed-record",
+      "name": "Syberjet Speed Record \u2014 1DS",
+      "sponsor": "1DS",
+      "payout_per_1k_usd": 3.0,
+      "min_payout_usd": 9,
+      "max_payout_usd": 450,
+      "budget_remaining_usd": 8374,
+      "status": "active",
+      "requirements": "30s+. Official campaign-folder footage only. Burned-in captions. 9:16 1080p+. IG tags @TREVORMILTONOFFICIAL @SYBERJETAERO. Say \"broke the record\", never \"officially certified\". Keep live 30 days after payout.",
+      "hashtags": [],
+      "caption_template": "SJ30 broke the transcontinental speed record: 4h 7m coast to coast at 505 mph. @TREVORMILTONOFFICIAL @SYBERJETAERO"
     }
   ],
   "connections": {
     "instagram": {
       "account": "@viralshortz_45",
       "last_verified": "2026-09-16T12:51:00+05:30",
-      "note": "Session expired ~12:48, restored via saved login. Reel posted 12:51 IST. Sessions need periodic re-auth — no fully unattended automation yet.",
+      "note": "Session expired ~12:48, restored via saved login. Reel posted 12:51 IST. Sessions need periodic re-auth \u2014 no fully unattended automation yet.",
       "status": "ok"
     },
     "whop": {
       "account": "flipify.com@gmail.com (Flipify Clips)",
       "last_verified": "2026-09-16T13:00:00+05:30",
-      "note": "Session expired; restored via Google OAuth. Tap Yes prompt STILL appeared — 2-step removal did not fully take effect. Sign-in needs owner attention.",
+      "note": "Session expired; restored via Google OAuth. Tap Yes prompt STILL appeared \u2014 2-step removal did not fully take effect. Sign-in needs owner attention.",
       "status": "ok"
     }
   },
   "guards": [
-    "Post → Whop submit within 20 minutes (campaign hard-rejects after 30 min).",
-    "Never submit a reel older than 30 min — repost fresh instead.",
+    "Post \u2192 Whop submit within 20 minutes (campaign hard-rejects after 30 min).",
+    "Never submit a reel older than 30 min \u2014 repost fresh instead.",
     "Never delete a reel that has a Whop submission (protected list below).",
     "Only mark 'submitted' when Whop shows exactly 'Clip submitted'.",
     "Caption = exact campaign template + required hashtag. No location unless brief asks.",
-    "Upload Original 9:16, no crop/zoom/trim. Hook ≥10% below top; captions ~72% height.",
+    "Upload Original 9:16, no crop/zoom/trim. Hook \u226510% below top; captions ~72% height.",
     "Verify the LIVE reel before submitting.",
     "Use VP9 file for upload (server Chromium cannot read H.264 uploads).",
     "Max 4 posts/day, spaced out. On Instagram action-block: pause + notify owner.",
@@ -89,7 +102,7 @@
           "t": "12:06"
         },
         {
-          "msg": "Instagram session OK — uploaded reel via web (Original 9:16)",
+          "msg": "Instagram session OK \u2014 uploaded reel via web (Original 9:16)",
           "t": "12:19"
         },
         {
@@ -105,7 +118,7 @@
           "t": "12:18"
         },
         {
-          "msg": "Reposted fresh reel, submitted within 3 min → 'Clip submitted' confirmed",
+          "msg": "Reposted fresh reel, submitted within 3 min \u2192 'Clip submitted' confirmed",
           "t": "12:22"
         },
         {
@@ -120,7 +133,7 @@
       "started_at": "2026-09-16T12:40:00+05:30",
       "reel_url": "https://www.instagram.com/reel/DdVvHoOB-ar/",
       "status": "reel_live_no_submission",
-      "whop_status": "Submission failed — campaign closed (budget 100% used)",
+      "whop_status": "Submission failed \u2014 campaign closed (budget 100% used)",
       "steps": [
         {
           "t": "12:40",
@@ -132,7 +145,7 @@
         },
         {
           "t": "12:48",
-          "msg": "Instagram session dead (password dialog) — restored via saved login (owner-authorized)"
+          "msg": "Instagram session dead (password dialog) \u2014 restored via saved login (owner-authorized)"
         },
         {
           "t": "12:51",
@@ -144,13 +157,19 @@
         },
         {
           "t": "13:00",
-          "msg": "Whop session dead — restored via Google OAuth (owner approved Tap Yes)"
+          "msg": "Whop session dead \u2014 restored via Google OAuth (owner approved Tap Yes)"
         },
         {
           "t": "13:04",
           "msg": "BLOCKED: Blizzard campaign shows 'Submissions closed', budget $41.6K/$41.6K 100% used, Submit button disabled"
         }
       ]
+    },
+    {
+      "ts": "2026-09-16T08:25:02.274000+00:00",
+      "kind": "render",
+      "campaign": "syberjet-speed-record",
+      "detail": "Syberjet clip1 rendered + QA passed: 37.6s 1080x1920 9:16, hook+captions in safe zones, VP9 compat ready. Post window opens ~16:51 IST (4h spacing)."
     }
   ],
   "submissions": [
@@ -188,5 +207,5 @@
     "submitted": 1,
     "target": 4
   },
-  "updated_at": "2026-09-16T13:05:00+05:30"
+  "updated_at": "2026-09-16T08:25:02.274000+00:00"
 }
