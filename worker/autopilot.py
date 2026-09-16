@@ -246,8 +246,12 @@ def main() -> None:
         return
 
     config.check_live_dryrun()
-    users = config.api("GET", "/api/worker/users", timeout=30).get(
-        "users", []) or []
+    try:
+        users = config.api("GET", "/api/worker/users", timeout=30).get(
+            "users", []) or []
+    except Exception as e:  # noqa: BLE001
+        _log(f"users poll failed: {e}")
+        return
     if not users:
         _log("no users with connections — nothing to do")
         return

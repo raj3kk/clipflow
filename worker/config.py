@@ -161,17 +161,26 @@ def api(method: str, path: str, body: dict | None = None,
         timeout: int = 60) -> dict:
     path = _user_path(path)
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(CLIPFLOW_URL + path, data=data, method=method)
-    if data:
-        req.add_header("Content-Type", "application/json")
-    if WORKER_SECRET:
-        req.add_header("x-worker-secret", WORKER_SECRET)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode())
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode(errors="replace")[:400]
-        raise RuntimeError(f"ClipFlow API {method} {path} -> {e.code}: {detail}") from e
+    last: Exception | None = None
+    for attempt in range(3):
+        req = urllib.request.Request(CLIPFLOW_URL + path, data=data,
+                                     method=method)
+        if data:
+            req.add_header("Content-Type", "application/json")
+        if WORKER_SECRET:
+            req.add_header("x-worker-secret", WORKER_SECRET)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode(errors="replace")[:400]
+            raise RuntimeError(
+                f"ClipFlow API {method} {path} -> {e.code}: {detail}") from e
+        except Exception as e:  # noqa: BLE001 - transient network; retry
+            last = e
+            time.sleep(2 * (attempt + 1))
+    raise RuntimeError(
+        f"ClipFlow API {method} {path} network failed after 3 tries: {last}")
 
 
 def activity(event: str, detail: str = "", clip_id: str | None = None) -> None:
