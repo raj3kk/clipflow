@@ -14,6 +14,13 @@ export async function PATCH(
 ) {
   const denied = requireWorkerAuth(req);
   if (denied) return denied;
+  const _wu = new URL(req.url).searchParams.get("user_id");
+  if (!_wu) {
+    return NextResponse.json(
+      { error: "user_id query param is required for worker calls." },
+      { status: 400 }
+    );
+  }
   const sb = getSupabase();
   if (!sb || !isConfigured()) {
     return NextResponse.json({ error: "Supabase not configured." }, { status: 503 });
@@ -33,6 +40,7 @@ export async function PATCH(
     .from("posts")
     .update(patch)
     .eq("id", params.id)
+    .eq("user_id", _wu)
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

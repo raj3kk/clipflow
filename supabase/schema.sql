@@ -16,15 +16,19 @@
 --   owner resolves (encrypts value) -> worker GETs .../consume once (decrypts,
 --   returns, then NULLs value_enc and marks 'consumed').
 --
--- ACCESS MODEL:
---   RLS is enabled on every table with NO public policies. The anon key gets
---   nothing. All server/worker access goes through the service-role key, which
---   bypasses RLS.
+-- ACCESS MODEL (multi-user):
+--   Every table has user_id (Supabase Auth user). RLS has one per-user policy
+--   ("own_rows": user_id = auth.uid()) as defense in depth; the app also
+--   scopes every query by user_id in code via the service-role key, which
+--   bypasses RLS. The anon key gets nothing.
 -- ============================================================================
 
 -- ---------------------------------------------------------------- campaigns --
+-- Campaigns are unique per (user_id, id): two users may each track the same
+-- Whop campaign slug independently.
 create table if not exists campaigns (
-  id text primary key,
+  id text not null,
+  user_id uuid,
   name text not null,
   sponsor text not null,
   payout_per_1k_usd numeric not null default 0,
@@ -38,7 +42,8 @@ create table if not exists campaigns (
   campaign_url text,
   joined boolean not null default false,
   active boolean not null default true,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  primary key (user_id, id)
 );
 
 -- New campaign columns (idempotent)
@@ -51,7 +56,8 @@ alter table campaigns add column if not exists notes text;
 -- ------------------------------------------------------------------- clips --
 create table if not exists clips (
   id uuid primary key default gen_random_uuid(),
-  campaign_id text not null references campaigns(id),
+  user_id uuid,
+  campaign_id text not null,
   source_url text not null,
   start_sec numeric not null,
   end_sec numeric not null,
@@ -63,7 +69,9 @@ create table if not exists clips (
   instagram_url text,
   posted_at timestamptz,
   error text,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  foreign key (user_id, campaign_id)
+    references campaigns (user_id, id) on delete cascade
 );
 
 -- New clip columns (idempotent)
@@ -87,15 +95,18 @@ alter table clips add constraint clips_status_check
 -- posted_at (PATCH /api/posts/[id]).
 create table if not exists posts (
   id uuid primary key default gen_random_uuid(),
+  user_id uuid,
   clip_id uuid references clips(id),
-  campaign_id text references campaigns(id),
+  campaign_id text,
   instagram_url text not null default '',
   platform text not null default 'instagram',
   scheduled_for timestamptz,
   posted_at timestamptz,
   verify_status text not null default 'pending',
   verify_detail jsonb,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  foreign key (user_id, campaign_id)
+    references campaigns (user_id, id) on delete cascade
 );
 
 -- Idempotent migration for projects created with the older posts shape
@@ -106,6 +117,7 @@ alter table posts alter column posted_at drop not null;
 -- ------------------------------------------------------------- submissions --
 create table if not exists submissions (
   id uuid primary key default gen_random_uuid(),
+  user_id uuid,
   clip_id uuid not null references clips(id),
   instagram_url text not null,
   whop_status text not null default 'submitted',
@@ -123,6 +135,7 @@ alter table submissions add column if not exists keep_live_until date;
 -- ENCRYPTED: secret_enc holds AES-256-GCM ciphertext (see header comment).
 create table if not exists connections (
   id uuid primary key default gen_random_uuid(),
+  user_id uuid,
   service text not null check (service in ('instagram','whop','gmail','content_rewards')),
   method text not null,
   label text,
@@ -131,7 +144,7 @@ create table if not exists connections (
   secret_enc text,
   meta jsonb,
   created_at timestamptz not null default now(),
-  unique (service, method)
+  unique (user_id, service, method)
 );
 
 -- ------------------------------------------------------------ interventions --
@@ -140,6 +153,7 @@ create table if not exists connections (
 -- consume, then nulled. Never exposed in list/resolve responses or logs.
 create table if not exists interventions (
   id uuid primary key default gen_random_uuid(),
+  user_id uuid,
   kind text not null,
   clip_id uuid references clips(id),
   question text not null,
@@ -156,6 +170,7 @@ create table if not exists interventions (
 -- ------------------------------------------------------------ activity_log --
 create table if not exists activity_log (
   id bigserial primary key,
+  user_id uuid,
   ts timestamptz not null default now(),
   actor text,
   event text not null,
@@ -164,8 +179,9 @@ create table if not exists activity_log (
 create index if not exists activity_log_ts_idx on activity_log (ts desc);
 
 -- ---------------------------------------------------------------- settings --
+-- One row per user, keyed by the Supabase Auth user id. Created on first use.
 create table if not exists settings (
-  id int primary key default 1 check (id = 1),
+  user_id uuid primary key,
   daily_target int not null default 4,
   spacing_hours numeric not null default 4,
   notify_email text,
@@ -174,10 +190,10 @@ create table if not exists settings (
   updated_at timestamptz not null default now()
 );
 
-insert into settings (id) values (1) on conflict (id) do nothing;
-
 -- --------------------------------------------------------------------- RLS --
--- Service-role key bypasses RLS; anon gets nothing (no public policies).
+-- Service-role key bypasses RLS; anon gets nothing except the per-user
+-- "own_rows" policy below (defense in depth — the app also scopes every
+-- query by user_id in code).
 alter table campaigns enable row level security;
 alter table clips enable row level security;
 alter table posts enable row level security;
@@ -187,39 +203,102 @@ alter table interventions enable row level security;
 alter table activity_log enable row level security;
 alter table settings enable row level security;
 
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'campaigns','clips','posts','submissions',
+    'connections','interventions','activity_log','settings'
+  ] loop
+    execute format('drop policy if exists own_rows on %I', t);
+    execute format(
+      'create policy own_rows on %I for all to authenticated ' ||
+      'using (user_id = auth.uid()) with check (user_id = auth.uid())',
+      t
+    );
+  end loop;
+end $$;
+
+-- ------------------------------------------- multi-user convergence (idempotent) --
+-- Brings databases created with the older single-user shape up to the
+-- multi-user shape. No-ops on fresh installs (columns/constraints already
+-- exist with the right shape) and on already-migrated projects.
+alter table campaigns    add column if not exists user_id uuid;
+alter table clips        add column if not exists user_id uuid;
+alter table posts        add column if not exists user_id uuid;
+alter table submissions  add column if not exists user_id uuid;
+alter table connections  add column if not exists user_id uuid;
+alter table interventions add column if not exists user_id uuid;
+alter table activity_log add column if not exists user_id uuid;
+alter table settings     add column if not exists user_id uuid;
+
+create index if not exists campaigns_user_idx    on campaigns (user_id);
+create index if not exists clips_user_idx        on clips (user_id);
+create index if not exists posts_user_idx        on posts (user_id);
+create index if not exists submissions_user_idx  on submissions (user_id);
+create index if not exists connections_user_idx  on connections (user_id);
+create index if not exists interventions_user_idx on interventions (user_id);
+create index if not exists activity_log_user_idx  on activity_log (user_id);
+
+-- connections: unique per (user, service, method)
+alter table connections drop constraint if exists connections_service_method_key;
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'connections_user_service_method_key'
+  ) then
+    alter table connections
+      add constraint connections_user_service_method_key
+      unique (user_id, service, method);
+  end if;
+end $$;
+
+-- campaigns: unique per (user_id, id); composite FKs on clips/posts
+alter table clips drop constraint if exists clips_campaign_id_fkey;
+alter table posts drop constraint if exists posts_campaign_id_fkey;
+alter table campaigns drop constraint if exists campaigns_pkey;
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'campaigns_user_id_pkey'
+  ) then
+    alter table campaigns
+      add constraint campaigns_user_id_pkey primary key (user_id, id);
+  end if;
+  if not exists (
+    select 1 from pg_constraint where conname = 'clips_campaign_user_fk'
+  ) then
+    alter table clips
+      add constraint clips_campaign_user_fk
+      foreign key (user_id, campaign_id)
+      references campaigns (user_id, id) on delete cascade;
+  end if;
+  if not exists (
+    select 1 from pg_constraint where conname = 'posts_campaign_user_fk'
+  ) then
+    alter table posts
+      add constraint posts_campaign_user_fk
+      foreign key (user_id, campaign_id)
+      references campaigns (user_id, id) on delete cascade;
+  end if;
+end $$;
+
+-- settings: one row per user
+delete from settings where user_id is null;
+alter table settings drop constraint if exists settings_pkey;
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'settings_user_pkey'
+  ) then
+    alter table settings add constraint settings_user_pkey primary key (user_id);
+  end if;
+end $$;
+
 -- ------------------------------------------------------------------ seeds --
--- Seed the three live campaigns
-insert into campaigns (
-  id, name, sponsor, payout_per_1k_usd, budget_remaining_usd,
-  min_payout_usd, max_payout_usd, join_status,
-  min_seconds, max_seconds, requirements, caption_template, hashtags,
-  brief_url, campaign_url, joined, active
-)
-values
-  ('perplexity-jre', 'Perplexity JRE Clipping — ClipFarm', 'Perplexity', 1.50, 14880,
-   1.00, 1.50, 'joined',
-   15, 60,
-   '15–60s. Only listed brief moments. Perplexity clearly heard AND seen. No fake screens. Caption must include #PerplexityPartner. Minimal overlays, no watermark. Likes visible. ≥0.20% engagement. ≥40% views from US/UK/CA/AU. Keep live 30 days. No boosting/bots.',
-   'Joe Rogan: "I just ask Perplexity" instead of sifting through Google searches 🤯 #PerplexityPartner',
-   array['#PerplexityPartner'],
-   'https://docs.google.com/document/d/1r3jFWtBrRbNdvp38w4qvcVK7vgu_6aK2GFQIS3pUBVk/edit?usp=sharing',
-   'https://contentrewards.com/discover/00aa48e9-dc39-45f5-8c28-3d5821713826/preview',
-   true, true),
-  ('blizzard-blizzcon', 'Blizzard BlizzCon 2026 Trailer Clipping', 'Blizzard', 1.50, 52000,
-   1.50, 1.50, 'joined',
-   15, 60,
-   'Official trailer-folder footage only. Caption #BlizzardPartner + franchise hashtag. Keep live 30 days.',
-   'The Diablo V reveal is here 🔥 #BlizzardPartner #DiabloV',
-   array['#BlizzardPartner','#DiabloV'],
-   null, null, true, true),
-  ('moonpay-cli', 'MoonPay CLI Clipping', 'MoonPay', 1.50, null,
-   null, null, 'joined',
-   15, 60,
-   'Explain what MoonPay CLI does. Tag @moonpay in caption.',
-   'What is MoonPay CLI? Ivan Soto-Wright explains how AI agents can transact with one line of code. @moonpay',
-   array[]::text[],
-   null, null, true, true)
-on conflict (id) do nothing;
+-- No demo seed data. Real users add their own campaigns through the UI.
+-- (Older installs had three demo campaigns; the multi-user migration removed
+-- them. This keeps fresh installs honest from the start.)
 
 -- Public bucket for rendered clips + preview frames
 insert into storage.buckets (id, name, public)

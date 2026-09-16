@@ -1,4 +1,5 @@
 import Nav from "./components/Nav";
+import UserBadge from "./components/UserBadge";
 import "./globals.css";
 
 export const metadata = {
@@ -17,7 +18,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <div className="text-xs text-slate-400">Whop clipping autopilot</div>
             </div>
             <Nav />
-            <div className="mt-auto text-xs text-slate-500">
+            <UserBadge />
+            <div className="text-xs text-slate-500">
               IG: @viralshortz_45
               <br />
               Target: 4/day · ≥4h spacing

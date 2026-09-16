@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabase, isConfigured } from "@/lib/supabase";
+import { getRouteUserId } from "@/lib/auth";
 import { requireWorkerAuth } from "@/lib/worker_auth";
 import { toPublic } from "@/lib/connections";
 import type { ConnectionService } from "@/lib/types";
@@ -31,6 +32,13 @@ export async function GET(
   if (!sb || !isConfigured()) {
     return NextResponse.json({ error: "Supabase not configured." }, { status: 503 });
   }
+  const _wu = new URL(req.url).searchParams.get("user_id");
+  if (!_wu) {
+    return NextResponse.json(
+      { error: "user_id query param is required for worker calls." },
+      { status: 400 }
+    );
+  }
   if (!(SERVICES as string[]).includes(params.id)) {
     return NextResponse.json(
       { error: `Unknown service '${params.id}'. Use one of: ${SERVICES.join(", ")}.` },
@@ -41,6 +49,7 @@ export async function GET(
     .from("connections")
     .select("id, service, method, label, status, secret_enc, created_at")
     .eq("service", params.id)
+    .eq("user_id", _wu)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -83,6 +92,9 @@ export async function PATCH(
   if (!sb || !isConfigured()) {
     return NextResponse.json({ error: "Supabase not configured." }, { status: 503 });
   }
+  const _ident = await getRouteUserId(req);
+  if ("error" in _ident) return _ident.error;
+  const userId = _ident.userId;
   const body = await req.json();
   const patch: Record<string, unknown> = {};
   for (const k of ALLOWED) {
@@ -98,6 +110,7 @@ export async function PATCH(
     .from("connections")
     .update(patch)
     .eq("id", params.id)
+    .eq("user_id", userId)
     .select("id, service, method, label, status, last_verified, secret_enc, meta, created_at")
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -105,14 +118,17 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: { id: string } }
 ) {
   const sb = getSupabase();
   if (!sb || !isConfigured()) {
     return NextResponse.json({ error: "Supabase not configured." }, { status: 503 });
   }
-  const { error } = await sb.from("connections").delete().eq("id", params.id);
+  const _ident = await getRouteUserId(req);
+  if ("error" in _ident) return _ident.error;
+  const userId = _ident.userId;
+  const { error } = await sb.from("connections").delete().eq("id", params.id).eq("user_id", userId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true, id: params.id });
 }

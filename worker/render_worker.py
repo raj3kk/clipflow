@@ -23,10 +23,15 @@ import tempfile
 import time
 import urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import config  # noqa: E402
+
+api = config.api
+
 CLIPFLOW_URL = os.environ.get("CLIPFLOW_URL", "").rstrip("/")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
-WORKER_SECRET = os.environ.get("WORKER_SECRET", "")
 POLL = int(os.environ.get("POLL_SECONDS", "60"))
 
 FACTORY = os.path.expanduser("~/workspace/whop-clipping/clip_factory.py")
@@ -38,17 +43,6 @@ for _v in ("no_proxy", "NO_PROXY"):
     _val = os.environ.get(_v)
     if _val:
         os.environ[_v] = ",".join(p for p in _val.split(",") if "[" not in p)
-
-
-def api(method, path, body=None):
-    data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(CLIPFLOW_URL + path, data=data, method=method)
-    if data:
-        req.add_header("Content-Type", "application/json")
-    if WORKER_SECRET:
-        req.add_header("x-worker-secret", WORKER_SECRET)
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return json.loads(resp.read().decode())
 
 
 def storage_upload(local_path, dest_name, content_type):
@@ -129,10 +123,23 @@ def main():
     print(f"[worker] polling {CLIPFLOW_URL} every {POLL}s", flush=True)
     while True:
         try:
-            jobs = api("GET", "/api/jobs?status=queued").get("jobs", [])
-            for job in jobs:
-                render_job(job)
+            users = config.api("GET", "/api/worker/users").get("users", [])
+            if not users:
+                print("[worker] no users with connections; skipping",
+                      flush=True)
+            for u in users:
+                uid = u.get("user_id")
+                if not uid:
+                    continue
+                config.set_worker_user(uid)
+                print(f"[worker] render pass for user {uid}", flush=True)
+                jobs = config.api(
+                    "GET", "/api/jobs?status=queued").get("jobs", [])
+                for job in jobs:
+                    render_job(job)
+            config.set_worker_user(None)
         except Exception as e:  # noqa: BLE001
+            config.set_worker_user(None)
             print(f"[worker] poll error: {e}", flush=True)
         time.sleep(POLL)
 

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabase, isConfigured } from "@/lib/supabase";
+import { getRouteUserId } from "@/lib/auth";
 import { encryptSecret } from "@/lib/crypto";
 
 const PUBLIC_COLS =
@@ -18,6 +19,9 @@ export async function POST(
   if (!sb || !isConfigured()) {
     return NextResponse.json({ error: "Supabase not configured." }, { status: 503 });
   }
+  const _ident = await getRouteUserId(req);
+  if ("error" in _ident) return _ident.error;
+  const userId = _ident.userId;
   const body = await req.json();
   const { value, resolved_via } = body as { value?: unknown; resolved_via?: string };
   if (value === undefined || value === null || value === "") {
@@ -43,6 +47,7 @@ export async function POST(
       resolved_via: resolved_via ?? "ui",
     })
     .eq("id", params.id)
+    .eq("user_id", userId)
     .eq("status", "pending")
     .select(PUBLIC_COLS)
     .single();

@@ -1,4 +1,8 @@
 node_modules/
 .next/
-*.log
-.env*.local
+worker/.venv/
+state/
+*.pyc
+__pycache__/
+.env
+.env.local

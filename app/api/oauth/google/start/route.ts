@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { randomBytes } from "crypto";
+import { getSessionUser } from "@/lib/auth";
 
 export const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 export const GOOGLE_SCOPES = [
@@ -24,6 +25,11 @@ export async function GET(req: Request) {
       { error: "Google OAuth is not configured on the server yet." },
       { status: 503 }
     );
+  }
+  // Only signed-in users can start OAuth (the connection binds to them).
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.redirect(new URL("/login?next=/connections", req.url).toString());
   }
   const state = randomBytes(16).toString("hex");
   const redirectUri = callbackUrl(req);

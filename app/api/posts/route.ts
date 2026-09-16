@@ -1,16 +1,21 @@
 import { NextResponse } from "next/server";
 import { getSupabase, isConfigured } from "@/lib/supabase";
+import { getRouteUserId } from "@/lib/auth";
 
-export async function GET() {
+export async function GET(req: Request) {
   const sb = getSupabase();
   if (!sb || !isConfigured()) {
     return NextResponse.json({ posts: [], configured: false });
   }
+  const _ident = await getRouteUserId(req);
+  if ("error" in _ident) return _ident.error;
+  const userId = _ident.userId;
   const { data, error } = await sb
     .from("posts")
     .select(
       "*, campaigns(name), submissions(id, clip_id, whop_status, submitted_at, views, earnings_usd, keep_live_until)"
     )
+    .eq("user_id", userId)
     .order("scheduled_for", { ascending: false, nullsFirst: false })
     .order("posted_at", { ascending: false, nullsFirst: false })
     .limit(50);
@@ -65,10 +70,14 @@ export async function POST(req: Request) {
     );
   }
   const postedAt = posted_at ?? new Date().toISOString();
+  const _ident3 = await getRouteUserId(req);
+  if ("error" in _ident3) return _ident3.error;
+  const userId3 = _ident3.userId;
   const { data, error } = await sb
     .from("posts")
     .insert({
       clip_id: clip_id ?? null,
+      user_id: userId3,
       campaign_id: campaign_id ?? null,
       instagram_url,
       platform: platform ?? "instagram",
@@ -82,7 +91,8 @@ export async function POST(req: Request) {
     await sb
       .from("clips")
       .update({ status: "posted", instagram_url, posted_at: postedAt })
-      .eq("id", clip_id);
+      .eq("id", clip_id)
+      .eq("user_id", userId3);
   }
   return NextResponse.json({ post: data }, { status: 201 });
 }

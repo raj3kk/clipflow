@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabase, isConfigured } from "@/lib/supabase";
+import { getRouteUserId } from "@/lib/auth";
 import { encryptSecret } from "@/lib/crypto";
 import { toPublic } from "@/lib/connections";
 import type { Connection, ConnectionService } from "@/lib/types";
@@ -11,14 +12,18 @@ const SERVICES: ConnectionService[] = [
   "content_rewards",
 ];
 
-export async function GET() {
+export async function GET(req: Request) {
   const sb = getSupabase();
   if (!sb || !isConfigured()) {
     return NextResponse.json({ connections: [], configured: false });
   }
+  const _ident = await getRouteUserId(req);
+  if ("error" in _ident) return _ident.error;
+  const userId = _ident.userId;
   const { data, error } = await sb
     .from("connections")
     .select("*")
+    .eq("user_id", userId)
     .order("service", { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({
@@ -57,6 +62,9 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
+  const _ident = await getRouteUserId(req);
+  if ("error" in _ident) return _ident.error;
+  const userId = _ident.userId;
 
   let secret_enc: string | undefined;
   if (secret !== undefined && secret !== null && secret !== "") {
@@ -73,6 +81,7 @@ export async function POST(req: Request) {
   const row: Record<string, unknown> = {
     service,
     method,
+    user_id: userId,
     label: label ?? null,
     status: "saved_unverified",
     meta: meta ?? null,
@@ -82,7 +91,7 @@ export async function POST(req: Request) {
 
   const { data, error } = await sb
     .from("connections")
-    .upsert(row, { onConflict: "service,method" })
+    .upsert(row, { onConflict: "user_id,service,method" })
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

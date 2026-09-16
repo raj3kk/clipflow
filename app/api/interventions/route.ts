@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabase, isConfigured } from "@/lib/supabase";
+import { getRouteUserId } from "@/lib/auth";
 import { requireWorkerAuth } from "@/lib/worker_auth";
 
 /**
@@ -28,11 +29,15 @@ export async function GET(req: Request) {
   if (!sb || !isConfigured()) {
     return NextResponse.json({ interventions: [], configured: false });
   }
+  const _ident = await getRouteUserId(req);
+  if ("error" in _ident) return _ident.error;
+  const userId = _ident.userId;
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status");
   let query = sb
     .from("interventions")
     .select(PUBLIC_COLS)
+    .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(50);
   if (status) query = query.eq("status", status);
@@ -44,6 +49,13 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const denied = requireWorkerAuth(req);
   if (denied) return denied;
+  const _wu = new URL(req.url).searchParams.get("user_id");
+  if (!_wu) {
+    return NextResponse.json(
+      { error: "user_id query param is required for worker calls." },
+      { status: 400 }
+    );
+  }
   const sb = getSupabase();
   if (!sb || !isConfigured()) {
     return NextResponse.json({ error: "Supabase not configured." }, { status: 503 });
@@ -60,6 +72,7 @@ export async function POST(req: Request) {
     .from("interventions")
     .insert({
       kind,
+      user_id: _wu,
       clip_id: clip_id ?? null,
       question,
       detail: detail ?? null,

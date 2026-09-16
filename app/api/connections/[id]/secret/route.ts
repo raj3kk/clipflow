@@ -16,6 +16,13 @@ export async function GET(
 ) {
   const auth = requireWorkerAuth(req);
   if (auth) return auth;
+  const _wu = new URL(req.url).searchParams.get("user_id");
+  if (!_wu) {
+    return NextResponse.json(
+      { error: "user_id query param is required for worker calls." },
+      { status: 400 }
+    );
+  }
   const sb = getSupabase();
   if (!sb || !isConfigured()) {
     return NextResponse.json(
@@ -27,6 +34,7 @@ export async function GET(
     .from("connections")
     .select("id, service, method, secret_enc")
     .eq("id", params.id)
+    .eq("user_id", _wu)
     .single();
   if (error || !data) {
     return NextResponse.json(

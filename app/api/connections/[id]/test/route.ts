@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabase, isConfigured } from "@/lib/supabase";
+import { getRouteUserId } from "@/lib/auth";
 
 /**
  * Light field validation for a stored connection.
@@ -13,17 +14,21 @@ import { getSupabase, isConfigured } from "@/lib/supabase";
  * untouched and { ok: false, detail } is returned.
  */
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: { id: string } }
 ) {
   const sb = getSupabase();
   if (!sb || !isConfigured()) {
     return NextResponse.json({ error: "Supabase not configured." }, { status: 503 });
   }
+  const _ident = await getRouteUserId(req);
+  if ("error" in _ident) return _ident.error;
+  const userId = _ident.userId;
   const { data, error } = await sb
     .from("connections")
     .select("id, service, method, label, status, secret_enc")
     .eq("id", params.id)
+    .eq("user_id", userId)
     .single();
   if (error || !data) {
     return NextResponse.json({ error: "Connection not found." }, { status: 404 });
@@ -48,7 +53,8 @@ export async function POST(
   await sb
     .from("connections")
     .update({ status: "saved_unverified" })
-    .eq("id", params.id);
+    .eq("id", params.id)
+    .eq("user_id", userId);
 
   return NextResponse.json({
     ok: true,

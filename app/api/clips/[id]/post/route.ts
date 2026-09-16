@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabase, isConfigured } from "@/lib/supabase";
+import { getRouteUserId } from "@/lib/auth";
 
 const DEFAULT_TARGET = 4;
 const DEFAULT_SPACING_HOURS = 4;
 
-async function getSettings(sb: SupabaseClient) {
+async function getSettings(sb: SupabaseClient, userId: string) {
   const { data } = await sb
     .from("settings")
     .select("daily_target, spacing_hours")
-    .eq("id", 1)
+    .eq("user_id", userId)
     .maybeSingle();
   return {
     daily_target: data?.daily_target ?? DEFAULT_TARGET,
@@ -24,7 +25,8 @@ async function getSettings(sb: SupabaseClient) {
  */
 async function computeScheduledFor(
   sb: SupabaseClient,
-  settings: { daily_target: number; spacing_hours: number }
+  settings: { daily_target: number; spacing_hours: number },
+  userId: string
 ): Promise<Date> {
   const spacingMs = settings.spacing_hours * 3600_000;
   const now = new Date();
@@ -33,6 +35,7 @@ async function computeScheduledFor(
   const { data: last } = await sb
     .from("posts")
     .select("scheduled_for, posted_at")
+    .eq("user_id", userId)
     .order("scheduled_for", { ascending: false, nullsFirst: false })
     .limit(1)
     .maybeSingle();
@@ -52,6 +55,7 @@ async function computeScheduledFor(
     const { count } = await sb
       .from("posts")
       .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
       .gte("scheduled_for", dayStart.toISOString())
       .lt("scheduled_for", dayEnd.toISOString());
     if ((count ?? 0) < settings.daily_target) break;
@@ -72,18 +76,21 @@ async function computeScheduledFor(
  * Note: this schedules the post — it does not post to Instagram itself.
  */
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: { id: string } }
 ) {
   const sb = getSupabase();
   if (!sb || !isConfigured()) {
     return NextResponse.json({ error: "Supabase not configured." }, { status: 503 });
   }
-
+  const _ident = await getRouteUserId(req);
+  if ("error" in _ident) return _ident.error;
+  const userId = _ident.userId;
   const { data: clip, error: fetchError } = await sb
     .from("clips")
     .select("*, campaigns(*)")
     .eq("id", params.id)
+    .eq("user_id", userId)
     .single();
   if (fetchError || !clip) {
     return NextResponse.json({ error: "Clip not found." }, { status: 404 });
@@ -117,7 +124,7 @@ export async function POST(
   if (!checks.caption_ok) failures.push("caption is empty");
   if (!checks.hook_ok) failures.push("hook is empty");
 
-  await sb.from("clips").update({ brief_check: checks }).eq("id", params.id);
+  await sb.from("clips").update({ brief_check: checks }).eq("id", params.id).eq("user_id", userId);
 
   if (failures.length > 0) {
     return NextResponse.json(
@@ -131,13 +138,14 @@ export async function POST(
   }
 
   // ---- schedule ----
-  const settings = await getSettings(sb);
-  const scheduledFor = await computeScheduledFor(sb, settings);
+  const settings = await getSettings(sb, userId);
+  const scheduledFor = await computeScheduledFor(sb, settings, userId);
 
   const { data: post, error: postError } = await sb
     .from("posts")
     .insert({
       clip_id: params.id,
+      user_id: userId,
       campaign_id: clip.campaign_id,
       instagram_url: "",
       platform: "instagram",
@@ -155,6 +163,7 @@ export async function POST(
     .from("clips")
     .update({ status: "scheduled", scheduled_for: scheduledFor.toISOString() })
     .eq("id", params.id)
+    .eq("user_id", userId)
     .select()
     .single();
   if (clipError) {

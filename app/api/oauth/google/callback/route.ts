@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getSupabase, isConfigured } from "@/lib/supabase";
+import { getSessionUser } from "@/lib/auth";
 import { encryptSecret } from "@/lib/crypto";
 import { callbackUrl } from "../start/route";
 
@@ -38,6 +39,11 @@ export async function GET(req: Request) {
   const sb = getSupabase();
   if (!clientId || !clientSecret || !sb || !isConfigured()) {
     return fail("Server not configured for Google OAuth.");
+  }
+  // Bind the connection to the signed-in ClipFlow user (multi-user).
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
+    return NextResponse.redirect(`${appOrigin}/login?next=/connections`);
   }
 
   try {
@@ -83,12 +89,13 @@ export async function GET(req: Request) {
         {
           service: "gmail",
           method: "oauth",
+          user_id: sessionUser.id,
           label: me.email,
           status: "verified",
           secret_enc: encryptSecret(secret),
           meta: { oauth_at: new Date().toISOString(), scope: "gmail.readonly" },
         },
-        { onConflict: "service,method" }
+        { onConflict: "user_id,service,method" }
       );
     if (error) return fail(`Could not save connection: ${error.message}`);
 

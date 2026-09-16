@@ -140,8 +140,26 @@ def encrypt_connection_secret(plaintext: bytes) -> str:
 # --------------------------------------------------------------------------
 # ClipFlow API (x-worker-secret header)
 # --------------------------------------------------------------------------
+WORKER_USER_ID: str | None = None
+
+
+def set_worker_user(uid: str | None) -> None:
+    """Scope subsequent api() calls to one user's rows (?user_id=...)."""
+    global WORKER_USER_ID
+    WORKER_USER_ID = uid
+
+
+def _user_path(path: str) -> str:
+    """Append ?user_id= (or &user_id=) for per-user worker endpoints."""
+    if not WORKER_USER_ID or path.startswith("/api/worker/users"):
+        return path
+    sep = "&" if "?" in path else "?"
+    return f"{path}{sep}user_id={urllib.parse.quote(str(WORKER_USER_ID), safe='')}"
+
+
 def api(method: str, path: str, body: dict | None = None,
         timeout: int = 60) -> dict:
+    path = _user_path(path)
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(CLIPFLOW_URL + path, data=data, method=method)
     if data:

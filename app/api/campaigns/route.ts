@@ -1,21 +1,25 @@
 import { NextResponse } from "next/server";
 import { getSupabase, isConfigured } from "@/lib/supabase";
-import { SEED_CAMPAIGNS } from "@/lib/seed";
+import { getRouteUserId } from "@/lib/auth";
 import type { CampaignInput } from "@/lib/types";
 
-export async function GET() {
+export async function GET(req: Request) {
   const sb = getSupabase();
   if (!sb || !isConfigured()) {
-    return NextResponse.json({ campaigns: SEED_CAMPAIGNS, configured: false });
+    return NextResponse.json({ campaigns: [], configured: false });
   }
+  const _ident = await getRouteUserId(req);
+  if ("error" in _ident) return _ident.error;
+  const userId = _ident.userId;
   const { data, error } = await sb
     .from("campaigns")
     .select("*")
+    .eq("user_id", userId)
     .eq("active", true)
     .order("payout_per_1k_usd", { ascending: false });
   if (error) {
     return NextResponse.json(
-      { campaigns: SEED_CAMPAIGNS, configured: true, warning: error.message },
+      { campaigns: [], configured: true, warning: error.message },
       { status: 200 }
     );
   }
@@ -30,6 +34,9 @@ export async function POST(req: Request) {
       { status: 503 }
     );
   }
+  const _ident = await getRouteUserId(req);
+  if ("error" in _ident) return _ident.error;
+  const userId = _ident.userId;
   const body = (await req.json()) as CampaignInput;
   const { id, name, sponsor } = body;
   if (!id || !name || !sponsor) {
@@ -42,6 +49,7 @@ export async function POST(req: Request) {
     .from("campaigns")
     .insert({
       id,
+      user_id: userId,
       name,
       sponsor,
       payout_per_1k_usd: body.payout_per_1k_usd ?? 0,

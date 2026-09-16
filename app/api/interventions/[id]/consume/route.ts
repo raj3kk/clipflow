@@ -16,6 +16,13 @@ export async function GET(
 ) {
   const denied = requireWorkerAuth(req);
   if (denied) return denied;
+  const _wu = new URL(req.url).searchParams.get("user_id");
+  if (!_wu) {
+    return NextResponse.json(
+      { error: "user_id query param is required for worker calls." },
+      { status: 400 }
+    );
+  }
   const sb = getSupabase();
   if (!sb || !isConfigured()) {
     return NextResponse.json({ error: "Supabase not configured." }, { status: 503 });
@@ -25,6 +32,7 @@ export async function GET(
     .from("interventions")
     .select("id, kind, status, value_enc")
     .eq("id", params.id)
+    .eq("user_id", _wu)
     .single();
   if (error || !data) {
     return NextResponse.json({ error: "Intervention not found." }, { status: 404 });
@@ -51,6 +59,7 @@ export async function GET(
     .from("interventions")
     .update({ value_enc: null, status: "consumed" })
     .eq("id", params.id)
+    .eq("user_id", _wu)
     .eq("status", "resolved");
   if (burnError) {
     return NextResponse.json({ error: burnError.message }, { status: 500 });

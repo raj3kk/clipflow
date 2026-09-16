@@ -963,7 +963,7 @@ def plan_dry_run(job: dict) -> list[dict]:
 # --------------------------------------------------------------------------
 # main loop
 # --------------------------------------------------------------------------
-def run_once(do_render: bool = False) -> None:
+def _run_once_for_user(do_render: bool = False) -> None:
     if do_render:
         try:
             jobs = config.api("GET", "/api/jobs?status=queued",
@@ -991,6 +991,30 @@ def run_once(do_render: bool = False) -> None:
                             "approved but no video_url (render first)", job["id"])
             continue
         process_approved(job)
+
+
+def run_once(do_render: bool = False) -> None:
+    """One pipeline pass, per user (users discovered via /api/worker/users)."""
+    try:
+        users = config.api("GET", "/api/worker/users",
+                           timeout=60).get("users", [])
+    except Exception as e:  # noqa: BLE001
+        print(f"[worker] users poll failed: {e}", flush=True)
+        return
+    if not users:
+        print("[worker] no users with connections; skipping", flush=True)
+        return
+    for u in users:
+        uid = u.get("user_id")
+        if not uid:
+            continue
+        config.set_worker_user(uid)
+        print(f"[worker] pipeline pass for user {uid}", flush=True)
+        try:
+            _run_once_for_user(do_render)
+        except Exception as e:  # noqa: BLE001
+            print(f"[worker] user {uid} pass error: {e}", flush=True)
+    config.set_worker_user(None)
 
 
 def main() -> None:

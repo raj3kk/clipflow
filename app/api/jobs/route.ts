@@ -9,6 +9,13 @@ import { requireWorkerAuth } from "@/lib/worker_auth";
 export async function GET(req: Request) {
   const denied = requireWorkerAuth(req);
   if (denied) return denied;
+  const _wu = new URL(req.url).searchParams.get("user_id");
+  if (!_wu) {
+    return NextResponse.json(
+      { error: "user_id query param is required for worker calls." },
+      { status: 400 }
+    );
+  }
   const sb = getSupabase();
   if (!sb || !isConfigured()) {
     return NextResponse.json({ jobs: [], configured: false });
@@ -18,6 +25,7 @@ export async function GET(req: Request) {
   const { data, error } = await sb
     .from("clips")
     .select("*")
+    .eq("user_id", _wu)
     .eq("status", status)
     .order("created_at", { ascending: true })
     .limit(10);
