@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabase, isConfigured } from "@/lib/supabase";
-import { toPublic } from "../route";
+import { toPublic } from "@/lib/connections";
 
 const ALLOWED = ["status", "last_verified", "label"];
 
