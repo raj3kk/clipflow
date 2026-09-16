@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { getDashboard, statusPill } from "@/lib/state";
+import { getDashboard } from "@/lib/state";
+import StatusPill from "@/lib/status-pill";
 
 export const dynamic = "force-dynamic";
 
@@ -54,14 +55,14 @@ export default async function Dashboard() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <div className="rounded-xl border border-line bg-panel p-5">
           <div className="text-sm text-slate-400 mb-2">Instagram</div>
-          {statusPill(d.connections.instagram.status)}
+          <StatusPill status={d.connections.instagram.status} />
           <div className="text-xs text-slate-500 mt-2">
             {d.connections.instagram.account}
           </div>
         </div>
         <div className="rounded-xl border border-line bg-panel p-5">
           <div className="text-sm text-slate-400 mb-2">Whop</div>
-          {statusPill(d.connections.whop.status)}
+          <StatusPill status={d.connections.whop.status} />
           <div className="text-xs text-slate-500 mt-2">
             {d.connections.whop.account}
           </div>
@@ -80,7 +81,7 @@ export default async function Dashboard() {
         <div className="rounded-xl border border-line bg-panel p-5 mb-8">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold">Latest run — {latest.id}</h2>
-            {statusPill(latest.status)}
+            <StatusPill status={latest.status} />
           </div>
           <ol className="text-sm text-slate-300 space-y-1.5">
             {latest.steps.map((s, i) => (

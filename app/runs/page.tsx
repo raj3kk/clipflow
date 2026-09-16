@@ -1,4 +1,5 @@
-import { getDashboard, statusPill } from "@/lib/state";
+import { getDashboard } from "@/lib/state";
+import StatusPill from "@/lib/status-pill";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export default async function Runs() {
                   {r.started_at.replace("T", " ").slice(0, 16)}
                 </div>
               </div>
-              {statusPill(r.status)}
+              <StatusPill status={r.status} />
             </div>
             <ol className="text-sm text-slate-300 space-y-1.5">
               {r.steps.map((s, i) => (

@@ -1,4 +1,5 @@
-import { getDashboard, statusPill } from "@/lib/state";
+import { getDashboard } from "@/lib/state";
+import StatusPill from "@/lib/status-pill";
 
 export const dynamic = "force-dynamic";
 
@@ -43,7 +44,7 @@ export default async function Submissions() {
                 <td className="p-4 text-slate-400">
                   {s.views == null ? "—" : s.views.toLocaleString()}
                 </td>
-                <td className="p-4">{statusPill(s.status)}</td>
+                <td className="p-4"><StatusPill status={s.status} /></td>
               </tr>
             ))}
           </tbody>

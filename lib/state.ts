@@ -68,21 +68,13 @@ export async function getDashboard(): Promise<DashboardState | null> {
   }
 }
 
-export function statusPill(status: string) {
+export function statusColor(status: string) {
   const s = status.toLowerCase();
-  const color =
-    s === "ok" || s === "submitted" || s === "approved"
-      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-      : s === "pending" || s === "needed"
-        ? "border-gold/40 bg-gold/10 text-gold"
-        : s === "rejected" || s === "error" || s === "failed"
-          ? "border-red-500/40 bg-red-500/10 text-red-300"
-          : "border-line bg-panel text-slate-300";
-  return (
-    <span
-      className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-medium ${color}`}
-    >
-      {status}
-    </span>
-  );
+  return s === "ok" || s === "submitted" || s === "approved"
+    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+    : s === "pending" || s === "needed"
+      ? "border-gold/40 bg-gold/10 text-gold"
+      : s === "rejected" || s === "error" || s === "failed"
+        ? "border-red-500/40 bg-red-500/10 text-red-300"
+        : "border-line bg-panel text-slate-300";
 }

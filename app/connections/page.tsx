@@ -1,4 +1,5 @@
-import { getDashboard, statusPill } from "@/lib/state";
+import { getDashboard } from "@/lib/state";
+import StatusPill from "@/lib/status-pill";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ export default async function Connections() {
     <div className="rounded-xl border border-line bg-panel p-5">
       <div className="flex items-center justify-between mb-2">
         <h2 className="font-semibold">{title}</h2>
-        {c && statusPill(c.status)}
+        {c && <StatusPill status={c.status} />}
       </div>
       {c ? (
         <>
