@@ -8,6 +8,8 @@ const DEFAULTS = {
   notify_email: null as string | null,
   pause_on_block: true,
   platforms: { instagram: true, tiktok: false, x: false, youtube: false },
+  autopilot_enabled: true,
+  auto_approve: true,
 };
 
 export async function GET(req: Request) {
@@ -53,6 +55,8 @@ export async function PUT(req: Request) {
     "notify_email",
     "pause_on_block",
     "platforms",
+    "autopilot_enabled",
+    "auto_approve",
   ]) {
     if (body[k] !== undefined) patch[k] = body[k];
   }

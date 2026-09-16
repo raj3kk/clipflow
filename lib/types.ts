@@ -167,6 +167,8 @@ export interface Settings {
   notify_email: string | null;
   pause_on_block: boolean;
   platforms: Record<string, boolean>;
+  autopilot_enabled: boolean;
+  auto_approve: boolean;
   updated_at?: string;
 }
 

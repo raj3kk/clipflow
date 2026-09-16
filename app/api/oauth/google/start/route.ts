@@ -1,17 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { getSessionUser } from "@/lib/auth";
-
-export const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
-export const GOOGLE_SCOPES = [
-  "openid",
-  "email",
-  "https://www.googleapis.com/auth/gmail.readonly",
-].join(" ");
-
-export function callbackUrl(req: Request): string {
-  return new URL("/api/oauth/google/callback", req.url).origin + "/api/oauth/google/callback";
-}
+import { GOOGLE_AUTH_URL, GOOGLE_SCOPES, callbackUrl } from "@/lib/google-oauth";
 
 /**
  * Starts the real Google OAuth dance for Gmail access.

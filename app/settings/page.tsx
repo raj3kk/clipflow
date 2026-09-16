@@ -14,7 +14,13 @@ interface Resp {
 
 type FormState = Pick<
   Settings,
-  "daily_target" | "spacing_hours" | "notify_email" | "pause_on_block" | "platforms"
+  | "daily_target"
+  | "spacing_hours"
+  | "notify_email"
+  | "pause_on_block"
+  | "platforms"
+  | "autopilot_enabled"
+  | "auto_approve"
 >;
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -151,6 +157,37 @@ export default function SettingsPage() {
             className={inputCls}
           />
         </label>
+
+        <div className="flex items-start justify-between gap-4 rounded-lg border border-line p-4">
+          <div>
+            <div className="text-sm font-semibold">Autopilot agent</div>
+            <p className="text-xs text-slate-500 mt-1">
+              ON rakho to agent khud campaign chunta hai, viral moment nikalta
+              hai, clip render karta hai, post karta hai aur Whop me submit
+              karta hai — bina kuch manual kiye. Sirf action-block ya OTP jaisi
+              rukavaton par rukkar aapko batayega.
+            </p>
+          </div>
+          <Toggle
+            checked={current.autopilot_enabled ?? true}
+            onChange={(v) => set("autopilot_enabled", v)}
+          />
+        </div>
+
+        <div className="flex items-start justify-between gap-4 rounded-lg border border-line p-4">
+          <div>
+            <div className="text-sm font-semibold">Auto-approve previews</div>
+            <p className="text-xs text-slate-500 mt-1">
+              Render ke baad QA-passed preview ko agent khud approve karke
+              posting pipeline me bhej dega. OFF rakho to har clip aapke
+              approval ka wait karega.
+            </p>
+          </div>
+          <Toggle
+            checked={current.auto_approve ?? true}
+            onChange={(v) => set("auto_approve", v)}
+          />
+        </div>
 
         <div className="flex items-start justify-between gap-4 rounded-lg border border-line p-4">
           <div>

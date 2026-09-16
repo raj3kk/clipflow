@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { getSupabase, isConfigured } from "@/lib/supabase";
 import { getSessionUser } from "@/lib/auth";
 import { encryptSecret } from "@/lib/crypto";
-import { callbackUrl } from "../start/route";
+import { callbackUrl } from "@/lib/google-oauth";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo";
