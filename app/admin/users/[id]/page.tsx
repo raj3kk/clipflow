@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { age, btnGhost, cardCls, fmtDate, Msg } from "../../components/ui";
+import { age, btnGhost, cardCls, fmtDate, Msg } from "../../../components/ui";
 
 interface UserDetail {
   user: { id: string; email: string | null; created_at: string | null };
