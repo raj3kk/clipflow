@@ -23,6 +23,7 @@ import email.header
 import imaplib
 import json
 import os
+import re
 import smtplib
 import sys
 import time
@@ -172,18 +173,31 @@ def find_reply(since_epoch: float, subject_hint: str) -> str | None:
                 ts = since_epoch
             if ts < since_epoch:
                 continue
-            # plain-text body
+            # plain-text body; fall back to stripped HTML (OTP/code mails are
+            # often HTML-only — the code must still be extractable)
             body = ""
+            html_fallback = ""
             if msg.is_multipart():
                 for part in msg.walk():
-                    if part.get_content_type() == "text/plain" and \
-                            "attachment" not in str(part.get("Content-Disposition")):
-                        body = part.get_payload(decode=True) or b""
-                        body = body.decode(errors="replace")
-                        break
+                    ctype = part.get_content_type()
+                    disp = str(part.get("Content-Disposition"))
+                    if "attachment" in disp:
+                        continue
+                    payload = part.get_payload(decode=True) or b""
+                    text = payload.decode(errors="replace")
+                    if ctype == "text/plain" and not body:
+                        body = text
+                    elif ctype == "text/html" and not html_fallback:
+                        html_fallback = text
             else:
                 payload = msg.get_payload(decode=True) or b""
                 body = payload.decode(errors="replace")
+            if not body.strip() and html_fallback:
+                body = re.sub(r"<(script|style)[^>]*>.*?</\1>",
+                              " ", html_fallback,
+                              flags=re.DOTALL | re.IGNORECASE)
+                body = re.sub(r"<[^>]+>", " ", body)
+                body = re.sub(r"\s+", " ", body)
             return body.strip() or None
     return None
 
