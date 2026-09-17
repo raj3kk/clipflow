@@ -1,0 +1,56 @@
+import { NextResponse } from "next/server";
+import { getSessionUser } from "@/lib/auth";
+import {
+  WHOP_AUTHORIZE_URL,
+  WHOP_SCOPES,
+  whopCallbackUrl,
+  pkceVerifier,
+  pkceChallenge,
+  oauthState,
+} from "@/lib/whop-oauth";
+
+/**
+ * Starts the official "Login with Whop" OAuth dance (PKCE).
+ * Redirects the user's browser to Whop's consent screen.
+ * Only works when WHOP_OAUTH_CLIENT_ID/SECRET are configured
+ * (see /api/oauth/whop/status).
+ */
+export async function GET(req: Request) {
+  const clientId = process.env.WHOP_OAUTH_CLIENT_ID;
+  if (!clientId || !process.env.WHOP_OAUTH_CLIENT_SECRET) {
+    return NextResponse.json(
+      { error: "Whop OAuth is not configured on the server yet." },
+      { status: 503 }
+    );
+  }
+  // Only signed-in users can start OAuth (the connection binds to them).
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.redirect(
+      new URL("/login?next=/connections", req.url).toString()
+    );
+  }
+  const state = oauthState();
+  const verifier = pkceVerifier();
+  const redirectUri = whopCallbackUrl(req);
+  const url = new URL(WHOP_AUTHORIZE_URL);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("client_id", clientId);
+  url.searchParams.set("redirect_uri", redirectUri);
+  url.searchParams.set("scope", WHOP_SCOPES);
+  url.searchParams.set("state", state);
+  url.searchParams.set("code_challenge", pkceChallenge(verifier));
+  url.searchParams.set("code_challenge_method", "S256");
+
+  const res = NextResponse.redirect(url.toString());
+  const cookieOpts = {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge: 600,
+  };
+  res.cookies.set("cf_whop_oauth_state", state, cookieOpts);
+  res.cookies.set("cf_whop_pkce_verifier", verifier, cookieOpts);
+  return res;
+}
