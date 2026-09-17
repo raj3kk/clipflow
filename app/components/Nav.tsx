@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 export const NAV = [
   { href: "/", label: "Dashboard" },
@@ -14,11 +15,23 @@ export const NAV = [
   { href: "/settings", label: "Settings" },
 ];
 
+const ADMIN_ITEM = { href: "/admin", label: "Admin" };
+
 export default function Nav() {
   const path = usePathname();
+  const [showAdmin, setShowAdmin] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/admin/is-owner")
+      .then((r) => r.json())
+      .then((j) => setShowAdmin(Boolean(j.isOwner)))
+      .catch(() => {});
+  }, []);
+
+  const items = showAdmin ? [...NAV, ADMIN_ITEM] : NAV;
   return (
     <nav className="flex flex-col gap-1">
-      {NAV.map((n) => {
+      {items.map((n) => {
         const active = n.href === "/" ? path === "/" : path.startsWith(n.href);
         return (
           <Link

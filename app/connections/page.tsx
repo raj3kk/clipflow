@@ -27,7 +27,7 @@ function LabelField({ value, onChange, placeholder }: { value: string; onChange:
 const IG_COOKIES = ["sessionid", "csrftoken", "ds_user_id", "datr", "ig_did", "mid"];
 
 function IgCookiesForm({ save }: { save: SaveFn }) {
-  const [label, setLabel] = useState("@viralshortz_45");
+  const [label, setLabel] = useState("");
   const [rows, setRows] = useState(IG_COOKIES.map((name) => ({ name, value: "" })));
   const [busy, setBusy] = useState(false);
 
@@ -236,8 +236,8 @@ function GmailOAuthForm({ onMsg }: { onMsg: (m: string) => void }) {
   return (
     <div className="grid gap-3">
       <p className="text-sm text-slate-400">
-        Real Google sign-in for the Gmail account used for OTP auto-read
-        (flipify.com@gmail.com). Google asks you to approve; ClipFlow stores only
+        Real Google sign-in for the Gmail account used for OTP auto-read.
+        Google asks you to approve; ClipFlow stores only
         a refresh token, encrypted — never your password.
       </p>
       <div>
@@ -259,7 +259,7 @@ function GmailOAuthForm({ onMsg }: { onMsg: (m: string) => void }) {
 
 // ---------- Gmail: app password ----------
 function GmailAppPassForm({ save }: { save: SaveFn }) {
-  const [email, setEmail] = useState("flipify.com@gmail.com");
+  const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
   const [busy, setBusy] = useState(false);
   return (
@@ -279,7 +279,7 @@ function GmailAppPassForm({ save }: { save: SaveFn }) {
       }}
     >
       <label className="text-sm block">Account email
-        <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} />
+        <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@gmail.com" className={inputCls} />
       </label>
       <label className="text-sm block">App password
         <input required type="password" value={pass} onChange={(e) => setPass(e.target.value)} className={inputCls} />

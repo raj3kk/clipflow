@@ -20,8 +20,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Nav />
             <UserBadge />
             <div className="text-xs text-slate-500">
-              IG: @viralshortz_45
-              <br />
               Target: 4/day · ≥4h spacing
             </div>
           </aside>
