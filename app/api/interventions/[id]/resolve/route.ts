@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabase, isConfigured } from "@/lib/supabase";
 import { getRouteUserId } from "@/lib/auth";
+import { requireWorkerAuth } from "@/lib/worker_auth";
 import { encryptSecret } from "@/lib/crypto";
 
 const PUBLIC_COLS =
@@ -10,6 +11,11 @@ const PUBLIC_COLS =
  * Owner resolves an intervention with the secret value (OTP code, approval).
  * The raw value is AES-256-GCM encrypted into value_enc and NEVER included
  * in the response or any log.
+ *
+ * Two callers:
+ *  - the owner via UI (session auth), or
+ *  - the VM worker (x-worker-secret + ?user_id=) when it receives the
+ *    owner's answer by email reply: POST { value, resolved_via: "email" }
  */
 export async function POST(
   req: Request,
@@ -19,9 +25,25 @@ export async function POST(
   if (!sb || !isConfigured()) {
     return NextResponse.json({ error: "Supabase not configured." }, { status: 503 });
   }
-  const _ident = await getRouteUserId(req);
-  if ("error" in _ident) return _ident.error;
-  const userId = _ident.userId;
+  // Worker path: only when the x-worker-secret header is actually sent
+  // (email-reply answers). Otherwise the owner's session is required.
+  let userId: string;
+  if (req.headers.get("x-worker-secret")) {
+    const workerDenied = requireWorkerAuth(req);
+    if (workerDenied) return workerDenied;
+    const wu = new URL(req.url).searchParams.get("user_id") ?? "";
+    if (!wu) {
+      return NextResponse.json(
+        { error: "user_id query param is required for worker calls." },
+        { status: 400 }
+      );
+    }
+    userId = wu;
+  } else {
+    const _ident = await getRouteUserId(req);
+    if ("error" in _ident) return _ident.error;
+    userId = _ident.userId;
+  }
   const body = await req.json();
   const { value, resolved_via } = body as { value?: unknown; resolved_via?: string };
   if (value === undefined || value === null || value === "") {

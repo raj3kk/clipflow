@@ -114,14 +114,18 @@ def request_intervention(kind: str, question: str, detail: str = "",
                 break
         except Exception:
             pass
-        # b) email reply
+        # b) email reply — resolve WITH the reply as the encrypted answer
+        # (transient; never logged), so /consume returns it exactly once.
         try:
             reply = gmail.find_reply(sent_at, subject_hint)
             if reply:
-                # record it so the dashboard shows answered
                 try:
-                    config.api("PATCH", f"/api/interventions/{iv_id}",
-                               {"status": "resolved"}, timeout=30)
+                    config.api(
+                        "POST",
+                        f"/api/interventions/{iv_id}/resolve"
+                        f"?user_id={config.WORKER_USER_ID}",
+                        {"value": reply, "resolved_via": "email"},
+                        timeout=30)
                 except Exception:
                     pass
                 break
