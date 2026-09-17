@@ -191,15 +191,137 @@ function WhopCookiesForm({ save }: { save: SaveFn }) {
   );
 }
 
-// ---------- Whop: email OTP (not wired worker-side yet) ----------
+// ---------- Whop: email OTP (automated via worker + connected Gmail) ----------
+const OTP_STEPS: Record<string, string> = {
+  queued: "Queued — the worker will pick this up within ~2 minutes.",
+  opening_whop: "Opening Whop's login page…",
+  submitting_email: "Submitting your email to Whop…",
+  waiting_for_code: "Code sent — reading it from your connected Gmail…",
+  verifying_code: "Entering the code on Whop…",
+  saving_session: "Login done — saving the Whop session securely…",
+  connected: "Connected.",
+};
+
 function WhopEmailOtpForm() {
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [attemptId, setAttemptId] = useState<string | null>(null);
+  const [step, setStep] = useState<string>("queued");
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    if (!attemptId || done) return;
+    let alive = true;
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/whop-otp/status?id=${attemptId}`);
+        const d = await r.json();
+        if (!alive) return;
+        if (d.error) {
+          setError(d.error);
+          setDone(true);
+          return;
+        }
+        setStep(d.step || "queued");
+        if (d.error) setError(d.error);
+        if (d.status === "resolved" || d.whop_connection?.status === "verified") {
+          setDone(true);
+          setStep("connected");
+        } else if (d.status === "failed") {
+          setDone(true);
+          setError(d.error || "The OTP login failed. Please try again.");
+        }
+      } catch {
+        /* keep polling */
+      }
+    };
+    poll();
+    const t = setInterval(poll, 5000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [attemptId, done]);
+
+  const start = async () => {
+    setBusy(true);
+    setError(null);
+    setDone(false);
+    setStep("queued");
+    try {
+      const r = await fetch("/api/whop-otp/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Could not start the OTP login.");
+      setAttemptId(d.intervention_id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start the OTP login.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reset = () => {
+    setAttemptId(null);
+    setError(null);
+    setDone(false);
+    setStep("queued");
+  };
+
   return (
     <div className="grid gap-3">
       <p className="text-sm text-slate-400">
-        Email-OTP sign-in is <span className="text-amber-300 font-medium">not wired yet</span>:
-        the worker cannot request or enter Whop codes on its own. Use{" "}
-        <span className="font-medium">Google session cookies</span> above for now.
+        Fully automatic: enter your Whop email, the worker opens Whop, submits it,
+        reads the fresh code from your <span className="font-medium">connected Gmail</span>,
+        and saves the session — <span className="font-medium">no code pasting, no session-id pasting</span>.
+        The code email must arrive in the Gmail account you connected above.
       </p>
+      {!attemptId ? (
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            className="flex-1 rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+          />
+          <button
+            onClick={start}
+            disabled={busy || !email}
+            className="rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-4 py-2 text-sm font-medium text-white"
+          >
+            {busy ? "Starting…" : "Connect with email OTP"}
+          </button>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-slate-700 bg-slate-800/60 p-3 grid gap-2">
+          <div className="flex items-center gap-2 text-sm">
+            {!done && !error ? (
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" />
+            ) : done && !error ? (
+              <span className="text-emerald-400">✓</span>
+            ) : (
+              <span className="text-red-400">✕</span>
+            )}
+            <span className="text-slate-200">
+              {error ? "Failed" : done ? "Whop connected" : OTP_STEPS[step] || step}
+            </span>
+          </div>
+          {error && <p className="text-sm text-red-300">{error}</p>}
+          {done && !error && (
+            <p className="text-sm text-emerald-300">
+              Whop session saved and verified. The worker will now use it for campaign checks and submissions.
+            </p>
+          )}
+          <button onClick={reset} className="justify-self-start text-xs text-slate-400 underline">
+            {done ? "Start a new attempt" : "Cancel"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -510,7 +632,7 @@ export default function ConnectionsPage() {
       service: "whop",
       methods: [
         { key: "google-oauth", title: "Google session cookies", desc: "Paste Whop session cookies", form: (p) => <WhopCookiesForm {...p} /> },
-        { key: "email-otp", title: "Email OTP", desc: "Not wired yet — see note", form: () => <WhopEmailOtpForm /> },
+        { key: "email-otp", title: "Email OTP", desc: "Automatic — worker handles the code", form: () => <WhopEmailOtpForm /> },
       ],
     },
     {
