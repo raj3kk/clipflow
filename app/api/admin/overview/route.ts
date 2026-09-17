@@ -34,7 +34,7 @@ export async function GET() {
       sb.from("submissions").select("id, user_id, whop_status, submitted_at"),
       sb.from("interventions").select("id, user_id, kind, status, created_at").order("created_at", { ascending: false }).limit(50),
       sb.from("connections").select("id, user_id, service, status, last_verified"),
-      sb.from("activity_log").select("id, user_id, action, created_at").order("created_at", { ascending: false }).limit(30),
+      sb.from("activity_log").select("id, user_id, actor, event, ts").order("ts", { ascending: false }).limit(30),
       sb.from("posts").select("id").gte("posted_at", dayStart),
     ]);
 
@@ -61,6 +61,7 @@ export async function GET() {
       connections: connections.data?.length ?? 0,
     },
     users: users.map((u) => ({
+      id: u.id,
       email: u.email,
       created_at: u.created_at,
       campaigns: countBy(campaigns.data)[u.id] ?? 0,
@@ -72,7 +73,13 @@ export async function GET() {
       .filter((i) => i.status === "pending")
       .map((i) => ({ ...i, email: emailOf(i.user_id) })),
     connections: (connections.data ?? []).map((c) => ({ ...c, email: emailOf(c.user_id) })),
-    recentActivity: (activity.data ?? []).map((a) => ({ ...a, email: emailOf(a.user_id) })),
+    recentActivity: (activity.data ?? []).map((a) => ({
+      id: a.id,
+      email: emailOf(a.user_id),
+      action: a.event,
+      actor: a.actor,
+      created_at: a.ts,
+    })),
     // keep the id list out of the client payload shape; only used above
     _userIds: userIds.length,
   });

@@ -39,25 +39,33 @@ GMAIL_SCOPE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 _oauth_access_cache: dict = {}  # email -> (access_token, expires_at)
 
 
-def _load_connection() -> dict:
+def _load_connections() -> list[dict]:
     """
-    Fetch the encrypted gmail connection from ClipFlow and decrypt it.
-    Expected decrypted JSON shapes are documented above.
+    Fetch + decrypt ALL gmail connections for the current worker user.
+    Use _read_connection() for IMAP reads, _send_connection() for SMTP.
     """
-    try:
-        data = config.api("GET", "/api/connections/gmail", timeout=30)
-    except Exception as e:
-        raise RuntimeError(f"could not load gmail connection: {e}") from e
-    payload = data.get("secret") or data.get("encrypted") or ""
-    if not payload:
-        raise RuntimeError("gmail connection has no encrypted secret stored")
-    try:
-        secret = json.loads(config.decrypt_connection_secret(payload).decode("utf-8"))
-    except ValueError as e:
-        raise RuntimeError(f"gmail connection decrypt failed: {e}") from e
-    if not isinstance(secret, dict):
-        raise RuntimeError("gmail connection secret is not a JSON object")
-    return secret
+    return config.load_service_connections("gmail")
+
+
+def _read_connection() -> dict:
+    """Prefer OAuth for reading (least privilege); fall back to app password."""
+    return config.pick_connection(_load_connections(), prefer_kind="oauth")
+
+
+def _send_connection() -> dict:
+    """
+    Prefer the app-password method for sending: the Google OAuth grant is
+    read-only (gmail.readonly), so SMTP XOAUTH2 cannot send through it.
+    """
+    conns = _load_connections()
+    for c in conns:
+        if c.get("kind") == "app_password":
+            return c
+    raise RuntimeError(
+        "gmail: sending email needs a Gmail app-password connection "
+        "(Connections tab -> Gmail -> App password). The OAuth grant is "
+        "read-only and cannot send mail."
+    )
 
 
 def _oauth_access_token(conn: dict) -> str:
@@ -141,7 +149,7 @@ def find_reply(since_epoch: float, subject_hint: str) -> str | None:
     Subject or In-Reply-To matches subject_hint. Returns the plain-text
     body (stripped), or None. Secrets never logged.
     """
-    conn = _load_connection()
+    conn = _read_connection()
     hint = subject_hint.lower()
     with _ImapSession(conn) as imap:
         since_str = time.strftime("%d-%b-%Y", time.gmtime(since_epoch - 86400))
@@ -186,8 +194,7 @@ def send_notification(to: str, subject: str, body: str) -> None:
     Send a plain-text email from the gmail connection. Used for
     intervention prompts, action-block alerts, and failure notices.
     """
-    conn = _load_connection()
-    kind = conn.get("kind")
+    conn = _send_connection()
     msg = email.message.EmailMessage()
     msg["From"] = conn["email"]
     msg["To"] = to
@@ -196,16 +203,8 @@ def send_notification(to: str, subject: str, body: str) -> None:
 
     smtp = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=60)
     try:
-        if kind == "app_password":
-            smtp.login(conn["email"], conn["app_password"])
-        elif kind == "oauth":
-            token = _oauth_access_token(conn)
-            code, resp = smtp.docmd(
-                "AUTH", "XOAUTH2 " + _xoauth2_string(conn["email"], token))
-            if code != 235:
-                raise RuntimeError(f"gmail SMTP XOAUTH2 failed: {resp}")
-        else:
-            raise RuntimeError(f"unknown gmail connection kind: {kind!r}")
+        # _send_connection() guarantees kind == "app_password".
+        smtp.login(conn["email"], conn["app_password"])
         smtp.send_message(msg)
     finally:
         try:

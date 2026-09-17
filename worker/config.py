@@ -183,6 +183,59 @@ def api(method: str, path: str, body: dict | None = None,
         f"ClipFlow API {method} {path} network failed after 3 tries: {last}")
 
 
+# --------------------------------------------------------------------------
+# Service connections (decrypted locally; secrets never logged)
+# --------------------------------------------------------------------------
+def load_service_connections(service: str) -> list[dict]:
+    """
+    Fetch all saved connections for `service` for the current WORKER_USER_ID
+    via the worker endpoint and decrypt each secret locally.
+
+    Returns a list of dicts: the decrypted secret fields plus
+    _id / _method / _status / _last_verified metadata.
+    Raises RuntimeError when no usable connection is saved.
+    """
+    data = api("GET", f"/api/worker/connections?service={service}", timeout=30)
+    rows = data.get("connections") or []
+    out: list[dict] = []
+    for row in rows:
+        payload = row.get("secret_enc") or ""
+        if not payload:
+            continue
+        try:
+            secret = json.loads(decrypt_connection_secret(payload).decode("utf-8"))
+        except ValueError as e:
+            print(f"[worker] connection {row.get('id')} decrypt failed: {e}",
+                  flush=True)
+            continue
+        if not isinstance(secret, dict):
+            continue
+        secret["_id"] = row.get("id")
+        secret["_method"] = row.get("method")
+        secret["_status"] = row.get("status")
+        secret["_last_verified"] = row.get("last_verified")
+        out.append(secret)
+    if not out:
+        raise RuntimeError(f"no usable {service} connection saved")
+    return out
+
+
+def pick_connection(conns: list[dict], prefer_kind: str | None = None) -> dict:
+    """
+    Pick the best connection from load_service_connections().
+    Preferred kind first, then healthy status, keeping original order
+    (newest first) as the final tiebreak.
+    """
+    def rank(c: dict) -> tuple[int, int]:
+        kind_ok = 0 if (prefer_kind and c.get("kind") == prefer_kind) else 1
+        status_ok = 0 if str(c.get("_status") or "").lower() in (
+            "ok", "verified", "active", "connected") else 1
+        return (kind_ok, status_ok)
+
+    best = min(range(len(conns)), key=lambda i: rank(conns[i]))
+    return conns[best]
+
+
 def activity(event: str, detail: str = "", clip_id: str | None = None) -> None:
     """Best-effort activity_log entry. Never raises."""
     try:

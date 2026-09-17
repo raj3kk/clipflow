@@ -15,7 +15,7 @@ interface Overview {
     pendingInterventions: number;
     connections: number;
   };
-  users: { email: string; created_at: string; campaigns: number; clips: number; posts: number; submissions: number }[];
+  users: { id: string; email: string; created_at: string; campaigns: number; clips: number; posts: number; submissions: number }[];
   pendingInterventions: { id: string; email: string; kind: string; status: string; created_at: string }[];
   connections: { id: string; email: string; service: string; status: string; last_verified: string | null }[];
   recentActivity: { id: string; email: string; action: string; created_at: string }[];
@@ -172,8 +172,8 @@ export default function AdminPage() {
             </thead>
             <tbody>
               {(data?.users ?? []).map((u) => (
-                <tr key={u.email} className="border-t border-line">
-                  <td className="py-1 pr-3">{u.email}</td>
+                <tr key={u.id} className="border-t border-line">
+                  <td className="py-1 pr-3"><a className="text-sky-400 underline" href={`/admin/users/${u.id}`}>{u.email}</a></td>
                   <td className="py-1 pr-3 text-slate-400">{fmtDate(u.created_at)}</td>
                   <td className="py-1 pr-3">{u.campaigns}</td>
                   <td className="py-1 pr-3">{u.clips}</td>

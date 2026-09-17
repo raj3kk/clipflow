@@ -525,26 +525,19 @@ class WebPoster(Poster):
 
 
 def _load_ig_connection() -> dict:
-    data = config.api("GET", "/api/connections/instagram", timeout=30)
-    payload = data.get("secret") or data.get("encrypted") or ""
-    if not payload:
-        raise PipelineError("instagram connection has no secret stored")
     try:
-        secret = json.loads(config.decrypt_connection_secret(payload).decode())
-    except ValueError as e:
-        raise PipelineError(f"instagram secret decrypt failed: {e}") from e
-    return secret
+        conns = config.load_service_connections("instagram")
+    except RuntimeError as e:
+        raise PipelineError(f"no instagram connection: {e}") from e
+    return config.pick_connection(conns)
 
 
 def _load_whop_connection() -> dict:
-    data = config.api("GET", "/api/connections/whop", timeout=30)
-    payload = data.get("secret") or data.get("encrypted") or ""
-    if not payload:
-        raise PipelineError("whop connection has no secret stored")
     try:
-        return json.loads(config.decrypt_connection_secret(payload).decode())
-    except ValueError as e:
-        raise PipelineError(f"whop secret decrypt failed: {e}") from e
+        conns = config.load_service_connections("whop")
+    except RuntimeError as e:
+        raise PipelineError(f"no whop connection: {e}") from e
+    return config.pick_connection(conns)
 
 
 def choose_poster() -> Poster:
