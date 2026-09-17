@@ -57,8 +57,8 @@
   "connections": {
     "instagram": {
       "account": "@viralshortz_45",
-      "last_verified": "2026-09-17T00:55:00+05:30",
-      "note": "Session expired; 'Continue viralshortz_45' now demands password entry. instagram-cli accounts empty. Owner notified by email 2026-09-17; re-login needed.",
+      "last_verified": "2026-09-17T06:43:00+05:30",
+      "note": "Session STILL expired at 06:43 IST; 'Continue viralshortz_45' demands password entry. instagram-cli accounts empty. Owner re-notified by email 2026-09-17 (00:55 + 06:44). Re-login needed.",
       "status": "auth_required"
     },
     "whop": {
@@ -87,6 +87,28 @@
     "https://www.instagram.com/reel/DdVvHoOB-ar/"
   ],
   "runs": [
+    {
+      "id": "run-2026-09-17-perplexity-2",
+      "started_at": "2026-09-17T06:41:00+05:30",
+      "status": "blocked",
+      "reel_url": null,
+      "whop_status": "not attempted",
+      "error": "Instagram session STILL expired at 06:43 check: 'Continue viralshortz_45' demands password entry; no stored IG password; no unattended login attempted. Owner re-notified by email 06:44. Nothing posted, nothing submitted; daily counter stays 0/4.",
+      "steps": [
+        {
+          "t": "06:41",
+          "msg": "State read: today 2026-09-17, 0/4 submitted. Campaign picked: Perplexity JRE Clipping ($1.50/1K, ~$14,962 remaining)"
+        },
+        {
+          "t": "06:42",
+          "msg": "VP9 clip verified ready (perplexity_clip1_vp9.mp4, 33s, 1080x1920; hook >=10% below top, captions ~78% — frames checked)"
+        },
+        {
+          "t": "06:43",
+          "msg": "IG session re-check via browser: still logged out (login page, password-entry dialog); no login attempted. STOPPED per guard; owner re-notified by email"
+        }
+      ]
+    },
     {
       "id": "run-2026-09-17-perplexity-1",
       "started_at": "2026-09-17T00:42:00+05:30",
@@ -237,5 +259,5 @@
     "submitted": 0,
     "target": 4
   },
-  "updated_at": "2026-09-17T00:55:00+05:30"
+  "updated_at": "2026-09-17T06:45:00+05:30"
 }
