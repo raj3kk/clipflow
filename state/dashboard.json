@@ -65,7 +65,7 @@
       "account": "flipify.com@gmail.com (Flipify Clips)",
       "status": "auth_required",
       "last_verified": "2026-09-17T18:48:00+05:30",
-      "note": "Sign-in stalled at Google 'Tap Yes' phone-verification prompt (whop.com, Step-0 gate). No credentials entered, no unattended login. Owner emailed 18:50 asking to complete the phone tap."
+      "note": "Session fully logged out at 18:48 check (whop.com shows only 'Sign in'; login modal = Whop Wallet flow with Email field). Correction: NOT a 'Tap Yes' prompt — full sign-in needed. Owner emailed 18:53 (corrected) asking to sign in via 'Continue with Google' (flipify.com@gmail.com, workspace Flipify Clips)."
     }
   },
   "guards": [
@@ -93,7 +93,7 @@
       "status": "blocked",
       "reel_url": null,
       "whop_status": "not attempted",
-      "error": "Whop gate stalled: browser parked at whop.com awaiting Google 'Tap Yes' phone verification (session dead); no credentials entered, task closed per detached-run policy. No IG upload performed, nothing submitted; daily counter stays 0/4. Owner emailed 18:50.",
+      "error": "Whop session fully logged out (whop.com shows only 'Sign in'; no flipify.com@gmail.com session, no Flipify Clips workspace). No credentials entered, no IG upload performed, nothing submitted; daily counter stays 0/4. Owner emailed 18:50 + corrected 18:53 asking to sign in to Whop (Continue with Google).",
       "steps": [
         {
           "t": "18:41",
@@ -113,11 +113,15 @@
         },
         {
           "t": "18:48",
-          "msg": "STEP 0 FAILED: browser parked at whop.com awaiting user input (Google 'Tap Yes' phone verification at sign-in). No credentials entered; task closed per detached-run policy. NO upload performed"
+          "msg": "STEP 0 FAILED: browser confirmed Whop fully logged out (whop.com 'Sign in' button; login modal with Email field). No credentials entered; task closed per detached-run policy. NO upload performed"
         },
         {
           "t": "18:50",
           "msg": "Owner emailed (priyadarshirajindia@gmail.com): IG is back, but Whop sign-in needs a phone 'Yes' tap; pipeline held at gate, nothing posted/submitted"
+        },
+        {
+          "t": "18:53",
+          "msg": "Owner emailed correction (same thread): Whop is fully logged out — needs 'Continue with Google' sign-in (flipify.com@gmail.com, Flipify Clips workspace); IG needs no action"
         }
       ]
     },
@@ -315,5 +319,5 @@
     "submitted": 0,
     "target": 4
   },
-  "updated_at": "2026-09-17T18:51:00+05:30"
+  "updated_at": "2026-09-17T18:54:00+05:30"
 }
