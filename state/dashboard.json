@@ -2,22 +2,22 @@
   "campaigns": [
     {
       "budget_remaining_usd": 14962,
-      "caption_template": "Joe Rogan: \"I just ask Perplexity\" instead of sifting through Google searches 🤯 #PerplexityPartner",
+      "caption_template": "Joe Rogan: \"I just ask Perplexity\" instead of sifting through Google searches \ud83e\udd2f #PerplexityPartner",
       "hashtags": [
         "#PerplexityPartner"
       ],
       "id": "perplexity-jre",
       "max_payout_usd": 450,
       "min_payout_usd": 150,
-      "name": "Perplexity JRE Clipping — ClipFarm",
+      "name": "Perplexity JRE Clipping \u2014 ClipFarm",
       "payout_per_1k_usd": 1.5,
-      "requirements": "15–60s. Only listed brief moments. Perplexity clearly heard AND seen. No fake screens. Caption must include #PerplexityPartner. Likes visible. ≥0.20% engagement. ≥40% views from US/UK/CA/AU. Keep live 30 days. No boosting/bots.",
+      "requirements": "15\u201360s. Only listed brief moments. Perplexity clearly heard AND seen. No fake screens. Caption must include #PerplexityPartner. Likes visible. \u22650.20% engagement. \u226540% views from US/UK/CA/AU. Keep live 30 days. No boosting/bots.",
       "sponsor": "Perplexity",
       "status": "active"
     },
     {
       "budget_remaining_usd": 0,
-      "caption_template": "The Diablo V reveal is here 🔥 #BlizzardPartner #DiabloV",
+      "caption_template": "The Diablo V reveal is here \ud83d\udd25 #BlizzardPartner #DiabloV",
       "hashtags": [
         "#BlizzardPartner",
         "#DiabloV"
@@ -25,7 +25,7 @@
       "id": "blizzard-blizzcon",
       "name": "Blizzard BlizzCon 2026 Trailer Clipping",
       "payout_per_1k_usd": 1.5,
-      "requirements": "Official trailer-folder footage only. Caption #BlizzardPartner + franchise hashtag. Keep live 30 days. [2026-09-16: Submissions CLOSED — budget $41.6K/$41.6K 100% used. Submit button disabled.]",
+      "requirements": "Official trailer-folder footage only. Caption #BlizzardPartner + franchise hashtag. Keep live 30 days. [2026-09-16: Submissions CLOSED \u2014 budget $41.6K/$41.6K 100% used. Submit button disabled.]",
       "sponsor": "Blizzard",
       "status": "closed"
     },
@@ -42,7 +42,7 @@
     },
     {
       "id": "syberjet-speed-record",
-      "name": "Syberjet Speed Record — 1DS",
+      "name": "Syberjet Speed Record \u2014 1DS",
       "sponsor": "1DS",
       "payout_per_1k_usd": 3.0,
       "min_payout_usd": 9,
@@ -58,23 +58,23 @@
     "instagram": {
       "account": "@viralshortz_45",
       "status": "ok",
-      "last_verified": "2026-09-17T18:43:00+05:30",
-      "note": "Owner re-logged in sometime after 12:42. Verified logged in 18:43 IST: home feed, viralshortz_45 avatar chip + Switch, Home/Reels/Messages/New post nav. Session healthy."
+      "last_verified": "2026-09-18T00:43:00+05:30",
+      "note": "Verified logged in 00:43 IST 09-18 (home feed, viralshortz_45 avatar chip + Switch, Reels/New post nav). Session healthy."
     },
     "whop": {
       "account": "flipify.com@gmail.com (Flipify Clips)",
       "status": "auth_required",
-      "last_verified": "2026-09-17T18:48:00+05:30",
-      "note": "Session fully logged out at 18:48 check (whop.com shows only 'Sign in'; login modal = Whop Wallet flow with Email field). Correction: NOT a 'Tap Yes' prompt — full sign-in needed. Owner emailed 18:53 (corrected) asking to sign in via 'Continue with Google' (flipify.com@gmail.com, workspace Flipify Clips)."
+      "last_verified": "2026-09-18T00:43:00+05:30",
+      "note": "STILL logged out at 00:43 IST 09-18 check (whop.com shows only 'Sign in'). Owner asked to sign in via 'Continue with Google' (flipify.com@gmail.com, Flipify Clips workspace) \u2014 first asked 18:53 IST 09-17, re-notified 00:45 IST 09-18 (msg 1a0b0c9d16e1160c)."
     }
   },
   "guards": [
-    "Post → Whop submit within 20 minutes (campaign hard-rejects after 30 min).",
-    "Never submit a reel older than 30 min — repost fresh instead.",
+    "Post \u2192 Whop submit within 20 minutes (campaign hard-rejects after 30 min).",
+    "Never submit a reel older than 30 min \u2014 repost fresh instead.",
     "Never delete a reel that has a Whop submission (protected list below).",
     "Only mark 'submitted' when Whop shows exactly 'Clip submitted'.",
     "Caption = exact campaign template + required hashtag. No location unless brief asks.",
-    "Upload Original 9:16, no crop/zoom/trim. Hook ≥10% below top; captions ~72% height.",
+    "Upload Original 9:16, no crop/zoom/trim. Hook \u226510% below top; captions ~72% height.",
     "Verify the LIVE reel before submitting.",
     "Use VP9 file for upload (server Chromium cannot read H.264 uploads).",
     "Max 4 posts/day, spaced out. On Instagram action-block: pause + notify owner.",
@@ -88,6 +88,32 @@
   ],
   "runs": [
     {
+      "id": "run-2026-09-18-syberjet-1",
+      "started_at": "2026-09-18T00:41:00+05:30",
+      "status": "blocked",
+      "reel_url": null,
+      "whop_status": "not attempted",
+      "error": "Whop session STILL logged out at 00:43 IST (whop.com shows only 'Sign in'; no Flipify Clips workspace). Owner already emailed 18:53 IST on 09-17; re-notified this run (msg 1a0b0c9d16e1160c). No credentials entered, no IG upload performed, nothing submitted; daily counter stays 0/4.",
+      "steps": [
+        {
+          "t": "00:41",
+          "msg": "State read: today 2026-09-18 (reset from 2026-09-17), 0/4 submitted. Campaign picked: Syberjet Speed Record \u2014 1DS ($3.00/1K, ~$8,374 remaining). Ready clip syberjet_clip1_vp9.mp4 (37.6s, 1080x1920) on disk from 2026-09-16"
+        },
+        {
+          "t": "00:42",
+          "msg": "Read-only browser session check delegated: IG + Whop"
+        },
+        {
+          "t": "00:43",
+          "msg": "STEP 0 RESULT: IG LOGGED IN as @viralshortz_45 (home feed, avatar chip + Switch, Reels/New post nav). Whop LOGGED OUT (only 'Sign in' button; no Flipify Clips workspace). No login attempted. STOPPED per guard"
+        },
+        {
+          "t": "00:45",
+          "msg": "Owner re-notified by email (priyadarshirajindia@gmail.com, from flipify.com@gmail.com): Whop needs \"Continue with Google\" sign-in (flipify.com@gmail.com, Flipify Clips workspace); IG needs no action"
+        }
+      ]
+    },
+    {
       "id": "run-2026-09-17-syberjet-1",
       "started_at": "2026-09-17T18:41:00+05:30",
       "status": "blocked",
@@ -97,7 +123,7 @@
       "steps": [
         {
           "t": "18:41",
-          "msg": "State read: today 2026-09-17, 0/4 submitted. Campaign picked: Syberjet Speed Record — 1DS ($3.00/1K, ~$8,374 remaining). Chose ready clip syberjet_clip1_vp9.mp4 (37.6s, 1080x1920) over re-posting the already-posted Perplexity clip"
+          "msg": "State read: today 2026-09-17, 0/4 submitted. Campaign picked: Syberjet Speed Record \u2014 1DS ($3.00/1K, ~$8,374 remaining). Chose ready clip syberjet_clip1_vp9.mp4 (37.6s, 1080x1920) over re-posting the already-posted Perplexity clip"
         },
         {
           "t": "18:42",
@@ -121,7 +147,7 @@
         },
         {
           "t": "18:53",
-          "msg": "Owner emailed correction (same thread): Whop is fully logged out — needs 'Continue with Google' sign-in (flipify.com@gmail.com, Flipify Clips workspace); IG needs no action"
+          "msg": "Owner emailed correction (same thread): Whop is fully logged out \u2014 needs 'Continue with Google' sign-in (flipify.com@gmail.com, Flipify Clips workspace); IG needs no action"
         }
       ]
     },
@@ -143,7 +169,7 @@
         },
         {
           "t": "12:43",
-          "msg": "Owner re-notified by email (priyadarshirajindia@gmail.com) — 3rd notice today, asking to log @viralshortz_45 back in on their phone"
+          "msg": "Owner re-notified by email (priyadarshirajindia@gmail.com) \u2014 3rd notice today, asking to log @viralshortz_45 back in on their phone"
         }
       ]
     },
@@ -161,7 +187,7 @@
         },
         {
           "t": "06:42",
-          "msg": "VP9 clip verified ready (perplexity_clip1_vp9.mp4, 33s, 1080x1920; hook >=10% below top, captions ~78% — frames checked)"
+          "msg": "VP9 clip verified ready (perplexity_clip1_vp9.mp4, 33s, 1080x1920; hook >=10% below top, captions ~78% \u2014 frames checked)"
         },
         {
           "t": "06:43",
@@ -214,7 +240,7 @@
           "t": "12:06"
         },
         {
-          "msg": "Instagram session OK — uploaded reel via web (Original 9:16)",
+          "msg": "Instagram session OK \u2014 uploaded reel via web (Original 9:16)",
           "t": "12:19"
         },
         {
@@ -230,7 +256,7 @@
           "t": "12:18"
         },
         {
-          "msg": "Reposted fresh reel, submitted within 3 min → 'Clip submitted' confirmed",
+          "msg": "Reposted fresh reel, submitted within 3 min \u2192 'Clip submitted' confirmed",
           "t": "12:22"
         },
         {
@@ -245,7 +271,7 @@
       "started_at": "2026-09-16T12:40:00+05:30",
       "reel_url": "https://www.instagram.com/reel/DdVvHoOB-ar/",
       "status": "reel_live_no_submission",
-      "whop_status": "Submission failed — campaign closed (budget 100% used)",
+      "whop_status": "Submission failed \u2014 campaign closed (budget 100% used)",
       "steps": [
         {
           "t": "12:40",
@@ -257,7 +283,7 @@
         },
         {
           "t": "12:48",
-          "msg": "Instagram session dead (password dialog) — restored via saved login (owner-authorized)"
+          "msg": "Instagram session dead (password dialog) \u2014 restored via saved login (owner-authorized)"
         },
         {
           "t": "12:51",
@@ -269,7 +295,7 @@
         },
         {
           "t": "13:00",
-          "msg": "Whop session dead — restored via Google OAuth (owner approved Tap Yes)"
+          "msg": "Whop session dead \u2014 restored via Google OAuth (owner approved Tap Yes)"
         },
         {
           "t": "13:04",
@@ -315,9 +341,9 @@
     }
   ],
   "today": {
-    "date": "2026-09-17",
+    "date": "2026-09-18",
     "submitted": 0,
     "target": 4
   },
-  "updated_at": "2026-09-17T18:54:00+05:30"
+  "updated_at": "2026-09-17T19:13:53Z"
 }
