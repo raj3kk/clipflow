@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { getSessionUser } from "@/lib/auth";
-import { GOOGLE_AUTH_URL, GOOGLE_SCOPES, callbackUrl } from "@/lib/google-oauth";
+import { GOOGLE_AUTH_URL, GOOGLE_SCOPES, callbackUrl, canonicalOAuthStartUrl } from "@/lib/google-oauth";
 
 /**
  * Starts the real Google OAuth dance for Gmail access.
@@ -15,6 +15,13 @@ export async function GET(req: Request) {
       { error: "Google OAuth is not configured on the server yet." },
       { status: 503 }
     );
+  }
+  // Keep the whole dance on the canonical host: the state cookie, the
+  // Supabase session and the callback must all live on the same origin,
+  // otherwise Google sees an unregistered redirect_uri or the state check fails.
+  const canonical = canonicalOAuthStartUrl(req);
+  if (canonical) {
+    return NextResponse.redirect(canonical);
   }
   // Only signed-in users can start OAuth (the connection binds to them).
   const user = await getSessionUser();
