@@ -13,10 +13,7 @@ export async function GET() {
   }
   const sb = getSupabase();
   if (!sb || !isConfigured()) {
-    return NextResponse.json(
-      { error: "Supabase not configured." },
-      { status: 503 }
-    );
+    return NextResponse.json({ devices: [], configured: false });
   }
   const { data, error } = await sb
     .from("devices")
@@ -28,5 +25,5 @@ export async function GET() {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  return NextResponse.json({ devices: data ?? [] });
+  return NextResponse.json({ devices: data ?? [], configured: true });
 }

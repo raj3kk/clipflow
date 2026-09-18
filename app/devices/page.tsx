@@ -403,7 +403,7 @@ export default function DevicesPage() {
         Har phone khud uska automation server hai — yahan enroll karo, status
         dekho, proof screenshots verify karo.
       </p>
-      <SetupBanner />
+      {devices.data && !devices.data.configured && <SetupBanner />}
 
       <div className="grid gap-4 md:grid-cols-2 mb-6">
         <EnrollBox onDone={() => devices.reload()} />
