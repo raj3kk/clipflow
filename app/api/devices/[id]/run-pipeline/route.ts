@@ -14,8 +14,11 @@ import { getSupabase, isConfigured } from "@/lib/supabase";
  * Schedule wala hissa planner cron (6h) already karta hai; ye sirf manual trigger.
  *
  * GET /api/devices/:id/run-pipeline
- *   → { request: { id, status, note, created_at, started_at, finished_at } | null }
+ *   → { request: { id, status, note, created_at, started_at, finished_at,
+ *                  stage, stage_at, attempts, next_retry_at } | null }
  *   Device ki latest pipeline request (UI status pill ke liye).
+ *   stage = planner ka live phase (campaign_chun_rahe, video_download,
+ *   clip_ban_raha, upload_ho_raha, phone_ko_bhej_rahe, ho_gaya).
  */
 async function getOwnedDevice(userId: string, deviceId: string) {
   const sb = getSupabase()!;
@@ -111,7 +114,9 @@ export async function GET(
 
   const { data: latest } = await sb
     .from("pipeline_requests")
-    .select("id, status, note, created_at, started_at, finished_at")
+    .select(
+      "id, status, note, created_at, started_at, finished_at, stage, stage_at, attempts, next_retry_at"
+    )
     .eq("device_id", params.id)
     .eq("user_id", user.id)
     .order("created_at", { ascending: false })

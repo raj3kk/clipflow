@@ -24,6 +24,17 @@ skip/error (apne retries ke baad).
 Overlap: wrapper (run_pipeline_watch.sh) flock -n rakhta hai.
 Ek request fail ho to doosri continue karti hai.
 Secrets kabhi log nahi hote.
+
+ORPHAN RECLAIM (KAM 1, 2026-09-19): `running` request ka planner dead mile
+(VM reboot → worker_boot badla, ya worker_pid dead) to status wapas
+`pending` hota hai — sirf note nahi. attempts>=3 → terminal failed.
+
+AUTO-RETRY (KAM 3, 2026-09-19): definitive fail (non-cap, attempts<3) pe
+`failed` + `next_retry_at` (attempts*5 min baad); promote_retries() use
+wapas `pending` karta hai. cap_full_24h kabhi retry nahi hota.
+
+STAGE (KAM 2): handle() stage='taiyaar_ho_raha' set karta hai; planner
+(PLANNER_REQUEST_ID env) har phase pe stage update karta hai.
 """
 
 from __future__ import annotations
@@ -45,6 +56,9 @@ PLANNER = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 CAP_MAX = 4
 CAP_WINDOW_H = 24
 PLANNER_TIMEOUT_S = 50 * 60
+MAX_ATTEMPTS = 3          # ek request zyada se zyada 3 baar try hogi (reclaim+retry milake)
+RETRY_BACKOFF_MIN = 5     # failed → dobara koshish: attempts*5 min baad
+STALE_RUNNING_MIN = 90    # bina pid/boot info ke itne min purana running = stale
 
 
 def now_iso() -> str:
@@ -55,13 +69,56 @@ def log(msg: str) -> None:
     print(f"[pipeline_watch] {now_iso()} {msg}", flush=True)
 
 
-def mark(req_id: str, status: str, note: str | None = None) -> None:
+def boot_id() -> str:
+    """VM boot identifier — reboot ke baad badal jata hai (orphan detect)."""
+    try:
+        with open("/proc/stat") as f:
+            for line in f:
+                if line.startswith("btime "):
+                    return line.split()[1]
+    except Exception:  # noqa: BLE001
+        pass
+    return "unknown"
+
+
+def _worker_alive(pid: int) -> bool:
+    """worker_pid wala process zinda hai AUR wahi pipeline_watch hai?
+
+    Sirf pid number check karna kaafi nahi (pid reuse ho sakta hai) —
+    cmdline me pipeline_watch hona chahiye.
+    """
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            cmd = f.read().replace(b"\0", b" ").decode("utf-8", "replace")
+        return "pipeline_watch" in cmd
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _planner_alive_on_vm() -> bool:
+    """Kya is VM pe koi planner_v2.py process chal raha hai?
+
+    Purane code ki rows me worker_pid nahi hota — tab yehi check batata hai
+    ki planner zinda hai ya VM reboot me mar gaya.
+    """
+    try:
+        out = subprocess.run(["pgrep", "-f", "[p]lanner_v2[.]py"],
+                             capture_output=True, text=True, timeout=5)
+        return out.returncode == 0 and bool(out.stdout.strip())
+    except Exception:  # noqa: BLE001
+        return True  # pata na chale to working maano (safe side)
+
+
+def mark(req_id: str, status: str, note: str | None = None,
+         extra: dict | None = None) -> None:
     patch = {"status": status,
              "finished_at": now_iso() if status in ("done", "failed") else None}
     if status == "running":
         patch["started_at"] = now_iso()
     if note is not None:
         patch["note"] = note[:500]
+    if extra:
+        patch.update(extra)
     config.sb_patch("pipeline_requests", req_id, patch)
 
 
@@ -69,11 +126,15 @@ def requeue(req_id: str, note: str) -> None:
     """Transient blip → request wapas `pending` (agla run retry karega).
 
     Kabhi failed mark nahi hota — yahi 2026-09-19 ka core fix hai.
+    Stage/pid/boot bhi reset taaki reclaim dobara na phase.
     """
     try:
         config.sb_patch("pipeline_requests", req_id,
                         {"status": "pending", "started_at": None,
-                         "finished_at": None, "note": note[:500]})
+                         "finished_at": None, "note": note[:500],
+                         "stage": None, "stage_at": None,
+                         "worker_pid": None, "worker_boot": None,
+                         "next_retry_at": None})
     except Exception as e:  # noqa: BLE001
         log(f"{req_id}: requeue bhi fail ({type(e).__name__}) — "
             f"request pending/running hi rahegi, agla fetch retry karega")
@@ -81,20 +142,43 @@ def requeue(req_id: str, note: str) -> None:
     log(f"{req_id}: transient → wapas pending (retry agle run me)")
 
 
-def mark_failed(req_id: str, note: str) -> None:
-    """Definitive failure — poora message note me (sirf class name nahi)."""
+def mark_failed(req_id: str, note: str, attempts: int,
+                retryable: bool = True) -> None:
+    """Definitive failure.
+
+    retryable (non-cap, attempts<MAX) → status `failed` + `next_retry_at`
+    (kuch min baad khud-b-khud dobara koshish hogi — KAM 3 auto-retry).
+    cap_full_24h ya 3 attempts poore → terminal failed, koi retry nahi.
+    """
+    extra: dict = {"stage": None, "stage_at": None}
+    clean = note
+    if retryable and attempts < MAX_ATTEMPTS:
+        wait_min = RETRY_BACKOFF_MIN * max(attempts, 1)
+        extra["next_retry_at"] = (
+            datetime.now(timezone.utc)
+            + timedelta(minutes=wait_min)).isoformat()
+        clean = (f"{note} | dobara koshish {wait_min} min baad "
+                 f"({attempts}/{MAX_ATTEMPTS})")
+        log(f"{req_id}: failed → auto-retry {wait_min} min me "
+            f"(attempt {attempts}/{MAX_ATTEMPTS})")
+    else:
+        extra["next_retry_at"] = None
+        if attempts >= MAX_ATTEMPTS:
+            clean = f"{note} | {MAX_ATTEMPTS} koshish ke baad ruk gaya"
+        log(f"{req_id}: failed (terminal) — {note[:120]}")
     try:
-        mark(req_id, "failed", note)
+        mark(req_id, "failed", clean, extra=extra)
     except Exception as e:  # noqa: BLE001
         log(f"{req_id}: mark(failed) bhi fail ({type(e).__name__})")
 
 
 def mark_done(req_id: str, note: str) -> None:
     try:
-        mark(req_id, "done", note)
+        mark(req_id, "done", note,
+             extra={"stage": "ho_gaya", "stage_at": now_iso()})
     except Exception as e:  # noqa: BLE001
         log(f"{req_id}: mark(done) fail ({type(e).__name__}) — "
-            f"planner safal tha, request running reh sakti hai (stale-reclaim dekhega)")
+            f"planner safal tha, request running reh sakti hai (reclaim dekhega)")
 
 
 # Planner ke stderr/outcome me ye markers = network blip (transient),
@@ -128,10 +212,15 @@ def cap_count(uid: str) -> int:
     return n_posts + n_jobs
 
 
-def run_planner(device_id: str) -> tuple[str, str]:
-    """planner_v2.py --once chalao. Returns (outcome, tail_note)."""
+def run_planner(device_id: str, req_id: str) -> tuple[str, str]:
+    """planner_v2.py --once chalao. Returns (outcome, tail_note).
+
+    PLANNER_REQUEST_ID env se planner har phase pe pipeline_requests.stage
+    update karta hai (website pe live progress — KAM 2).
+    """
     env = dict(os.environ)
     env["PLANNER_DEVICE_ID"] = device_id
+    env["PLANNER_REQUEST_ID"] = req_id
     try:
         proc = subprocess.run(
             [VENV_PY, PLANNER, "--once"],
@@ -156,15 +245,26 @@ def handle(req: dict) -> None:
     req_id = req["id"]
     device_id = req["device_id"]
     uid = req["user_id"]
-    log(f"request {req_id} device={device_id} user={uid}")
+    attempts = req.get("attempts") or 0
+    log(f"request {req_id} device={device_id} user={uid} "
+        f"attempt={attempts + 1}/{MAX_ATTEMPTS}")
 
-    # 1. running mark — ye bhi na ho paya to pending hi rehne do
+    # 1. running mark — attempts+1, worker pid/boot (orphan detect ke liye),
+    #    stage reset. Ye bhi na ho paya to pending hi rehne do.
     try:
-        mark(req_id, "running")
+        mark(req_id, "running", extra={
+            "attempts": attempts + 1,
+            "worker_pid": os.getpid(),
+            "worker_boot": boot_id(),
+            "stage": "taiyaar_ho_raha",
+            "stage_at": now_iso(),
+            "next_retry_at": None,
+        })
     except Exception as e:  # noqa: BLE001
         log(f"{req_id}: mark(running) failed "
             f"({type(e).__name__}: {e}) — pending rehta hai")
         return
+    attempts += 1
 
     # 2. cap check — transient blip → wapas pending, kabhi failed nahi
     try:
@@ -175,17 +275,19 @@ def handle(req: dict) -> None:
         else:
             tb = traceback.format_exc()
             mark_failed(req_id,
-                        f"cap_check_error: {type(e).__name__}: {e}\n{tb[-700:]}")
+                        f"cap check me dikkat: {type(e).__name__}\n{tb[-400:]}",
+                        attempts)
             log(f"{req_id}: cap check definitive error → failed")
         return
     if n >= CAP_MAX:
-        mark_failed(req_id, "cap_full_24h")
-        log(f"{req_id}: cap full (>=4/24h) → failed")
+        # cap-full kabhi auto-retry nahi hota — kal ka window wait karo
+        mark_failed(req_id, "cap_full_24h", attempts, retryable=False)
+        log(f"{req_id}: cap full (>=4/24h) → failed (no retry)")
         return
 
     # 3. planner chalao
     try:
-        outcome, detail = run_planner(device_id)
+        outcome, detail = run_planner(device_id, req_id)
     except Exception as e:  # noqa: BLE001
         tb = traceback.format_exc()
         if isinstance(e, config.TransientError) or _looks_transient_text(str(e)):
@@ -193,7 +295,8 @@ def handle(req: dict) -> None:
                     f"transient planner-launch: {type(e).__name__}: {e}")
         else:
             mark_failed(req_id,
-                        f"watcher_error: {type(e).__name__}: {e}\n{tb[-700:]}")
+                        f"watcher dikkat: {type(e).__name__}\n{tb[-400:]}",
+                        attempts)
             log(f"{req_id}: watcher error {type(e).__name__} → failed")
         return
 
@@ -212,30 +315,115 @@ def handle(req: dict) -> None:
         # definitive nahi, agla run retry karega.
         requeue(req_id, f"transient planner: {note}")
         return
-    mark_failed(req_id, note)
-    log(f"{req_id}: planner outcome {outcome} → failed")
+    mark_failed(req_id, note, attempts)
+    log(f"{req_id}: planner outcome {outcome} → failed (auto-retry if eligible)")
 
 
-STALE_RUNNING_MIN = 90
+def reclaim_orphans() -> None:
+    """`running` requests jinka planner dead hai → wapas `pending`.
 
-
-def reclaim_stale_running() -> None:
-    """90 min se atki `running` requests wapas `pending` (stuck 409 guard kholo)."""
+    Yahi KAM 1 ka core fix hai: sirf note NAHI, status bhi `pending` hota hai
+    taaki agla watcher pass use uthaye. Teen case:
+    1. VM reboot (worker_boot badal gaya) → turant orphan → turant reclaim.
+    2. worker_pid dead (process nahi hai) → orphan → reclaim.
+    3. Bina pid/boot info ke 90+ min purana → stale → reclaim.
+    MAX_ATTEMPTS poore → terminal failed (infinite loop nahi).
+    """
     try:
-        cutoff = (datetime.now(timezone.utc)
-                  - timedelta(minutes=STALE_RUNNING_MIN)).isoformat()
-        stale = config.sb_request(
+        running = config.sb_request(
             "GET", "/rest/v1/pipeline_requests",
             query={"status": "eq.running",
-                   "started_at": f"lt.{cutoff}",
-                   "select": "id,started_at",
+                   "select": "id,started_at,attempts,worker_pid,worker_boot",
                    "limit": "20"})
     except Exception as e:  # noqa: BLE001
-        log(f"stale-reclaim fetch failed ({type(e).__name__}) — skip")
+        log(f"orphan-reclaim fetch failed ({type(e).__name__}) — skip")
         return
-    for s in stale or []:
-        requeue(s["id"],
-                f"stale running (>{STALE_RUNNING_MIN}m, {s.get('started_at')}) — wapas pending")
+    boot = boot_id()
+    now = datetime.now(timezone.utc)
+    for r in running or []:
+        rid = r["id"]
+        att = r.get("attempts") or 0
+        rboot = r.get("worker_boot")
+        rpid = r.get("worker_pid")
+        orphan = False
+        reason = ""
+        if rboot and rboot != boot:
+            orphan, reason = True, "server restart hua tha"
+        elif rpid and not _worker_alive(int(rpid)):
+            orphan, reason = True, "planner process band ho gaya tha"
+        else:
+            started = r.get("started_at")
+            age_min = 0.0
+            if started:
+                try:
+                    age_min = (now - datetime.fromisoformat(started)
+                               ).total_seconds() / 60
+                except Exception:  # noqa: BLE001
+                    age_min = 0.0
+            if rpid or rboot:
+                # pid/boot info hai aur process zinda → kaam chal raha hai
+                if age_min > STALE_RUNNING_MIN:
+                    orphan = True
+                    reason = f"{int(age_min)} min se atka tha"
+            elif not _planner_alive_on_vm():
+                # purani row, VM pe koi planner nahi → pakka orphan
+                # (VM reboot case — turant reclaim, 90 min wait nahi)
+                orphan, reason = True, "server restart me planner ruk gaya tha"
+            elif age_min > STALE_RUNNING_MIN:
+                orphan = True
+                reason = f"{int(age_min)} min se atka tha"
+        if not orphan:
+            continue
+        if att >= MAX_ATTEMPTS:
+            mark(rid, "failed",
+                 f"{MAX_ATTEMPTS} koshish ke baad bhi poora nahi hua "
+                 f"(aakhri wajah: {reason})"[:500],
+                 extra={"stage": None, "stage_at": None,
+                        "next_retry_at": None})
+            log(f"{rid}: orphan lekin {MAX_ATTEMPTS} attempts → terminal failed")
+            continue
+        try:
+            config.sb_patch("pipeline_requests", rid, {
+                "status": "pending", "started_at": None, "finished_at": None,
+                "worker_pid": None, "worker_boot": None,
+                "stage": None, "stage_at": None, "next_retry_at": None,
+                "note": (f"{reason} — dobara koshish ho rahi hai "
+                         f"({att + 1}/{MAX_ATTEMPTS})")[:500]})
+            log(f"{rid}: orphan ({reason}) → wapas pending "
+                f"({att + 1}/{MAX_ATTEMPTS})")
+        except Exception as e:  # noqa: BLE001
+            log(f"{rid}: orphan requeue fail ({type(e).__name__})")
+
+
+def promote_retries() -> None:
+    """KAM 3: `failed` + next_retry_at aa gaya → wapas `pending` (auto-retry).
+
+    Har retry pe stage reset; attempts handle() me +1 hota hai.
+    """
+    try:
+        due = config.sb_request(
+            "GET", "/rest/v1/pipeline_requests",
+            query={"status": "eq.failed",
+                   "next_retry_at": f"lte.{now_iso()}",
+                   "select": "id,attempts",
+                   "limit": "20"})
+    except Exception as e:  # noqa: BLE001
+        log(f"retry-promote fetch failed ({type(e).__name__}) — skip")
+        return
+    for r in due or []:
+        att = r.get("attempts") or 0
+        if att >= MAX_ATTEMPTS:
+            continue
+        try:
+            config.sb_patch("pipeline_requests", r["id"], {
+                "status": "pending", "started_at": None, "finished_at": None,
+                "stage": None, "stage_at": None, "next_retry_at": None,
+                "worker_pid": None, "worker_boot": None,
+                "note": (f"dobara koshish ho rahi hai "
+                         f"({att + 1}/{MAX_ATTEMPTS})")[:500]})
+            log(f"{r['id']}: auto-retry → pending ({att + 1}/{MAX_ATTEMPTS})")
+        except Exception as e:  # noqa: BLE001
+            log(f"{r['id']}: promote retry fail ({type(e).__name__})")
 
 
 def main() -> int:
@@ -245,7 +433,7 @@ def main() -> int:
     try:
         pending = config.sb_request("GET", "/rest/v1/pipeline_requests",
                                     query={"status": "eq.pending",
-                                           "select": "id,user_id,device_id,created_at",
+                                           "select": "id,user_id,device_id,created_at,attempts",
                                            "order": "created_at.asc",
                                            "limit": "20"})
     except config.TransientError as e:
@@ -255,7 +443,8 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         log(f"FATAL: fetch failed {type(e).__name__}: {e}")
         return 1
-    reclaim_stale_running()
+    reclaim_orphans()
+    promote_retries()
     if not pending:
         log("no pending requests")
         return 0

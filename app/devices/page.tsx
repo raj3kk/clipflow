@@ -582,6 +582,101 @@ function DeleteDeviceButton({ deviceId }: { deviceId: string }) {
   );
 }
 
+/** Pipeline stage → user ko dikhne wala Hindi label (KAM 2). */
+const STAGE_LABEL: Record<string, string> = {
+  taiyaar_ho_raha: "Taiyaar ho raha hai",
+  campaign_chun_rahe: "Campaign chun rahe hain",
+  video_download: "Video download ho rahi hai",
+  clip_ban_raha: "Clip ban raha hai",
+  upload_ho_raha: "Upload ho raha hai",
+  phone_ko_bhej_rahe: "Phone ko bhej rahe hain",
+  ho_gaya: "Ho gaya",
+};
+
+/** stage_at se elapsed: "3 min se" / "45 s se" */
+function stageElapsed(iso: string | null): string {
+  if (!iso) return "";
+  const s = Math.max(
+    0,
+    Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+  );
+  if (s < 60) return `${s} s se`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min se`;
+  return `${Math.floor(m / 60)} h ${m % 60} min se`;
+}
+
+/** Pipeline fail ka user-friendly kaaran — technical note kabhi raw nahi dikhta. */
+function pipeFailLabel(p: {
+  note: string | null;
+  attempts: number;
+  next_retry_at: string | null;
+}): string {
+  if (p.note?.includes("cap_full_24h"))
+    return "Aaj ke 4 runs poore ho gaye — kal phir try karein";
+  if (p.next_retry_at)
+    return `fail hui — dobara koshish ho rahi hai (${p.attempts}/3)`;
+  if ((p.attempts ?? 0) >= 3) return "3 baar koshish ke baad fail hui";
+  if (p.note?.includes("dobara koshish"))
+    return `fail hui — dobara koshish ho rahi hai (${p.attempts}/3)`;
+  return "fail hui";
+}
+
+/** Hindi relative time: "5 min" / "2 ghante" / "abhi-abhi" */
+function hindiAgo(iso: string | null): string {
+  if (!iso) return "kabhi nahi";
+  const ms = Date.now() - new Date(iso).getTime();
+  if (isNaN(ms) || ms < 0) return "kabhi nahi";
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return "abhi-abhi";
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} ghante`;
+  return `${Math.floor(h / 24)} din`;
+}
+
+/**
+ * KAM 4 — active phone job ke liye heartbeat progress (bina app update ke).
+ * device.last_seen se: "Phone pe chal raha hai — aakhri halchal X pehle".
+ * 30+ min stale → honest warning.
+ */
+function PhoneProgress({
+  jobStatus,
+  runStatus,
+  lastSeen,
+}: {
+  jobStatus: string;
+  runStatus: string | undefined;
+  lastSeen: string | null;
+}) {
+  const active =
+    ["queued", "dispatched", "running"].includes(jobStatus) ||
+    runStatus === "running";
+  if (!active) return null;
+  const staleMs = lastSeen
+    ? Date.now() - new Date(lastSeen).getTime()
+    : Infinity;
+  if (!lastSeen || staleMs > 30 * 60 * 1000) {
+    return (
+      <p className="mt-2 text-xs text-amber-300">
+        ⚠{" "}
+        {lastSeen
+          ? `Phone se ${hindiAgo(lastSeen)} se jawab nahi aa raha`
+          : "Phone se abhi tak jawab nahi aaya"}{" "}
+        — app khula hai na check karo
+      </p>
+    );
+  }
+  const ago = hindiAgo(lastSeen);
+  return (
+    <p className="mt-2 text-xs text-slate-400">
+      {ago === "abhi-abhi"
+        ? "Phone pe chal raha hai — abhi halchal hui ✓"
+        : `Phone pe chal raha hai — aakhri halchal ${ago} pehle`}
+    </p>
+  );
+}
+
 function JobsPanel({ deviceId }: { deviceId: string }) {
   const { data, loading, error, reload } = useApi<JobsResp>(
     `/api/devices/${deviceId}/jobs`
@@ -596,6 +691,10 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
     id: string;
     status: string;
     note: string | null;
+    stage: string | null;
+    stage_at: string | null;
+    attempts: number;
+    next_retry_at: string | null;
   } | null>(null);
 
   const fetchPipeline = async () => {
@@ -733,27 +832,50 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
           </p>
         )}
         {runMsg && <p className="text-xs text-slate-300">{runMsg}</p>}
-        {pipe && (
-          <div
-            className={`mt-2 text-xs px-3 py-2 rounded-lg inline-block ${
-              pipe.status === "done"
-                ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40"
-                : pipe.status === "failed"
-                  ? "bg-red-500/15 text-red-300 border border-red-500/40"
-                  : pipe.status === "running"
-                    ? "bg-blue-500/15 text-blue-300 border border-blue-500/40"
-                    : "bg-amber-500/15 text-amber-300 border border-amber-500/40"
-            }`}
-          >
-            Pipeline:{" "}
-            {pipe.status === "pending" &&
-              "Pipeline shuru ho gayi hai — taiyaar ho rahi hai…"}
-            {pipe.status === "running" && "chal rahi hai…"}
-            {pipe.status === "done" && "poori ho gayi ✓"}
-            {pipe.status === "failed" && "fail hui"}
-            {pipe.note && ` (${pipe.note})`}
-          </div>
-        )}
+        {pipe &&
+          (() => {
+            // Stage 15+ min se na badle to honest stuck hint (KAM 2).
+            const stuck =
+              pipe.status === "running" &&
+              !!pipe.stage_at &&
+              Date.now() - new Date(pipe.stage_at).getTime() >
+                15 * 60 * 1000;
+            const stageLabel =
+              pipe.stage && STAGE_LABEL[pipe.stage]
+                ? STAGE_LABEL[pipe.stage]
+                : null;
+            const retrying =
+              pipe.status === "pending" &&
+              !!pipe.note?.includes("dobara koshish");
+            return (
+              <div
+                className={`mt-2 text-xs px-3 py-2 rounded-lg inline-block ${
+                  pipe.status === "done"
+                    ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40"
+                    : pipe.status === "failed"
+                      ? "bg-red-500/15 text-red-300 border border-red-500/40"
+                      : pipe.status === "running"
+                        ? "bg-blue-500/15 text-blue-300 border border-blue-500/40"
+                        : "bg-amber-500/15 text-amber-300 border border-amber-500/40"
+                }`}
+              >
+                Pipeline:{" "}
+                {pipe.status === "pending" &&
+                  (retrying
+                    ? `Dobara koshish ho rahi hai (${pipe.attempts}/3)…`
+                    : "Pipeline shuru ho gayi hai — taiyaar ho rahi hai…")}
+                {pipe.status === "running" &&
+                  (stageLabel
+                    ? `Abhi: ${stageLabel}… (${stageElapsed(pipe.stage_at)})`
+                    : "chal rahi hai…")}
+                {pipe.status === "running" &&
+                  stuck &&
+                  " — atak sakta hai, auto-retry lagega"}
+                {pipe.status === "done" && "poori ho gayi ✓"}
+                {pipe.status === "failed" && pipeFailLabel(pipe)}
+              </div>
+            );
+          })()}
         <details className="mt-2">
           <summary className="text-xs text-slate-500 underline cursor-pointer">
             Advanced (testing ke liye purana direct run-now)
@@ -866,8 +988,12 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
               <StatusPill status={j.run?.status ?? j.status} />
             </div>
           </div>
-          {j.run?.result?.vars?.reel_url && (
-            <div className="mt-2 text-sm">
+          <PhoneProgress
+            jobStatus={j.status}
+            runStatus={j.run?.status}
+            lastSeen={data.device.last_seen}
+          />
+          {j.run?.result?.vars?.reel_url && (            <div className="mt-2 text-sm">
               <a
                 href={j.run.result.vars.reel_url}
                 target="_blank"

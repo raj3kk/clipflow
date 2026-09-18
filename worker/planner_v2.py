@@ -100,6 +100,23 @@ def sb_select_retry(table: str, filters: dict | None = None,
 
 
 # --------------------------------------------------------------------------
+# stage progress — website pe live dikhta hai ("Abhi: Clip ban raha hai…").
+# PLANNER_REQUEST_ID env watcher deta hai. Best-effort, kabhi raise nahi.
+# --------------------------------------------------------------------------
+def set_stage(name: str) -> None:
+    rid = os.environ.get("PLANNER_REQUEST_ID")
+    if not rid:
+        return
+    try:
+        sb_retry("PATCH", "/rest/v1/pipeline_requests",
+                 query={"id": f"eq.{rid}"},
+                 body={"stage": name,
+                       "stage_at": datetime.now(timezone.utc).isoformat()})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# --------------------------------------------------------------------------
 # 1. cap guard — v1 posts + v2 jobs, rolling 24h
 # --------------------------------------------------------------------------
 def cap_count(uid: str) -> int:
@@ -513,10 +530,13 @@ def attempt_campaign(uid: str, campaign: dict, score: float,
     # download → render → caption → upload
     tmp = tempfile.mkdtemp(prefix="planner_v2_")
     try:
+        set_stage("video_download")
         src = download_section(brief_url, start, end, tmp)
+        set_stage("clip_ban_raha")
         clip = render_clip(src, start, end, tmp, campaign)
         caption = build_caption(campaign, moment.get("hook_text") or "")
         log(f"caption ({len(caption)} chars): {caption[:90]}…")
+        set_stage("upload_ho_raha")
         video_url = upload_clip(clip, cid, start, end)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -532,12 +552,14 @@ def attempt_campaign(uid: str, campaign: dict, score: float,
                         f"{cid} {start}-{end}s {video_url[:60]}")
         return "dryrun"
 
+    set_stage("phone_ko_bhej_rahe")
     res = enqueue(video_url, caption, whop_submit_url)
     if res.get("ok"):
         log(f"ENQUEUED job {res.get('job_id')} "
             f"(deduped={res.get('deduped')}) — phone poll pe uthayega")
         activity(uid, "planner_v2_enqueued",
                         f"{cid} {start}-{end}s job={res.get('job_id')}")
+        set_stage("ho_gaya")
         return "enqueued"
     if res.get("capped") or res.get("conflict"):
         return "skipped:server_guard"
@@ -548,6 +570,7 @@ def plan_once(dry_run: bool) -> str:
     """Ek planning pass. Returns outcome string: enqueued|dryrun|skipped:*."""
     uid, dname = get_device_user()
     log(f"device {dname} ({DEVICE_ID[:8]}…) user {uid[:8]}…")
+    set_stage("campaign_chun_rahe")
     # config.api() wali calls (agar bhavishya me hon) user-scoped rahen —
     # bina iske /api/activity jaise endpoints "user_id required" 400 dete hain.
     config.set_worker_user(uid)
