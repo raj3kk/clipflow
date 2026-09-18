@@ -190,6 +190,26 @@ create table if not exists settings (
   updated_at timestamptz not null default now()
 );
 
+-- ------------------------------------------------------- automation_runs --
+-- One row per automation cycle (manual "run now" + scheduled). The worker
+-- claims queued rows and updates current_step live so the dashboard can show
+-- background activity. Cap: max 4 runs per rolling 24h per user (manual +
+-- scheduled combined) — enforced in /api/automation/run and the cron briefs.
+create table if not exists automation_runs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid,
+  trigger text not null default 'manual',
+  status text not null default 'queued',
+  current_step text,
+  detail text,
+  error text,
+  created_at timestamptz not null default now(),
+  started_at timestamptz,
+  finished_at timestamptz
+);
+create index if not exists automation_runs_user_idx on automation_runs (user_id, created_at desc);
+create index if not exists automation_runs_status_idx on automation_runs (status, created_at);
+
 -- --------------------------------------------------------------------- RLS --
 -- Service-role key bypasses RLS; anon gets nothing except the per-user
 -- "own_rows" policy below (defense in depth — the app also scopes every
@@ -202,13 +222,14 @@ alter table connections enable row level security;
 alter table interventions enable row level security;
 alter table activity_log enable row level security;
 alter table settings enable row level security;
+alter table automation_runs enable row level security;
 
 do $$
 declare t text;
 begin
   foreach t in array array[
     'campaigns','clips','posts','submissions',
-    'connections','interventions','activity_log','settings'
+    'connections','interventions','activity_log','settings','automation_runs'
   ] loop
     execute format('drop policy if exists own_rows on %I', t);
     execute format(
@@ -231,6 +252,7 @@ alter table connections  add column if not exists user_id uuid;
 alter table interventions add column if not exists user_id uuid;
 alter table activity_log add column if not exists user_id uuid;
 alter table settings     add column if not exists user_id uuid;
+alter table automation_runs add column if not exists user_id uuid;
 
 create index if not exists campaigns_user_idx    on campaigns (user_id);
 create index if not exists clips_user_idx        on clips (user_id);
@@ -309,3 +331,86 @@ on conflict (id) do nothing;
 drop policy if exists "public read clips" on storage.objects;
 create policy "public read clips" on storage.objects
   for select using (bucket_id = 'clips');
+
+-- ------------------------------------------------------- PhoneAgent tables --
+-- Har user ka phone = uska automation device. Phone poll karta hai (outbound
+-- HTTPS only) — koi inbound port/public IP nahi chahiye.
+
+create table if not exists devices (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  device_name text not null default 'Android',
+  platform text not null default 'android',
+  app_version text,
+  fcm_token text,
+  api_key_hash text not null,
+  status text not null default 'active',
+  paused_until timestamptz,
+  last_seen timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists devices_user_idx on devices (user_id);
+
+create table if not exists device_enroll_codes (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  code_hash text not null,
+  expires_at timestamptz not null,
+  used_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists device_enroll_codes_user_idx on device_enroll_codes (user_id);
+
+create table if not exists device_jobs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  device_id uuid not null references devices (id) on delete cascade,
+  type text not null,
+  payload jsonb not null default '{}',
+  idempotency_key text unique,
+  status text not null default 'queued',
+  attempts int not null default 0,
+  max_attempts int not null default 3,
+  run_after timestamptz not null default now(),
+  last_heartbeat timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists device_jobs_device_idx on device_jobs (device_id, status, run_after);
+create index if not exists device_jobs_user_idx on device_jobs (user_id, created_at desc);
+
+create table if not exists job_runs (
+  id uuid primary key default gen_random_uuid(),
+  job_id uuid not null references device_jobs (id) on delete cascade,
+  device_id uuid not null,
+  user_id uuid not null,
+  status text not null,
+  result jsonb,
+  screenshots text[] not null default '{}',
+  started_at timestamptz,
+  finished_at timestamptz not null default now()
+);
+create index if not exists job_runs_job_idx on job_runs (job_id);
+
+alter table devices enable row level security;
+alter table device_enroll_codes enable row level security;
+alter table device_jobs enable row level security;
+alter table job_runs enable row level security;
+
+do $$
+declare t text;
+begin
+  foreach t in array array['devices','device_enroll_codes','device_jobs','job_runs'] loop
+    execute format('drop policy if exists own_rows on %I', t);
+    execute format(
+      'create policy own_rows on %I for all to authenticated ' ||
+      'using (user_id = auth.uid()) with check (user_id = auth.uid())',
+      t
+    );
+  end loop;
+end $$;
+
+-- Automation screenshot proofs ke liye private bucket (service-role upload,
+-- dashboard signed URLs se dikhata hai)
+insert into storage.buckets (id, name, public)
+values ('device-shots', 'device-shots', false)
+on conflict (id) do nothing;
