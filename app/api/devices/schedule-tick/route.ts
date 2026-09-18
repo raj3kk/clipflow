@@ -15,6 +15,10 @@ import { sendWakePush } from "@/lib/fcm";
  *   - schedule.enabled === false → skip (schedule band hai)
  *   - times mode: pichhle 20 min me aaya hua scheduled time → job banao
  *   - interval mode: current epoch-anchored period → job banao (dedupe by key)
+ * Manual clip package set ho → direct automation job (testing ke liye).
+ * Manual clip NA ho → pipeline_requests row banti hai; watcher (1-min cron)
+ * planner chalata hai jo campaign se clip bana ke plan-job enqueue karta hai.
+ * User ko kuch bharna nahi padta (zero-touch, 2026-09-19).
  * Idempotency key (`sched:<device>:<slot>`) double-creation rokta hai;
  * cap (4/24h) aur paused-device check createAutomationJob me hota hai.
  * Phone har 15 min poll karke queued job utha leta hai (FCM optional).
@@ -147,15 +151,51 @@ export async function POST(req: Request) {
       continue;
     }
 
-    // Clip package bina automation adhuri hai — pehle website pe set karo
+    // Manual clip set nahi hai → pipeline khud clip banayegi.
+    // pipeline_requests row banao taaki watcher (1-min cron) planner chala de.
+    // Manual clip set ho → purana direct-job behavior (testing ke liye).
+    // User ko kuch bharna NAHI padta — ye 2026-09-19 ka zero-touch fix hai.
     const clipCheck = validateClipPackage(sched.clip);
     if (!clipCheck.ok || !clipCheck.pkg) {
-      skipped.push({
-        device_id: d.id,
-        reason: "no_clip_package",
-        detail:
-          "Clip package set nahi hai (video URL + caption + Whop URL). Device card me 'Clip package' bharo.",
-      });
+      const { data: existingPipe } = await sb
+        .from("pipeline_requests")
+        .select("id")
+        .eq("device_id", d.id)
+        .in("status", ["pending", "running"])
+        .limit(1);
+      if (existingPipe && existingPipe.length > 0) {
+        skipped.push({
+          device_id: d.id,
+          reason: "pipeline_already_pending",
+          slots,
+        });
+        continue;
+      }
+      const { data: pipeReq, error: pipeErr } = await sb
+        .from("pipeline_requests")
+        .insert({
+          user_id: d.user_id,
+          device_id: d.id,
+          status: "pending",
+          note: `schedule slot (${slots.join(", ")}) — pipeline khud clip banayegi`,
+        })
+        .select("id")
+        .single();
+      if (pipeErr || !pipeReq) {
+        skipped.push({
+          device_id: d.id,
+          reason: "pipeline_request_failed",
+          detail: pipeErr?.message ?? "insert failed",
+          slots,
+        });
+      } else {
+        created.push({
+          device_id: d.id,
+          pipeline_request_id: pipeReq.id,
+          slots,
+          via: "pipeline",
+        });
+      }
       continue;
     }
     const payload = buildAutomationPayload(clipCheck.pkg);

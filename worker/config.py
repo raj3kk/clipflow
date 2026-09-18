@@ -14,8 +14,11 @@ Security: never log or print decrypted secret values.
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import os
+import random
+import socket
 import sys
 import time
 import urllib.error
@@ -178,7 +181,7 @@ def api(method: str, path: str, body: dict | None = None,
                 f"ClipFlow API {method} {path} -> {e.code}: {detail}") from e
         except Exception as e:  # noqa: BLE001 - transient network; retry
             last = e
-            time.sleep(2 * (attempt + 1))
+            time.sleep(2 * (attempt + 1) + random.uniform(0, 1.5))
     raise RuntimeError(
         f"ClipFlow API {method} {path} network failed after 3 tries: {last}")
 
@@ -249,7 +252,44 @@ def activity(event: str, detail: str = "", clip_id: str | None = None) -> None:
 
 # --------------------------------------------------------------------------
 # Supabase REST (service_role) + storage
+#
+# Egress proxy beech-beech me connection tod deta hai (RemoteDisconnected /
+# IncompleteRead). urllib connection pool NAHI karta (har request fresh
+# TCP connection), isliye "stale keep-alive" wala issue yahan nahi hai —
+# fix = transient errors pe retry-with-backoff+jitter.
 # --------------------------------------------------------------------------
+
+class TransientError(RuntimeError):
+    """Network blip jo retry se theek ho sakta hai (proxy drop, timeout, 5xx)."""
+
+
+TRANSIENT_ERRORS = (
+    http.client.RemoteDisconnected,
+    http.client.IncompleteRead,
+    socket.timeout,
+    TimeoutError,
+    ConnectionError,
+)
+
+
+def is_transient_error(e: BaseException) -> bool:
+    """Ye error retry ke layak hai ya permanent?"""
+    if isinstance(e, TRANSIENT_ERRORS):
+        return True
+    if isinstance(e, urllib.error.HTTPError):
+        return 500 <= e.code < 600
+    if isinstance(e, urllib.error.URLError):
+        # Non-HTTP URLError = network level (DNS refused, proxy reset, ...).
+        # reason me lipti hui socket/http-client error bhi transient hai.
+        reason = getattr(e, "reason", None)
+        if reason is None or isinstance(reason, TRANSIENT_ERRORS):
+            return True
+        return True
+    return False
+
+
+def _retry_wait(attempt: int) -> float:
+    return min(2 ** attempt, 30) + random.uniform(0, 1.5)
 def sb_headers(extra: dict | None = None) -> dict:
     h = {"apikey": SUPABASE_SERVICE_KEY,
          "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
@@ -259,22 +299,53 @@ def sb_headers(extra: dict | None = None) -> dict:
 
 
 def sb_request(method: str, path: str, body: dict | None = None,
-               query: dict | None = None, timeout: int = 60) -> dict:
+               query: dict | None = None, timeout: int = 60,
+               tries: int = 6) -> dict:
+    """Supabase REST call — transient errors pe backoff+jitter ke saath retry.
+
+    4xx = permanent (turant raise). Connection blips / timeouts / 5xx =
+    transient (tries tak retry, phir TransientError).
+    """
     url = SUPABASE_URL + path
     if query:
         url += "?" + urllib.parse.urlencode(query)
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(url, data=data, method=method)
-    for k, v in sb_headers(
-            {"Content-Type": "application/json"} if data else {}).items():
-        req.add_header(k, v)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode()
-            return json.loads(raw) if raw else {}
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode(errors="replace")[:400]
-        raise RuntimeError(f"Supabase {method} {path} -> {e.code}: {detail}") from e
+    last: BaseException | None = None
+    for i in range(tries):
+        req = urllib.request.Request(url, data=data, method=method)
+        for k, v in sb_headers(
+                {"Content-Type": "application/json"} if data else {}).items():
+            req.add_header(k, v)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode()
+                return json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as e:
+            if 500 <= e.code < 600 and i < tries - 1:
+                wait = _retry_wait(i)
+                print(f"[worker] sb {method} {path} -> {e.code} "
+                      f"(retry {i + 1}/{tries}, {wait:.1f}s)", flush=True)
+                time.sleep(wait)
+                last = e
+                continue
+            detail = e.read().decode(errors="replace")[:400]
+            raise RuntimeError(
+                f"Supabase {method} {path} -> {e.code}: {detail}") from e
+        except Exception as e:  # noqa: BLE001
+            if not is_transient_error(e):
+                raise
+            last = e
+            if i < tries - 1:
+                wait = _retry_wait(i)
+                print(f"[worker] sb {method} {path} transient "
+                      f"({type(e).__name__}) "
+                      f"(retry {i + 1}/{tries}, {wait:.1f}s)", flush=True)
+                time.sleep(wait)
+                continue
+    assert last is not None
+    raise TransientError(
+        f"Supabase {method} {path} transient failed after {tries} tries: "
+        f"{type(last).__name__}: {last}") from last
 
 
 def sb_select(table: str, filters: dict | None = None,
@@ -304,21 +375,52 @@ def sb_patch(table: str, row_id: str, patch: dict) -> dict:
 
 
 def storage_upload(local_path: str, dest_name: str, content_type: str,
-                   bucket: str = "clips") -> str:
-    """Upload to a Supabase storage bucket; returns the public URL."""
+                   bucket: str = "clips", tries: int = 3) -> str:
+    """Upload to a Supabase storage bucket; returns the public URL.
+
+    x-upsert:true ki wajah se retry idempotent hai (same path overwrite).
+    """
     url = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{dest_name}"
     with open(local_path, "rb") as f:
         data = f.read()
-    req = urllib.request.Request(url, data=data, method="POST")
-    for k, v in sb_headers({"Content-Type": content_type,
-                            "x-upsert": "true"}).items():
-        req.add_header(k, v)
-    try:
-        with urllib.request.urlopen(req, timeout=300) as resp:
-            resp.read()
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode(errors="replace")[:300]
-        raise RuntimeError(f"storage upload -> {e.code}: {detail}") from e
+    last: BaseException | None = None
+    for i in range(tries):
+        req = urllib.request.Request(url, data=data, method="POST")
+        for k, v in sb_headers({"Content-Type": content_type,
+                                "x-upsert": "true"}).items():
+            req.add_header(k, v)
+        try:
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                resp.read()
+            break
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode(errors="replace")[:300]
+            if 500 <= e.code < 600 and i < tries - 1:
+                wait = _retry_wait(i)
+                print(f"[worker] storage upload -> {e.code} "
+                      f"(retry {i + 1}/{tries}, {wait:.1f}s)", flush=True)
+                time.sleep(wait)
+                last = e
+                continue
+            raise RuntimeError(
+                f"storage upload -> {e.code}: {detail}") from e
+        except Exception as e:  # noqa: BLE001
+            if not is_transient_error(e):
+                raise
+            last = e
+            if i < tries - 1:
+                wait = _retry_wait(i)
+                print(f"[worker] storage upload transient "
+                      f"({type(e).__name__}) "
+                      f"(retry {i + 1}/{tries}, {wait:.1f}s)", flush=True)
+                time.sleep(wait)
+                continue
+    else:
+        # loop bina break ke poora chala = sab tries transient me gire
+        assert last is not None
+        raise TransientError(
+            f"storage upload transient failed after {tries} tries: "
+            f"{type(last).__name__}: {last}") from last
     return f"{SUPABASE_URL}/storage/v1/object/public/{bucket}/{dest_name}"
 
 

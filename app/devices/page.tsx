@@ -425,7 +425,7 @@ function ClipPackageCard({ deviceId }: { deviceId: string }) {
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? r.status);
-      setMsg("Clip package save ho gaya — schedule aur Run Now dono yahi istemal karenge.");
+      setMsg("Manual clip save ho gaya — testing wale run isi ko istemal karenge.");
       reload();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Failed");
@@ -437,21 +437,17 @@ function ClipPackageCard({ deviceId }: { deviceId: string }) {
   return (
     <div className={cardCls}>
       <div className="flex items-center justify-between mb-1">
-        <div className="font-semibold text-sm">Clip package</div>
-        <span
-          className={`text-[11px] px-2 py-0.5 rounded-full border ${
-            hasClip
-              ? "bg-emerald-400/15 text-emerald-300 border-emerald-400/30"
-              : "bg-amber-400/15 text-amber-300 border-amber-400/30"
-          }`}
-        >
-          {hasClip ? "set hai" : "set nahi hai"}
-        </span>
+        <div className="font-semibold text-sm">Manual clip (optional — testing ke liye)</div>
+        {hasClip && (
+          <span className="text-[11px] px-2 py-0.5 rounded-full border bg-emerald-400/15 text-emerald-300 border-emerald-400/30">
+            manual clip set hai
+          </span>
+        )}
       </div>
       <p className="text-xs text-slate-500 mb-3">
-        Automation isi se chalti hai: ready video (direct MP4 link), caption +
-        hashtags (campaign requirement ke hisab se), aur Whop campaign ka submit
-        page. Bina iske schedule slot aane pe job nahi banegi.
+        Bharna zaroori nahi hai — schedule slot ya Run Now pe pipeline khud
+        campaign se clip (video + caption + hashtags) bana leti hai. Ye form
+        sirf testing ke liye hai, jab koi khaas video chalana ho.
       </p>
       <label className="text-xs text-slate-400 block mb-2">
         Video URL (direct MP4 link):
@@ -751,7 +747,7 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
           >
             Pipeline:{" "}
             {pipe.status === "pending" &&
-              "pending — watcher 5 min me uthayega"}
+              "Pipeline shuru ho gayi hai — taiyaar ho rahi hai…"}
             {pipe.status === "running" && "chal rahi hai…"}
             {pipe.status === "done" && "poori ho gayi ✓"}
             {pipe.status === "failed" && "fail hui"}

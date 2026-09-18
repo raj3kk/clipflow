@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run Now → full pipeline watcher — single pass (cron entrypoint, every 5 min).
+# Run Now → full pipeline watcher — single pass (cron entrypoint, every 1 min).
 # Loads worker env from ~/.config/clipflow/worker.env (600), prevents
 # overlapping runs with flock, logs to worker/logs/pipeline_watch.log.
 set -u

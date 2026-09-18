@@ -9,7 +9,7 @@ import { getSupabase, isConfigured } from "@/lib/supabase";
  *   → 200 { ok, request_id } | 409 { error } (already pending/running)
  *
  * Device user ka hai + active (paused nahi) hona chahiye. `pending` request
- * insert karti hai — VM pe `pipeline_watch.py` watcher (5-min cron) ise
+ * insert karti hai — VM pe `pipeline_watch.py` watcher (1-min cron) ise
  * uthata hai aur `planner_v2.py` (campaign → render → phone enqueue) chalata hai.
  * Schedule wala hissa planner cron (6h) already karta hai; ye sirf manual trigger.
  *

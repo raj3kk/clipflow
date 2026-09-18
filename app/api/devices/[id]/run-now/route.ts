@@ -63,7 +63,7 @@ export async function POST(
     return NextResponse.json(
       {
         error:
-          "Clip package set nahi hai. Device card me video URL + caption + Whop URL bharo, ya yahan do.",
+          "Is manual (testing) run ke liye clip chahiye — upar fields me video URL + caption + Whop URL do, ya device card me manual clip save karo.",
         detail: clipCheck.error,
       },
       { status: 400 }

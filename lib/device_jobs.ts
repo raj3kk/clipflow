@@ -8,6 +8,20 @@
 export const CAP_COUNT = 4;
 export const CAP_WINDOW_HOURS = 24;
 
+/**
+ * Jin statuses me job "zinda" mana jata hai — sirf inhi pe idempotency
+ * dedup hota hai. cancelled/failed purana/mara hua job hai: uspe dedup
+ * NAHI hota, balki uska key retire karke NAYA job banta hai.
+ * (2026-09-19 fix: cancelled job pe deduped:true wala silent failure.)
+ */
+export const LIVE_JOB_STATUSES = new Set([
+  "queued",
+  "claimed",
+  "dispatched",
+  "running",
+  "succeeded",
+]);
+
 export type JobCreateResult =
   | { ok: true; job_id: string; status: string; deduped?: boolean }
   | { ok: false; code: 404 | 409 | 429 | 500; error: string; cap?: number; window_hours?: number };
@@ -60,22 +74,29 @@ export async function createAutomationJob(
     };
   }
 
-  const { data: job, error: jobErr } = await sb
-    .from("device_jobs")
-    .insert({
-      user_id: userId,
-      device_id: deviceId,
-      type,
-      payload,
-      idempotency_key: opts?.idempotency_key ?? null,
-      run_after: opts?.run_after ?? new Date().toISOString(),
-    })
-    .select("id")
-    .single();
+  // Insert — idempotency_key duplicate (23505) pe purana job dekho.
+  // LIVE job (queued/claimed/dispatched/running/succeeded) → deduped:true.
+  // cancelled/failed purana job → uska key retire karke NAYA job banao
+  // (nahi to retry hamesha mare hue job ko wapas deta — silent failure).
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { data: job, error: jobErr } = await sb
+      .from("device_jobs")
+      .insert({
+        user_id: userId,
+        device_id: deviceId,
+        type,
+        payload,
+        idempotency_key: opts?.idempotency_key ?? null,
+        run_after: opts?.run_after ?? new Date().toISOString(),
+      })
+      .select("id")
+      .single();
 
-  if (jobErr || !job) {
+    if (!jobErr && job) {
+      return { ok: true, job_id: job.id, status: "queued" };
+    }
+
     const msg = jobErr?.message ?? "Job create failed.";
-    // idempotency_key duplicate → pehle wala job wapas do
     if (jobErr?.code === "23505" && opts?.idempotency_key) {
       const { data: existing } = await sb
         .from("device_jobs")
@@ -83,14 +104,26 @@ export async function createAutomationJob(
         .eq("idempotency_key", opts.idempotency_key)
         .eq("user_id", userId)
         .single();
+      if (existing && LIVE_JOB_STATUSES.has(existing.status)) {
+        return {
+          ok: true,
+          job_id: existing.id,
+          status: existing.status,
+          deduped: true,
+        };
+      }
       if (existing) {
-        return { ok: true, job_id: existing.id, status: existing.status, deduped: true };
+        // Purana job cancelled/failed hai — key retire karo, fresh insert retry.
+        await sb
+          .from("device_jobs")
+          .update({ idempotency_key: null })
+          .eq("id", existing.id);
+        continue;
       }
     }
     return { ok: false, code: 500, error: msg };
   }
-
-  return { ok: true, job_id: job.id, status: "queued" };
+  return { ok: false, code: 500, error: "Job create failed." };
 }
 
 /**
