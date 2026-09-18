@@ -266,16 +266,46 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
     return <Msg msg={error ?? "No data"} />;
 
   const pct = Math.min(100, Math.round((data.cap_used / data.cap_max) * 100));
+  const devPaused = data.device.status === "paused";
+
+  const togglePause = async () => {
+    try {
+      const r = await fetch(`/api/devices/${deviceId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: devPaused ? "resume" : "pause" }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? r.status);
+      window.location.reload();
+    } catch (e) {
+      setRunMsg(e instanceof Error ? e.message : "Failed");
+    }
+  };
 
   return (
     <div className="space-y-4">
       <div className={cardCls}>
         <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
           <div className="font-semibold text-sm">Abhi chalao</div>
-          <button onClick={runNow} disabled={running} className={btnPrimary}>
-            {running ? "Bhej raha hai…" : "Run Now"}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={togglePause}
+              className="text-xs px-3 py-2 rounded-lg border border-line text-slate-300 hover:border-slate-400"
+              title={devPaused ? "Device wapas active karo" : "Device ko rok do (koi job nahi milega)"}
+            >
+              {devPaused ? "Resume device" : "Pause device"}
+            </button>
+            <button onClick={runNow} disabled={running || devPaused} className={btnPrimary}>
+              {running ? "Bhej raha hai…" : "Run Now"}
+            </button>
+          </div>
         </div>
+        {devPaused && (
+          <p className="text-xs text-amber-300 mb-1">
+            Device paused hai — pehle Resume karo, tabhi Run Now chalega.
+          </p>
+        )}
         {runMsg && <p className="text-xs text-slate-300">{runMsg}</p>}
         <p className="text-xs text-slate-500 mt-1">
           "Jab chahe" trigger — cap (4/48h) yahan bhi lagu hota hai.
