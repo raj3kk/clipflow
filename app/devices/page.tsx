@@ -160,6 +160,43 @@ interface ScheduleResp {
   last_run: { finished_at: string; status: string } | null;
 }
 
+// Schedule time: UI layer 12-hour AM/PM <-> backend 24h "HH:MM" (backend/storage untouched)
+function to12h(t24: string): string {
+  const m = t24.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return t24;
+  let h = parseInt(m[1], 10);
+  const min = m[2];
+  if (h > 23) return t24;
+  const ampm = h >= 12 ? "PM" : "AM";
+  h = h % 12;
+  if (h === 0) h = 12;
+  return `${h}:${min} ${ampm}`;
+}
+
+function to24h(s: string): string | null {
+  const t = s.trim();
+  // "7:30 PM", "7 PM", "07:30 pm", "7.30 p.m." wagera
+  const m = t.match(/^(\d{1,2})(?::(\d{1,2}))?\s*([aApP])\s*\.?\s*([mM])\s*\.?$/);
+  if (m) {
+    let h = parseInt(m[1], 10);
+    const min = m[2] ? parseInt(m[2], 10) : 0;
+    if (h < 1 || h > 12 || min > 59) return null;
+    const pm = m[3].toLowerCase() === "p";
+    if (pm && h !== 12) h += 12;
+    if (!pm && h === 12) h = 0;
+    return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+  }
+  // fallback: seedha 24h "HH:MM" bhi chalega
+  const m2 = t.match(/^(\d{1,2}):(\d{2})$/);
+  if (m2) {
+    const h = parseInt(m2[1], 10);
+    const min = parseInt(m2[2], 10);
+    if (h > 23 || min > 59) return null;
+    return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+  }
+  return null;
+}
+
 function fmtNextRun(iso: string): string {
   const ms = new Date(iso).getTime() - Date.now();
   if (ms <= 0) return "bas abhi (kuch minute me)";
@@ -171,8 +208,11 @@ function fmtNextRun(iso: string): string {
   return (
     d.toLocaleDateString("en-IN", { day: "numeric", month: "short" }) +
     ", " +
-    d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) +
-    " (andaza)"
+    d.toLocaleTimeString("en-IN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    }) + " (andaza)"
   );
 }
 
@@ -182,7 +222,7 @@ function ScheduleCard({ deviceId }: { deviceId: string }) {
   );
   const [mode, setMode] = useState<"interval" | "times">("interval");
   const [hours, setHours] = useState("12");
-  const [times, setTimes] = useState("09:00, 21:00");
+  const [times, setTimes] = useState("9:00 AM, 9:00 PM");
   const [msg, setMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
@@ -191,7 +231,8 @@ function ScheduleCard({ deviceId }: { deviceId: string }) {
     if (data?.schedule) {
       setMode(data.schedule.mode);
       if (data.schedule.interval_hours) setHours(String(data.schedule.interval_hours));
-      if (data.schedule.times) setTimes(data.schedule.times.join(", "));
+      if (data.schedule.times)
+        setTimes(data.schedule.times.map(to12h).join(", "));
     }
   }, [data]);
 
@@ -202,12 +243,29 @@ function ScheduleCard({ deviceId }: { deviceId: string }) {
     setMsg(null);
     try {
       const en = nextEnabled ?? enabled;
+      // UI me 12-hour AM/PM, backend ko hamesha 24h "HH:MM"
+      let times24: string[] | null = null;
+      if (mode === "times") {
+        const parsed = times
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean)
+          .map(to24h);
+        if (parsed.some((p) => p === null)) {
+          setMsg(
+            "Time samajh nahi aaya — 12-hour AM/PM me likho, jaise: 7:30 PM, 9 AM"
+          );
+          setSaving(false);
+          return;
+        }
+        times24 = parsed as string[];
+      }
       const schedule =
         mode === "interval"
           ? { mode, interval_hours: parseInt(hours, 10), enabled: en }
           : {
               mode,
-              times: times.split(",").map((t) => t.trim()).filter(Boolean),
+              times: times24,
               timezone: "Asia/Calcutta",
               enabled: en,
             };
@@ -256,7 +314,7 @@ function ScheduleCard({ deviceId }: { deviceId: string }) {
   const current = data?.schedule
     ? data.schedule.mode === "interval"
       ? `har ${data.schedule.interval_hours} ghante`
-      : `roz ${(data.schedule.times ?? []).join(", ")} baje`
+      : `roz ${(data.schedule.times ?? []).map(to12h).join(", ")} baje`
     : "…";
 
   return (
@@ -340,12 +398,12 @@ function ScheduleCard({ deviceId }: { deviceId: string }) {
         </label>
       ) : (
         <label className="text-xs text-slate-400 block mb-3">
-          Times (24h, comma se alag):{" "}
+          Times (12-hour, AM/PM, comma se alag):{" "}
           <input
             value={times}
             onChange={(e) => setTimes(e.target.value)}
-            placeholder="09:00, 21:00"
-            className="bg-black/30 border border-line rounded-lg px-2 py-1 w-48 text-slate-200 ml-1"
+            placeholder="7:30 AM, 7:30 PM"
+            className="bg-black/30 border border-line rounded-lg px-2 py-1 w-52 text-slate-200 ml-1"
           />
         </label>
       )}
