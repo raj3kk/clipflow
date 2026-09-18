@@ -81,6 +81,16 @@ export async function POST(
     if (i > 20) break;
   }
 
+  // LOCKED RULE: screenshot proof ke bina succeeded NAHI.
+  // 400 → job state unchanged rehta hai (dispatched/running),
+  // taaki phone screenshots ke saath dobara report kar sake.
+  if (status === "succeeded" && shotPaths.length === 0) {
+    return NextResponse.json(
+      { error: "screenshots_required", detail: "succeeded needs >=1 screenshot proof." },
+      { status: 400 }
+    );
+  }
+
   const now = new Date().toISOString();
   await sb.from("device_jobs").update({ status }).eq("id", job.id);
   await sb.from("job_runs").insert({
