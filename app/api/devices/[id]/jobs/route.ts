@@ -77,7 +77,7 @@ export async function GET(
     .select("id", { count: "exact", head: true })
     .eq("user_id", user.id)
     .gte("created_at", since)
-    .in("status", ["queued", "dispatched", "running", "succeeded"]);
+    .in("status", ["queued", "dispatched", "running", "succeeded", "failed"]);
 
   return NextResponse.json({
     device,

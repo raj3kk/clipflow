@@ -46,7 +46,7 @@ export async function createAutomationJob(
     .select("id", { count: "exact", head: true })
     .eq("user_id", userId)
     .gte("created_at", since)
-    .in("status", ["queued", "dispatched", "running", "succeeded"]);
+    .in("status", ["queued", "dispatched", "running", "succeeded", "failed"]);
   if (countErr) {
     return { ok: false, code: 500, error: countErr.message };
   }

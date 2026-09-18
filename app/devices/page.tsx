@@ -596,8 +596,56 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
   const [ovVideo, setOvVideo] = useState("");
   const [ovCaption, setOvCaption] = useState("");
   const [ovWhop, setOvWhop] = useState("");
+  const [pipe, setPipe] = useState<{
+    id: string;
+    status: string;
+    note: string | null;
+  } | null>(null);
 
-  const runNow = async () => {
+  const fetchPipeline = async () => {
+    try {
+      const r = await fetch(`/api/devices/${deviceId}/run-pipeline`);
+      const d = await r.json();
+      if (r.ok) setPipe(d.request ?? null);
+    } catch {
+      /* silent */
+    }
+  };
+
+  // Mount pe latest request dikhao; pending/running pe poll karo.
+  useEffect(() => {
+    fetchPipeline();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!pipe || (pipe.status !== "pending" && pipe.status !== "running"))
+      return;
+    const t = setInterval(fetchPipeline, 15000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pipe?.id, pipe?.status]);
+
+  /** Run Now → POORA pipeline (campaign → render → IG → Whop). Koi manual field nahi. */
+  const runPipeline = async () => {
+    setRunning(true);
+    setRunMsg(null);
+    try {
+      const r = await fetch(`/api/devices/${deviceId}/run-pipeline`, {
+        method: "POST",
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? r.status);
+      setRunMsg("Pipeline shuru ho gayi.");
+      await fetchPipeline();
+    } catch (e) {
+      setRunMsg(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  /** Purana direct run-now (manual clip override) — testing ke liye Advanced me. */
+  const runNowManual = async () => {
     setRunning(true);
     setRunMsg(null);
     try {
@@ -671,7 +719,7 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
               {devPaused ? "Resume device" : "Pause device"}
             </button>
             <button
-              onClick={runNow}
+              onClick={runPipeline}
               disabled={running || devPaused}
               className={`${btnPrimary} text-base px-8 py-3 font-bold`}
             >
@@ -685,35 +733,68 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
           </p>
         )}
         {runMsg && <p className="text-xs text-slate-300">{runMsg}</p>}
-        <button
-          onClick={() => setShowClip((v) => !v)}
-          className="text-xs text-slate-500 underline mt-2"
-        >
-          {showClip ? "Clip fields chhupao" : "Is baar alag clip chalana hai?"}
-        </button>
-        {showClip && (
-          <div className="mt-2 space-y-2">
-            <input
-              value={ovVideo}
-              onChange={(e) => setOvVideo(e.target.value)}
-              placeholder="Video URL (khali = saved clip package)"
-              className="w-full bg-black/30 border border-line rounded-lg px-3 py-2 text-xs text-slate-200"
-            />
-            <textarea
-              value={ovCaption}
-              onChange={(e) => setOvCaption(e.target.value)}
-              rows={2}
-              placeholder="Caption + hashtags (khali = saved)"
-              className="w-full bg-black/30 border border-line rounded-lg px-3 py-2 text-xs text-slate-200"
-            />
-            <input
-              value={ovWhop}
-              onChange={(e) => setOvWhop(e.target.value)}
-              placeholder="Whop submit URL (khali = saved)"
-              className="w-full bg-black/30 border border-line rounded-lg px-3 py-2 text-xs text-slate-200"
-            />
+        {pipe && (
+          <div
+            className={`mt-2 text-xs px-3 py-2 rounded-lg inline-block ${
+              pipe.status === "done"
+                ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40"
+                : pipe.status === "failed"
+                  ? "bg-red-500/15 text-red-300 border border-red-500/40"
+                  : pipe.status === "running"
+                    ? "bg-blue-500/15 text-blue-300 border border-blue-500/40"
+                    : "bg-amber-500/15 text-amber-300 border border-amber-500/40"
+            }`}
+          >
+            Pipeline:{" "}
+            {pipe.status === "pending" &&
+              "pending — watcher 5 min me uthayega"}
+            {pipe.status === "running" && "chal rahi hai…"}
+            {pipe.status === "done" && "poori ho gayi ✓"}
+            {pipe.status === "failed" && "fail hui"}
+            {pipe.note && ` (${pipe.note})`}
           </div>
         )}
+        <details className="mt-2">
+          <summary className="text-xs text-slate-500 underline cursor-pointer">
+            Advanced (testing ke liye purana direct run-now)
+          </summary>
+          <button
+            onClick={() => setShowClip((v) => !v)}
+            className="text-xs text-slate-500 underline mt-2 block"
+          >
+            {showClip ? "Clip fields chhupao" : "Is baar alag clip chalana hai?"}
+          </button>
+          {showClip && (
+            <div className="mt-2 space-y-2">
+              <input
+                value={ovVideo}
+                onChange={(e) => setOvVideo(e.target.value)}
+                placeholder="Video URL (khali = saved clip package)"
+                className="w-full bg-black/30 border border-line rounded-lg px-3 py-2 text-xs text-slate-200"
+              />
+              <textarea
+                value={ovCaption}
+                onChange={(e) => setOvCaption(e.target.value)}
+                rows={2}
+                placeholder="Caption + hashtags (khali = saved)"
+                className="w-full bg-black/30 border border-line rounded-lg px-3 py-2 text-xs text-slate-200"
+              />
+              <input
+                value={ovWhop}
+                onChange={(e) => setOvWhop(e.target.value)}
+                placeholder="Whop submit URL (khali = saved)"
+                className="w-full bg-black/30 border border-line rounded-lg px-3 py-2 text-xs text-slate-200"
+              />
+            </div>
+          )}
+          <button
+            onClick={runNowManual}
+            disabled={running || devPaused}
+            className="text-xs mt-2 px-3 py-2 rounded-lg border border-line text-slate-300 hover:border-slate-400"
+          >
+            {running ? "Bhej raha hai…" : "Purana Run Now bhejo (direct job)"}
+          </button>
+        </details>
         <p className="text-xs text-slate-500 mt-1">
           "Jab chahe" trigger — cap (4/24h) yahan bhi lagu hota hai.
         </p>
