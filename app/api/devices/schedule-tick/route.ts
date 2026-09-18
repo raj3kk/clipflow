@@ -61,12 +61,12 @@ export async function POST(req: Request) {
 
   const now = Date.now();
   const created: Array<Record<string, unknown>> = [];
-  let skipped = 0;
+  const skipped: Array<Record<string, unknown>> = [];
 
   for (const d of (devices ?? []) as TickDevice[]) {
     const sched = (d.schedule_json ?? {}) as Record<string, unknown>;
     if (sched.enabled === false) {
-      skipped++;
+      skipped.push({ device_id: d.id, reason: "schedule_disabled" });
       continue;
     }
     const slots: string[] = [];
@@ -80,7 +80,7 @@ export async function POST(req: Request) {
       try {
         cur = tzParts(tz);
       } catch {
-        skipped++;
+        skipped.push({ device_id: d.id, reason: "bad_timezone" });
         continue;
       }
       for (const t of times) {
@@ -96,11 +96,16 @@ export async function POST(req: Request) {
       // interval mode — epoch-anchored periods (deterministic, race-safe)
       const h = Number(sched.interval_hours ?? 12);
       if (!Number.isInteger(h) || h < 1 || h > 48) {
-        skipped++;
+        skipped.push({ device_id: d.id, reason: "bad_interval" });
         continue;
       }
       const period = Math.floor(now / (h * 3600 * 1000));
       slots.push(`sched:${d.id}:int:${period}`);
+    }
+
+    if (slots.length === 0) {
+      skipped.push({ device_id: d.id, reason: "no_due_slot" });
+      continue;
     }
 
     for (const key of slots) {
@@ -114,8 +119,15 @@ export async function POST(req: Request) {
       );
       if (res.ok && !res.deduped) {
         created.push({ device_id: d.id, job_id: res.job_id, slot: key });
+      } else if (res.ok) {
+        skipped.push({ device_id: d.id, reason: "already_queued_for_slot", slot: key });
       } else {
-        skipped++;
+        skipped.push({
+          device_id: d.id,
+          reason: res.code === 429 ? "cap_reached" : res.code === 409 ? "device_not_active" : "create_failed",
+          detail: res.error,
+          slot: key,
+        });
       }
     }
   }
