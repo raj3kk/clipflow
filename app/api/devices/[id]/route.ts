@@ -64,3 +64,63 @@ export async function PATCH(
   }
   return NextResponse.json({ ok: true, device: data });
 }
+
+/**
+ * Device hatao (dashboard).
+ *
+ * DELETE /api/devices/:id  → { ok: true }
+ *
+ * Device row delete hoti hai; device_jobs + job_runs FK cascade se
+ * apne aap delete hote hain. Screenshots (device-shots bucket) best-effort
+ * saaf hote hain — fail ho to device delete phir bhi hota hai.
+ * Phone pe app ka local enroll bana rehta hai — dobara link karne ke
+ * liye app data clear karke naya code se enroll karo.
+ */
+export async function DELETE(
+  _req: Request,
+  { params }: { params: { id: string } }
+) {
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "Not signed in." }, { status: 401 });
+  }
+  const sb = getSupabase();
+  if (!sb || !isConfigured()) {
+    return NextResponse.json({ error: "Supabase not configured." }, { status: 503 });
+  }
+
+  const { data: device } = await sb
+    .from("devices")
+    .select("id")
+    .eq("id", params.id)
+    .eq("user_id", user.id)
+    .single();
+  if (!device) {
+    return NextResponse.json({ error: "Unknown device." }, { status: 404 });
+  }
+
+  // screenshots best-effort saaf karo (bucket private hai)
+  try {
+    const { data: files } = await sb.storage
+      .from("device-shots")
+      .list(params.id, { limit: 1000 });
+    const paths = (files ?? [])
+      .filter((f) => f.name)
+      .map((f) => `${params.id}/${f.name}`);
+    if (paths.length > 0) {
+      await sb.storage.from("device-shots").remove(paths);
+    }
+  } catch {
+    /* best-effort — device delete phir bhi hoga */
+  }
+
+  const { error } = await sb
+    .from("devices")
+    .delete()
+    .eq("id", params.id)
+    .eq("user_id", user.id);
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true });
+}

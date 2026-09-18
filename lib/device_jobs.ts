@@ -94,9 +94,10 @@ export async function createAutomationJob(
 }
 
 /**
- * Schedule JSON validate karo. Do modes:
- *   { mode: "interval", interval_hours: 1..48 }
- *   { mode: "times", times: ["HH:MM", ...] (1..8), timezone: "Asia/Calcutta" }
+ * Schedule JSON validate karo. Do modes (+ enabled flag):
+ *   { mode: "interval", interval_hours: 1..48, enabled?: bool }
+ *   { mode: "times", times: ["HH:MM", ...] (1..8), timezone: "Asia/Calcutta", enabled?: bool }
+ * enabled=false → schedule band (koi auto job nahi; sirf manual Run Now).
  */
 export function validateSchedule(s: unknown): {
   ok: boolean;
@@ -107,12 +108,13 @@ export function validateSchedule(s: unknown): {
     return { ok: false, error: "schedule must be an object." };
   }
   const o = s as Record<string, unknown>;
+  const enabled = o.enabled === undefined ? true : o.enabled === true;
   if (o.mode === "interval") {
     const h = Number(o.interval_hours);
     if (!Number.isInteger(h) || h < 1 || h > 48) {
       return { ok: false, error: "interval_hours must be an integer 1..48." };
     }
-    return { ok: true, schedule: { mode: "interval", interval_hours: h } };
+    return { ok: true, schedule: { mode: "interval", interval_hours: h, enabled } };
   }
   if (o.mode === "times") {
     if (!Array.isArray(o.times) || o.times.length < 1 || o.times.length > 8) {
@@ -129,9 +131,9 @@ export function validateSchedule(s: unknown): {
     } catch {
       return { ok: false, error: `bad timezone: ${tz}.` };
     }
-    return { ok: true, schedule: { mode: "times", times: o.times, timezone: tz } };
+    return { ok: true, schedule: { mode: "times", times: o.times, timezone: tz, enabled } };
   }
   return { ok: false, error: 'mode must be "interval" or "times".' };
 }
 
-export const DEFAULT_SCHEDULE = { mode: "interval", interval_hours: 12 };
+export const DEFAULT_SCHEDULE = { mode: "interval", interval_hours: 12, enabled: true };

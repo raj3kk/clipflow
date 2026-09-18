@@ -150,10 +150,33 @@ interface Schedule {
   interval_hours?: number;
   times?: string[];
   timezone?: string;
+  enabled?: boolean;
+}
+
+interface ScheduleResp {
+  schedule: Schedule;
+  next_run: string | null;
+  last_run: { finished_at: string; status: string } | null;
+}
+
+function fmtNextRun(iso: string): string {
+  const ms = new Date(iso).getTime() - Date.now();
+  if (ms <= 0) return "bas abhi (kuch minute me)";
+  const m = Math.round(ms / 60000);
+  if (m < 60) return `${m} min me (andaza)`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h} ghante ${m % 60} min me (andaza)`;
+  const d = new Date(iso);
+  return (
+    d.toLocaleDateString("en-IN", { day: "numeric", month: "short" }) +
+    ", " +
+    d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) +
+    " (andaza)"
+  );
 }
 
 function ScheduleCard({ deviceId }: { deviceId: string }) {
-  const { data, loading, reload } = useApi<{ schedule: Schedule }>(
+  const { data, loading, reload } = useApi<ScheduleResp>(
     `/api/devices/${deviceId}/schedule`
   );
   const [mode, setMode] = useState<"interval" | "times">("interval");
@@ -161,6 +184,7 @@ function ScheduleCard({ deviceId }: { deviceId: string }) {
   const [times, setTimes] = useState("09:00, 21:00");
   const [msg, setMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
 
   useEffect(() => {
     if (data?.schedule) {
@@ -170,17 +194,21 @@ function ScheduleCard({ deviceId }: { deviceId: string }) {
     }
   }, [data]);
 
-  const save = async () => {
+  const enabled = data?.schedule?.enabled !== false;
+
+  const save = async (nextEnabled?: boolean) => {
     setSaving(true);
     setMsg(null);
     try {
+      const en = nextEnabled ?? enabled;
       const schedule =
         mode === "interval"
-          ? { mode, interval_hours: parseInt(hours, 10) }
+          ? { mode, interval_hours: parseInt(hours, 10), enabled: en }
           : {
               mode,
               times: times.split(",").map((t) => t.trim()).filter(Boolean),
               timezone: "Asia/Calcutta",
+              enabled: en,
             };
       const r = await fetch(`/api/devices/${deviceId}/schedule`, {
         method: "PUT",
@@ -189,7 +217,33 @@ function ScheduleCard({ deviceId }: { deviceId: string }) {
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? r.status);
-      setMsg("Schedule save ho gaya — phone agli run se naya schedule uthayega.");
+      setMsg(
+        en
+          ? "Schedule save ho gaya — server agle slot pe khud job banayega."
+          : "Schedule band kar diya — ab koi auto run nahi hoga (sirf Run Now)."
+      );
+      reload();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeSchedule = async () => {
+    if (!confirmDel) {
+      setConfirmDel(true);
+      return;
+    }
+    setConfirmDel(false);
+    setSaving(true);
+    try {
+      const r = await fetch(`/api/devices/${deviceId}/schedule`, {
+        method: "DELETE",
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? r.status);
+      setMsg("Schedule hata diya — ab koi auto run nahi hoga (sirf Run Now).");
       reload();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Failed");
@@ -206,11 +260,58 @@ function ScheduleCard({ deviceId }: { deviceId: string }) {
 
   return (
     <div className={cardCls}>
-      <div className="font-semibold text-sm mb-1">Schedule</div>
-      <p className="text-xs text-slate-400 mb-3">
-        Abhi: <span className="text-slate-200">{loading ? "…" : current}</span>
-        {" "}(phone WorkManager se chalata hai; Doze me ±10 min drift normal hai)
-      </p>
+      <div className="flex items-center justify-between mb-1">
+        <div className="font-semibold text-sm">Schedule</div>
+        {data && (
+          <span
+            className={`text-[11px] px-2 py-0.5 rounded-full border ${
+              enabled
+                ? "bg-emerald-400/15 text-emerald-300 border-emerald-400/30"
+                : "bg-slate-400/15 text-slate-400 border-slate-400/30"
+            }`}
+          >
+            {enabled ? "chalu hai" : "band hai"}
+          </span>
+        )}
+      </div>
+
+      {/* status: automation shuru hui ya sirf schedule hai */}
+      <div className="text-xs text-slate-400 mb-3 space-y-1">
+        <div>
+          Abhi: <span className="text-slate-200">{loading ? "…" : current}</span>
+          {enabled && data?.next_run && (
+            <>
+              {" "}· agla run:{" "}
+              <span className="text-slate-200 font-medium">
+                {fmtNextRun(data.next_run)}
+              </span>
+            </>
+          )}
+        </div>
+        <div>
+          {data?.last_run ? (
+            <>
+              Pichhli automation:{" "}
+              <span className="text-slate-200">
+                {age(data.last_run.finished_at)} pehle ({data.last_run.status})
+              </span>
+            </>
+          ) : (
+            !loading && (
+              <span className="text-amber-300">
+                Abhi tak koi automation nahi chali — sirf schedule hai.
+              </span>
+            )
+          )}
+        </div>
+        {!enabled && !loading && (
+          <div className="text-slate-500">
+            Schedule band hai — server koi auto job nahi banayega. Sirf ▶ Run
+            Now se chalega.
+          </div>
+        )}
+      </div>
+
       <div className="flex gap-2 mb-3">
         {(["interval", "times"] as const).map((m) => (
           <button
@@ -247,10 +348,86 @@ function ScheduleCard({ deviceId }: { deviceId: string }) {
           />
         </label>
       )}
-      <button onClick={save} disabled={saving} className={btnPrimary}>
-        {saving ? "Save…" : "Schedule save karo"}
-      </button>
+      <div className="flex gap-2 flex-wrap items-center">
+        <button onClick={() => save()} disabled={saving} className={btnPrimary}>
+          {saving ? "Save…" : "Schedule save karo"}
+        </button>
+        {data && (
+          <button
+            onClick={() => save(!enabled)}
+            disabled={saving}
+            className="text-xs px-3 py-2 rounded-lg border border-line text-slate-300 hover:border-slate-400"
+          >
+            {enabled ? "Band karo" : "Chalu karo"}
+          </button>
+        )}
+        <button
+          onClick={removeSchedule}
+          onBlur={() => setConfirmDel(false)}
+          disabled={saving}
+          className={`text-xs px-3 py-2 rounded-lg border ${
+            confirmDel
+              ? "border-red-500 text-red-300 bg-red-500/10"
+              : "border-line text-slate-500 hover:text-red-300 hover:border-red-500/50"
+          }`}
+        >
+          {confirmDel ? "Pakka? dobara dabao" : "Schedule hatao"}
+        </button>
+      </div>
       {msg && <p className="text-xs text-slate-300 mt-2">{msg}</p>}
+      <p className="text-[11px] text-slate-600 mt-2">
+        Server har 15 min me schedule check karke khud job banata hai; phone
+        poll karke utha leta hai (FCM ho to turant).
+      </p>
+    </div>
+  );
+}
+
+function DeleteDeviceButton({ deviceId }: { deviceId: string }) {
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const del = async () => {
+    if (!confirm) {
+      setConfirm(true);
+      return;
+    }
+    setConfirm(false);
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await fetch(`/api/devices/${deviceId}`, { method: "DELETE" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? r.status);
+      window.location.reload();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Failed");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={`${cardCls} border-red-500/20`}>
+      <div className="font-semibold text-sm mb-1 text-red-300">Danger zone</div>
+      <p className="text-xs text-slate-500 mb-3">
+        Device hatega to uski saari jobs, runs aur screenshots bhi delete ho
+        jayenge. Phone pe app ka data bana rahega — dobara link karne ke liye
+        app data clear karke naya code se enroll karo.
+      </p>
+      <button
+        onClick={del}
+        onBlur={() => setConfirm(false)}
+        disabled={busy}
+        className={`text-xs px-4 py-2 rounded-lg border ${
+          confirm
+            ? "border-red-500 text-red-200 bg-red-500/15"
+            : "border-red-500/40 text-red-300 hover:bg-red-500/10"
+        }`}
+      >
+        {busy ? "Hata raha hai…" : confirm ? "Pakka? dobara dabao" : "Device hatao"}
+      </button>
+      {msg && <p className="text-xs text-red-300 mt-2">{msg}</p>}
     </div>
   );
 }
@@ -440,6 +617,8 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
           )}
         </div>
       ))}
+
+      <DeleteDeviceButton deviceId={deviceId} />
     </div>
   );
 }
