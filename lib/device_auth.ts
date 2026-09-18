@@ -72,12 +72,11 @@ export async function getDeviceIdentity(req: Request): Promise<DeviceIdentity> {
   return { deviceId: data.id, userId: data.user_id, device: data };
 }
 
-/** Har device request pe last_seen update (fire-and-forget). */
-export async function touchDevice(deviceId: string) {
+/** Har device request pe last_seen update (fire-and-forget). app_version mile to wo bhi. */
+export async function touchDevice(deviceId: string, appVersion?: string | null) {
   const sb = getSupabase();
   if (!sb) return;
-  await sb
-    .from("devices")
-    .update({ last_seen: new Date().toISOString() })
-    .eq("id", deviceId);
+  const patch: Record<string, string> = { last_seen: new Date().toISOString() };
+  if (appVersion) patch.app_version = appVersion;
+  await sb.from("devices").update(patch).eq("id", deviceId);
 }

@@ -95,9 +95,12 @@ export async function createAutomationJob(
 
 /**
  * Schedule JSON validate karo. Do modes (+ enabled flag):
- *   { mode: "interval", interval_hours: 1..48, enabled?: bool }
- *   { mode: "times", times: ["HH:MM", ...] (1..8), timezone: "Asia/Calcutta", enabled?: bool }
+ *   { mode: "interval", interval_hours: 1..48, enabled?: bool, clip?: {...} }
+ *   { mode: "times", times: ["HH:MM", ...] (1..8), timezone: "Asia/Calcutta", enabled?: bool, clip?: {...} }
  * enabled=false → schedule band (koi auto job nahi; sirf manual Run Now).
+ * clip (optional) = automation ka "clip package":
+ *   { video_url, caption, whop_submit_url } — schedule Run Now dono isi se
+ *   workflow steps banate hain. Yahan sirf passthrough (validate workflow me).
  */
 export function validateSchedule(s: unknown): {
   ok: boolean;
@@ -109,12 +112,23 @@ export function validateSchedule(s: unknown): {
   }
   const o = s as Record<string, unknown>;
   const enabled = o.enabled === undefined ? true : o.enabled === true;
+  // clip package passthrough (shape validateClipPackage me hota hai)
+  const clip =
+    typeof o.clip === "object" && o.clip !== null
+      ? (o.clip as Record<string, unknown>)
+      : undefined;
   if (o.mode === "interval") {
     const h = Number(o.interval_hours);
     if (!Number.isInteger(h) || h < 1 || h > 48) {
       return { ok: false, error: "interval_hours must be an integer 1..48." };
     }
-    return { ok: true, schedule: { mode: "interval", interval_hours: h, enabled } };
+    const schedule: Record<string, unknown> = {
+      mode: "interval",
+      interval_hours: h,
+      enabled,
+    };
+    if (clip) schedule.clip = clip;
+    return { ok: true, schedule };
   }
   if (o.mode === "times") {
     if (!Array.isArray(o.times) || o.times.length < 1 || o.times.length > 8) {
@@ -131,7 +145,14 @@ export function validateSchedule(s: unknown): {
     } catch {
       return { ok: false, error: `bad timezone: ${tz}.` };
     }
-    return { ok: true, schedule: { mode: "times", times: o.times, timezone: tz, enabled } };
+    const schedule: Record<string, unknown> = {
+      mode: "times",
+      times: o.times,
+      timezone: tz,
+      enabled,
+    };
+    if (clip) schedule.clip = clip;
+    return { ok: true, schedule };
   }
   return { ok: false, error: 'mode must be "interval" or "times".' };
 }

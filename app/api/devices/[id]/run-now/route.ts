@@ -2,17 +2,21 @@ import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { getSupabase, isConfigured } from "@/lib/supabase";
 import { createAutomationJob } from "@/lib/device_jobs";
+import { validateClipPackage, buildAutomationPayload } from "@/lib/v2_workflow";
 import { sendWakePush } from "@/lib/fcm";
 
 /**
  * "Jab chahe" trigger — user dashboard se turant automation chalaye.
  *
  * POST /api/devices/:id/run-now
- *   { type?, payload? }  →  { job_id, via: "fcm"|"poll", fcm_sent }
+ *   { type?, video_url?, caption?, whop_submit_url? }  →  { job_id, via, ... }
  *
+ * Clip package: body me aaye to wahi, nahi to device ke schedule_json.clip
+ * (website pe saved). Bina valid clip package ke job nahi banta — pehle
+ * website pe "Clip package" bharna hota hai.
  * Job turant queue hota hai (cap check ke saath), phir phone ko FCM
  * wake bhejne ki koshish hoti hai. FCM na ho to phone agle poll pe
- * (max apne schedule interval me) job utha lega — via:"poll".
+ * (max ~15 min) job utha lega — via:"poll".
  */
 export async function POST(
   req: Request,
@@ -35,12 +39,47 @@ export async function POST(
   }
   const type = String(body.type ?? "automation");
 
+  // Clip package: body override → device saved → error
+  const { data: dev } = await sb
+    .from("devices")
+    .select("schedule_json, fcm_token")
+    .eq("id", params.id)
+    .eq("user_id", user.id)
+    .single();
+  if (!dev) {
+    return NextResponse.json({ error: "Unknown device." }, { status: 404 });
+  }
+  const savedClip = (dev.schedule_json as Record<string, unknown> | null)?.clip;
+  const clipInput =
+    body.video_url || body.caption || body.whop_submit_url
+      ? {
+          video_url: body.video_url,
+          caption: body.caption,
+          whop_submit_url: body.whop_submit_url,
+        }
+      : savedClip;
+  const clipCheck = validateClipPackage(clipInput);
+  if (!clipCheck.ok || !clipCheck.pkg) {
+    return NextResponse.json(
+      {
+        error:
+          "Clip package set nahi hai. Device card me video URL + caption + Whop URL bharo, ya yahan do.",
+        detail: clipCheck.error,
+      },
+      { status: 400 }
+    );
+  }
+  const payload = {
+    ...buildAutomationPayload(clipCheck.pkg),
+    trigger: "manual",
+  };
+
   const res = await createAutomationJob(
     sb,
     user.id,
     params.id,
     type,
-    (body.payload as Record<string, unknown>) ?? {},
+    payload,
     { run_after: new Date().toISOString() }
   );
   if (!res.ok) {
@@ -52,13 +91,9 @@ export async function POST(
   let via: "fcm" | "poll" = "poll";
   let fcm_sent = false;
   let reason: string | undefined;
-  const { data: device } = await sb
-    .from("devices")
-    .select("fcm_token")
-    .eq("id", params.id)
-    .single();
-  if (device?.fcm_token) {
-    const r = await sendWakePush(device.fcm_token);
+  const fcmToken = (dev as { fcm_token?: string | null })?.fcm_token;
+  if (fcmToken) {
+    const r = await sendWakePush(fcmToken);
     via = r.via;
     fcm_sent = r.sent;
     reason = r.reason;

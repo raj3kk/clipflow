@@ -43,6 +43,7 @@ export async function GET(
     .from("device_jobs")
     .select("id, type, status, attempts, created_at")
     .eq("device_id", params.id)
+    .neq("status", "cancelled")
     .order("created_at", { ascending: false })
     .limit(20);
 

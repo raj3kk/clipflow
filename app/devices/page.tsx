@@ -151,6 +151,7 @@ interface Schedule {
   times?: string[];
   timezone?: string;
   enabled?: boolean;
+  clip?: { video_url?: string; caption?: string; whop_submit_url?: string };
 }
 
 interface ScheduleResp {
@@ -383,6 +384,159 @@ function ScheduleCard({ deviceId }: { deviceId: string }) {
   );
 }
 
+function ClipPackageCard({ deviceId }: { deviceId: string }) {
+  const { data, reload } = useApi<ScheduleResp>(
+    `/api/devices/${deviceId}/schedule`
+  );
+  const [videoUrl, setVideoUrl] = useState("");
+  const [caption, setCaption] = useState("");
+  const [whopUrl, setWhopUrl] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const c = data?.schedule?.clip;
+    if (c) {
+      setVideoUrl(c.video_url ?? "");
+      setCaption(c.caption ?? "");
+      setWhopUrl(c.whop_submit_url ?? "");
+    }
+  }, [data]);
+
+  const hasClip = !!(data?.schedule?.clip?.video_url && data?.schedule?.clip?.caption);
+
+  const save = async () => {
+    setSaving(true);
+    setMsg(null);
+    try {
+      const cur = data?.schedule ?? { mode: "interval", interval_hours: 12, enabled: true };
+      const schedule = {
+        ...cur,
+        clip: {
+          video_url: videoUrl.trim(),
+          caption: caption.trim(),
+          whop_submit_url: whopUrl.trim() || "https://whop.com/content-rewards/",
+        },
+      };
+      const r = await fetch(`/api/devices/${deviceId}/schedule`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ schedule }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? r.status);
+      setMsg("Clip package save ho gaya — schedule aur Run Now dono yahi istemal karenge.");
+      reload();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className={cardCls}>
+      <div className="flex items-center justify-between mb-1">
+        <div className="font-semibold text-sm">Clip package</div>
+        <span
+          className={`text-[11px] px-2 py-0.5 rounded-full border ${
+            hasClip
+              ? "bg-emerald-400/15 text-emerald-300 border-emerald-400/30"
+              : "bg-amber-400/15 text-amber-300 border-amber-400/30"
+          }`}
+        >
+          {hasClip ? "set hai" : "set nahi hai"}
+        </span>
+      </div>
+      <p className="text-xs text-slate-500 mb-3">
+        Automation isi se chalti hai: ready video (direct MP4 link), caption +
+        hashtags (campaign requirement ke hisab se), aur Whop campaign ka submit
+        page. Bina iske schedule slot aane pe job nahi banegi.
+      </p>
+      <label className="text-xs text-slate-400 block mb-2">
+        Video URL (direct MP4 link):
+        <input
+          value={videoUrl}
+          onChange={(e) => setVideoUrl(e.target.value)}
+          placeholder="https://…/clip.mp4"
+          className="mt-1 w-full bg-black/30 border border-line rounded-lg px-3 py-2 text-slate-200"
+        />
+      </label>
+      <label className="text-xs text-slate-400 block mb-2">
+        Caption + hashtags:
+        <textarea
+          value={caption}
+          onChange={(e) => setCaption(e.target.value)}
+          rows={3}
+          placeholder="Hook line… #tag1 #tag2"
+          className="mt-1 w-full bg-black/30 border border-line rounded-lg px-3 py-2 text-slate-200"
+        />
+      </label>
+      <label className="text-xs text-slate-400 block mb-3">
+        Whop submit page URL:
+        <input
+          value={whopUrl}
+          onChange={(e) => setWhopUrl(e.target.value)}
+          placeholder="https://whop.com/content-rewards/"
+          className="mt-1 w-full bg-black/30 border border-line rounded-lg px-3 py-2 text-slate-200"
+        />
+      </label>
+      <button onClick={save} disabled={saving} className={btnPrimary}>
+        {saving ? "Save…" : "Clip package save karo"}
+      </button>
+      {msg && <p className="text-xs text-slate-300 mt-2">{msg}</p>}
+    </div>
+  );
+}
+
+function CancelJobButton({
+  deviceId,
+  jobId,
+  onDone,
+}: {
+  deviceId: string;
+  jobId: string;
+  onDone: () => void;
+}) {
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const cancel = async () => {
+    if (!confirm) {
+      setConfirm(true);
+      return;
+    }
+    setConfirm(false);
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/devices/${deviceId}/jobs/${jobId}`, {
+        method: "DELETE",
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? r.status);
+      onDone();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Cancel failed");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={cancel}
+      onBlur={() => setConfirm(false)}
+      disabled={busy}
+      className={`text-xs px-3 py-1.5 rounded-lg border ${
+        confirm
+          ? "border-red-500 text-red-200 bg-red-500/15"
+          : "border-line text-slate-400 hover:border-red-500/50 hover:text-red-300"
+      }`}
+    >
+      {busy ? "Hata raha…" : confirm ? "Pakka? dobara dabao" : "Hatao"}
+    </button>
+  );
+}
+
 function DeleteDeviceButton({ deviceId }: { deviceId: string }) {
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -433,20 +587,30 @@ function DeleteDeviceButton({ deviceId }: { deviceId: string }) {
 }
 
 function JobsPanel({ deviceId }: { deviceId: string }) {
-  const { data, loading, error } = useApi<JobsResp>(
+  const { data, loading, error, reload } = useApi<JobsResp>(
     `/api/devices/${deviceId}/jobs`
   );
   const [runMsg, setRunMsg] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  const [showClip, setShowClip] = useState(false);
+  const [ovVideo, setOvVideo] = useState("");
+  const [ovCaption, setOvCaption] = useState("");
+  const [ovWhop, setOvWhop] = useState("");
 
   const runNow = async () => {
     setRunning(true);
     setRunMsg(null);
     try {
+      const body: Record<string, string> = { type: "automation" };
+      if (ovVideo.trim() || ovCaption.trim() || ovWhop.trim()) {
+        body.video_url = ovVideo.trim();
+        body.caption = ovCaption.trim();
+        body.whop_submit_url = ovWhop.trim();
+      }
       const r = await fetch(`/api/devices/${deviceId}/run-now`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "automation" }),
+        body: JSON.stringify(body),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? r.status);
@@ -521,6 +685,35 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
           </p>
         )}
         {runMsg && <p className="text-xs text-slate-300">{runMsg}</p>}
+        <button
+          onClick={() => setShowClip((v) => !v)}
+          className="text-xs text-slate-500 underline mt-2"
+        >
+          {showClip ? "Clip fields chhupao" : "Is baar alag clip chalana hai?"}
+        </button>
+        {showClip && (
+          <div className="mt-2 space-y-2">
+            <input
+              value={ovVideo}
+              onChange={(e) => setOvVideo(e.target.value)}
+              placeholder="Video URL (khali = saved clip package)"
+              className="w-full bg-black/30 border border-line rounded-lg px-3 py-2 text-xs text-slate-200"
+            />
+            <textarea
+              value={ovCaption}
+              onChange={(e) => setOvCaption(e.target.value)}
+              rows={2}
+              placeholder="Caption + hashtags (khali = saved)"
+              className="w-full bg-black/30 border border-line rounded-lg px-3 py-2 text-xs text-slate-200"
+            />
+            <input
+              value={ovWhop}
+              onChange={(e) => setOvWhop(e.target.value)}
+              placeholder="Whop submit URL (khali = saved)"
+              className="w-full bg-black/30 border border-line rounded-lg px-3 py-2 text-xs text-slate-200"
+            />
+          </div>
+        )}
         <p className="text-xs text-slate-500 mt-1">
           "Jab chahe" trigger — cap (4/24h) yahan bhi lagu hota hai.
         </p>
@@ -542,6 +735,8 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
       )}
 
       <ScheduleCard deviceId={deviceId} />
+
+      <ClipPackageCard deviceId={deviceId} />
 
       <div className={cardCls}>
         <div className="flex items-center justify-between mb-2">
@@ -579,7 +774,16 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
                 {fmtDT(j.created_at)} · attempt {j.attempts}
               </span>
             </div>
-            <StatusPill status={j.run?.status ?? j.status} />
+            <div className="flex items-center gap-2">
+              {j.status === "queued" && (
+                <CancelJobButton
+                  deviceId={deviceId}
+                  jobId={j.id}
+                  onDone={() => reload()}
+                />
+              )}
+              <StatusPill status={j.run?.status ?? j.status} />
+            </div>
           </div>
           {j.run?.result?.vars?.reel_url && (
             <div className="mt-2 text-sm">

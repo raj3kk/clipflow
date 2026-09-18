@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabase, isConfigured } from "@/lib/supabase";
 import { requireWorkerAuth } from "@/lib/worker_auth";
 import { createAutomationJob } from "@/lib/device_jobs";
+import { validateClipPackage, buildAutomationPayload } from "@/lib/v2_workflow";
 
 /**
  * Schedule ticker — server khud schedule pe automation job banata hai.
@@ -22,6 +23,10 @@ const GRACE_MIN = 20;
 interface TickDevice {
   id: string;
   user_id: string;
+  device_name: string;
+  app_version: string | null;
+  status: string;
+  last_seen: string | null;
   schedule_json: Record<string, unknown> | null;
 }
 
@@ -56,12 +61,44 @@ export async function POST(req: Request) {
 
   const { data: devices } = await sb
     .from("devices")
-    .select("id, user_id, schedule_json")
+    .select("id, user_id, device_name, app_version, status, last_seen, schedule_json")
     .eq("status", "active");
 
   const now = Date.now();
   const created: Array<Record<string, unknown>> = [];
   const skipped: Array<Record<string, unknown>> = [];
+  const diag: Array<Record<string, unknown>> = [];
+
+  for (const d of (devices ?? []) as TickDevice[]) {
+    // Diagnostics: phone kab online aaya, kaunsa app version, kitne queued
+    try {
+      const { data: q } = await sb
+        .from("device_jobs")
+        .select("id, created_at")
+        .eq("device_id", d.id)
+        .eq("status", "queued")
+        .order("created_at", { ascending: true });
+      const oldest = (q ?? [])[0]?.created_at ?? null;
+      diag.push({
+        device_id: d.id,
+        name: d.device_name,
+        app_version: d.app_version,
+        last_seen: d.last_seen,
+        last_seen_min_ago:
+          d.last_seen != null
+            ? Math.round((now - new Date(d.last_seen).getTime()) / 60000)
+            : null,
+        queued: (q ?? []).length,
+        oldest_queued_at: oldest,
+        oldest_queued_min_ago:
+          oldest != null
+            ? Math.round((now - new Date(oldest).getTime()) / 60000)
+            : null,
+      });
+    } catch {
+      /* diag best-effort */
+    }
+  }
 
   for (const d of (devices ?? []) as TickDevice[]) {
     const sched = (d.schedule_json ?? {}) as Record<string, unknown>;
@@ -108,13 +145,26 @@ export async function POST(req: Request) {
       continue;
     }
 
+    // Clip package bina automation adhuri hai — pehle website pe set karo
+    const clipCheck = validateClipPackage(sched.clip);
+    if (!clipCheck.ok || !clipCheck.pkg) {
+      skipped.push({
+        device_id: d.id,
+        reason: "no_clip_package",
+        detail:
+          "Clip package set nahi hai (video URL + caption + Whop URL). Device card me 'Clip package' bharo.",
+      });
+      continue;
+    }
+    const payload = buildAutomationPayload(clipCheck.pkg);
+
     for (const key of slots) {
       const res = await createAutomationJob(
         sb,
         d.user_id,
         d.id,
         "automation",
-        { trigger: "schedule", slot: key },
+        { ...payload, trigger: "schedule", slot: key },
         { idempotency_key: key }
       );
       if (res.ok && !res.deduped) {
@@ -135,6 +185,7 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ticked_at: new Date().toISOString(),
     devices_checked: (devices ?? []).length,
+    devices: diag,
     created,
     skipped,
   });

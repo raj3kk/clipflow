@@ -24,7 +24,7 @@ export async function GET(req: Request) {
     );
   }
 
-  await touchDevice(ident.deviceId);
+  await touchDevice(ident.deviceId, req.headers.get("x-app-version"));
 
   // 1) Heartbeat-timeout reconciliation: 15 min se zyada purane
   //    dispatched/running jobs wapas queue (attempts bache hon to),
