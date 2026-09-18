@@ -713,10 +713,14 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
           <div className="flex gap-2">
             <button
               onClick={togglePause}
-              className="text-xs px-3 py-3 rounded-lg border border-line text-slate-300 hover:border-slate-400"
-              title={devPaused ? "Device wapas active karo" : "Device ko rok do (koi job nahi milega)"}
+              className={`text-base px-8 py-3 rounded-xl font-bold border transition ${
+                devPaused
+                  ? "bg-amber-500/15 border-amber-400/60 text-amber-300 hover:bg-amber-500/25"
+                  : "bg-emerald-500/15 border-emerald-400/60 text-emerald-300 hover:bg-emerald-500/25"
+              }`}
+              title={devPaused ? "Device wapas active karo — automation chalegi" : "Device offline karo — koi job nahi milega"}
             >
-              {devPaused ? "Resume device" : "Pause device"}
+              {devPaused ? "\u{1F4A4} Offline — Online karo" : "\u{1F7E2} Online — Offline karo"}
             </button>
             <button
               onClick={runPipeline}
