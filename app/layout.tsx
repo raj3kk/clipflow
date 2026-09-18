@@ -1,7 +1,18 @@
-import Nav from "./components/Nav";
-import UserBadge from "./components/UserBadge";
-import ModeToggle from "./components/ModeToggle";
+import { Space_Grotesk, Inter } from "next/font/google";
+import AppShell from "./components/AppShell";
 import "./globals.css";
+
+const display = Space_Grotesk({
+  subsets: ["latin"],
+  variable: "--font-display",
+  display: "swap",
+});
+
+const sans = Inter({
+  subsets: ["latin"],
+  variable: "--font-sans",
+  display: "swap",
+});
 
 export const metadata = {
   title: "ClipFlow — Whop Clipping Automation",
@@ -10,25 +21,9 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${display.variable} ${sans.variable}`}>
       <body>
-        <div className="min-h-screen flex">
-          <aside className="w-56 shrink-0 border-r border-line bg-panel p-5 flex flex-col gap-2">
-            <div className="mb-4">
-              <div className="text-xl font-bold text-accent">ClipFlow</div>
-              <div className="text-xs text-slate-400">Whop clipping autopilot</div>
-            </div>
-            <div className="mb-4">
-              <ModeToggle />
-            </div>
-            <Nav />
-            <UserBadge />
-            <div className="text-xs text-slate-500">
-              Target: 4/day · ≥4h spacing
-            </div>
-          </aside>
-          <main className="flex-1 p-8 max-w-6xl">{children}</main>
-        </div>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

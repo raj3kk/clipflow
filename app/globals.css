@@ -2,6 +2,163 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============ ClipFlow "Magic Premium" design system ============ */
+
 body {
-  @apply bg-ink text-slate-100;
+  @apply bg-void text-slate-100 font-sans antialiased;
+  background-image:
+    radial-gradient(1200px 600px at 85% -10%, rgba(139, 92, 246, 0.14), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(34, 211, 238, 0.08), transparent 60%);
+  background-attachment: fixed;
+}
+
+::selection {
+  background: rgba(217, 70, 239, 0.35);
+}
+
+/* Slim magic scrollbar */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #8b5cf6, #d946ef);
+  border-radius: 99px;
+  border: 2px solid #050310;
+}
+
+@layer components {
+  /* ---- glass card: har section ka base ---- */
+  .glass {
+    @apply rounded-2xl border border-white/10 bg-white/[0.045] backdrop-blur-xl;
+    box-shadow: 0 8px 32px -12px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+  }
+  .glass-hover:hover {
+    transform: translateY(-3px);
+    border-color: rgba(139, 92, 246, 0.45);
+    box-shadow: 0 0 24px -6px rgba(139, 92, 246, 0.55), 0 18px 40px -16px rgba(0, 0, 0, 0.7);
+  }
+
+  /* ---- magic gradient text ---- */
+  .magic-text {
+    background: linear-gradient(100deg, #c4b5fd 0%, #e879f9 45%, #67e8f9 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* ---- primary magic button (shimmer sweep) ---- */
+  .btn-magic {
+    @apply relative overflow-hidden rounded-xl px-4 py-2 text-sm font-semibold text-white;
+    background: linear-gradient(100deg, #7c3aed, #c026d3 55%, #0891b2);
+    background-size: 160% 100%;
+    box-shadow: 0 0 20px -6px rgba(168, 85, 247, 0.7), 0 8px 20px -8px rgba(0, 0, 0, 0.7);
+    transition: background-position 0.4s ease, transform 0.15s ease, box-shadow 0.25s ease;
+  }
+  .btn-magic:hover {
+    background-position: 90% 0;
+    box-shadow: 0 0 28px -4px rgba(217, 70, 239, 0.8), 0 8px 24px -8px rgba(0, 0, 0, 0.7);
+  }
+  .btn-magic:active { transform: scale(0.97); }
+  .btn-magic:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-magic::after {
+    content: "";
+    position: absolute;
+    top: 0; bottom: 0; width: 45%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+    transform: translateX(-120%) skewX(-18deg);
+    animation: shimmer 2.8s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  /* ---- ghost / danger buttons ---- */
+  .btn-ghost-magic {
+    @apply rounded-xl border border-white/12 bg-white/[0.04] px-3 py-1.5 text-xs text-slate-200 backdrop-blur;
+    transition: border-color 0.2s ease, background 0.2s ease, transform 0.15s ease;
+  }
+  .btn-ghost-magic:hover { border-color: rgba(139, 92, 246, 0.6); background: rgba(139, 92, 246, 0.12); }
+  .btn-ghost-magic:active { transform: scale(0.96); }
+  .btn-ghost-magic:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-danger-magic {
+    @apply rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs text-red-200;
+    transition: background 0.2s ease, transform 0.15s ease;
+  }
+  .btn-danger-magic:hover { background: rgba(239, 68, 68, 0.2); }
+  .btn-danger-magic:active { transform: scale(0.96); }
+  .btn-danger-magic:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ---- magic input ---- */
+  .input-magic {
+    @apply mt-1 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-100 backdrop-blur;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .input-magic::placeholder { color: #475569; }
+  .input-magic:focus {
+    outline: none;
+    border-color: rgba(168, 85, 247, 0.7);
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.18), 0 0 16px -4px rgba(139, 92, 246, 0.5);
+  }
+
+  /* ---- sidebar / tab item ---- */
+  .tab-item {
+    @apply relative flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm text-slate-300;
+    transition: color 0.2s ease, background 0.2s ease, transform 0.15s ease;
+  }
+  .tab-item:hover { @apply text-white bg-white/[0.06]; }
+  .tab-item:active { transform: scale(0.98); }
+  .tab-item.active {
+    @apply text-white font-semibold;
+    background: linear-gradient(100deg, rgba(124, 58, 237, 0.35), rgba(192, 38, 211, 0.22));
+    box-shadow: inset 0 0 0 1px rgba(168, 85, 247, 0.45), 0 0 18px -6px rgba(139, 92, 246, 0.7);
+  }
+  .tab-item.active::before {
+    content: "";
+    position: absolute;
+    left: -13px; top: 20%; bottom: 20%; width: 3px;
+    border-radius: 99px;
+    background: linear-gradient(180deg, #a78bfa, #e879f9, #67e8f9);
+    box-shadow: 0 0 12px rgba(217, 70, 239, 0.9);
+    animation: pulse-glow 2.4s ease-in-out infinite;
+  }
+  .tab-item.active svg { filter: drop-shadow(0 0 6px rgba(217, 70, 239, 0.8)); }
+
+  /* ---- bottom mobile tab ---- */
+  .mtab {
+    @apply relative flex flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[10px] text-slate-400 min-w-[60px];
+    transition: color 0.2s ease, transform 0.15s ease;
+  }
+  .mtab:active { transform: scale(0.92); }
+  .mtab.active { @apply text-white; }
+  .mtab.active .mdot {
+    position: absolute; top: -2px;
+    width: 22px; height: 3px; border-radius: 99px;
+    background: linear-gradient(90deg, #a78bfa, #e879f9, #67e8f9);
+    box-shadow: 0 0 10px rgba(217, 70, 239, 0.9);
+  }
+
+  /* ---- message / banner ---- */
+  .msg-magic {
+    @apply mb-4 rounded-xl border border-white/10 bg-white/[0.05] p-3 text-sm text-slate-200 backdrop-blur;
+  }
+
+  /* ---- stat shimmer number ---- */
+  .stat-glow { text-shadow: 0 0 24px rgba(139, 92, 246, 0.65); }
+
+  /* ---- divider glow ---- */
+  .glow-line {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(168, 85, 247, 0.5), rgba(103, 232, 249, 0.4), transparent);
+  }
+}
+
+/* page enter animation */
+.page-enter > * { animation: fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.page-enter > *:nth-child(2) { animation-delay: 0.05s; }
+.page-enter > *:nth-child(3) { animation-delay: 0.1s; }
+.page-enter > *:nth-child(4) { animation-delay: 0.15s; }
+.page-enter > *:nth-child(5) { animation-delay: 0.2s; }
+.page-enter > *:nth-child(6) { animation-delay: 0.25s; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }

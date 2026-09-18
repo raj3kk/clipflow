@@ -4,28 +4,69 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppMode, MODE_EVENT, getMode } from "./mode";
+import {
+  IconActivity,
+  IconBell,
+  IconCampaign,
+  IconClips,
+  IconConnections,
+  IconDashboard,
+  IconPhone,
+  IconPost,
+  IconSettings,
+  IconShield,
+  IconUser,
+} from "./icons";
+import type { JSX } from "react";
 
-/** v1 = purana server-side ClipFlow · v2 = phone automation (sab separate) */
-export const NAV_V1 = [
-  { href: "/", label: "Dashboard" },
-  { href: "/campaigns", label: "Campaigns" },
-  { href: "/clips", label: "Clips" },
-  { href: "/post-submit", label: "Post & Submit" },
-  { href: "/connections", label: "Connections" },
-  { href: "/interventions", label: "Interventions" },
-  { href: "/activity", label: "Activity" },
-  { href: "/settings", label: "Settings" },
+export interface TabItem {
+  href: string;
+  label: string;
+  icon: (p: { className?: string }) => JSX.Element;
+}
+
+/** v1 = server-side ClipFlow · v2 = phone automation (sab separate) */
+export const NAV_V1: TabItem[] = [
+  { href: "/", label: "Dashboard", icon: IconDashboard },
+  { href: "/campaigns", label: "Campaigns", icon: IconCampaign },
+  { href: "/clips", label: "Clips", icon: IconClips },
+  { href: "/post-submit", label: "Post & Submit", icon: IconPost },
+  { href: "/connections", label: "Connections", icon: IconConnections },
+  { href: "/interventions", label: "Interventions", icon: IconBell },
+  { href: "/activity", label: "Activity", icon: IconActivity },
+  { href: "/settings", label: "Settings", icon: IconSettings },
 ];
 
-export const NAV_V2 = [
-  { href: "/devices", label: "Devices" },
+export const NAV_V2: TabItem[] = [
+  { href: "/devices", label: "Devices", icon: IconPhone },
 ];
 
 /** backward-compat: purana NAV export v1 hai */
 export const NAV = NAV_V1;
 
-const ADMIN_ITEM = { href: "/admin", label: "Admin" };
+export const PROFILE_ITEM: TabItem = {
+  href: "/profile",
+  label: "Profile",
+  icon: IconUser,
+};
 
+const ADMIN_ITEM: TabItem = { href: "/admin", label: "Admin", icon: IconShield };
+
+export function isActiveTab(href: string, path: string) {
+  return href === "/" ? path === "/" : path.startsWith(href);
+}
+
+function TabLink({ item, active }: { item: TabItem; active: boolean }) {
+  const Icon = item.icon;
+  return (
+    <Link href={item.href} className={`tab-item ${active ? "active" : ""}`}>
+      <Icon />
+      <span className="truncate">{item.label}</span>
+    </Link>
+  );
+}
+
+/** Desktop sidebar nav — saare tabs + profile + admin */
 export default function Nav() {
   const path = usePathname();
   const [showAdmin, setShowAdmin] = useState(false);
@@ -47,25 +88,42 @@ export default function Nav() {
   }, []);
 
   const base = mode === "v2" ? NAV_V2 : NAV_V1;
-  const items = showAdmin ? [...base, ADMIN_ITEM] : base;
   return (
     <nav className="flex flex-col gap-1">
-      {items.map((n) => {
-        const active = n.href === "/" ? path === "/" : path.startsWith(n.href);
-        return (
-          <Link
-            key={n.href}
-            href={n.href}
-            className={`rounded-lg px-3 py-2 text-sm transition-colors ${
-              active
-                ? "bg-accent/15 text-accent font-semibold"
-                : "text-slate-300 hover:bg-line hover:text-white"
-            }`}
-          >
-            {n.label}
-          </Link>
-        );
-      })}
+      {base.map((n) => (
+        <TabLink key={n.href} item={n} active={isActiveTab(n.href, path)} />
+      ))}
+      <div className="glow-line my-2" />
+      <TabLink
+        item={PROFILE_ITEM}
+        active={isActiveTab(PROFILE_ITEM.href, path)}
+      />
+      {showAdmin && (
+        <TabLink item={ADMIN_ITEM} active={isActiveTab(ADMIN_ITEM.href, path)} />
+      )}
     </nav>
   );
+}
+
+/** Mobile "More" sheet ke liye poori tab list */
+export function useAllTabs() {
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [mode, setModeState] = useState<AppMode>("v1");
+  useEffect(() => {
+    setModeState(getMode());
+    const h = (e: Event) =>
+      setModeState((e as CustomEvent<AppMode>).detail ?? getMode());
+    window.addEventListener(MODE_EVENT, h);
+    return () => window.removeEventListener(MODE_EVENT, h);
+  }, []);
+  useEffect(() => {
+    fetch("/api/admin/is-owner")
+      .then((r) => r.json())
+      .then((j) => setShowAdmin(Boolean(j.isOwner)))
+      .catch(() => {});
+  }, []);
+  const base = mode === "v2" ? NAV_V2 : NAV_V1;
+  const tabs = [...base, PROFILE_ITEM];
+  if (showAdmin) tabs.push(ADMIN_ITEM);
+  return { tabs, mode };
 }

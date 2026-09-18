@@ -1,26 +1,18 @@
-// Shared UI primitives — dark-theme card style used across all tabs.
+// Shared UI primitives — "magic premium" theme. Saare tabs isi se style lete hain.
 
-export const inputCls =
-  "mt-1 w-full rounded-lg bg-ink border border-line p-2 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-accent";
+export const inputCls = "input-magic";
 
-export const btnPrimary =
-  "rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-ink hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed";
+export const btnPrimary = "btn-magic";
 
-export const btnGhost =
-  "rounded-lg border border-line px-3 py-1.5 text-xs text-slate-300 hover:bg-line disabled:opacity-50";
+export const btnGhost = "btn-ghost-magic";
 
-export const btnDanger =
-  "rounded-lg border border-red-500/40 px-3 py-1.5 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-50";
+export const btnDanger = "btn-danger-magic";
 
-export const cardCls = "rounded-xl border border-line bg-panel p-5";
+export const cardCls = "glass p-5";
 
 export function Msg({ msg }: { msg: string }) {
   if (!msg) return null;
-  return (
-    <div className="mb-4 rounded-lg border border-line bg-panel p-3 text-sm text-slate-200">
-      {msg}
-    </div>
-  );
+  return <div className="msg-magic">{msg}</div>;
 }
 
 export function fmtDT(s: string | null | undefined): string {

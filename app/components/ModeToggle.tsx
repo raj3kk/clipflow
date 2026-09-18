@@ -5,10 +5,10 @@ import { useRouter } from "next/navigation";
 import { AppMode, MODE_EVENT, getMode, setMode } from "./mode";
 
 /**
- * Upar v1/v2 toggle — ek login se dono models.
- * v1: purana server-side automation · v2: phone (app cookies wala system)
+ * v1/v2 segmented toggle — ek login se dono models.
+ * v1: server-side automation · v2: phone automation (sab separate)
  */
-export default function ModeToggle() {
+export default function ModeToggle({ compact }: { compact?: boolean }) {
   const [mode, setModeState] = useState<AppMode>("v1");
   const router = useRouter();
 
@@ -24,7 +24,6 @@ export default function ModeToggle() {
     if (m === mode) return;
     setMode(m);
     setModeState(m);
-    // mode ke hisaab se sahi landing page
     router.push(m === "v2" ? "/devices" : "/");
   };
 
@@ -32,27 +31,41 @@ export default function ModeToggle() {
     <button
       onClick={() => pick(m)}
       title={title}
-      className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+      className={`relative flex-1 rounded-lg px-3 py-1.5 font-display text-xs font-bold tracking-wide transition-all duration-300 ${
         mode === m
-          ? "bg-accent text-black"
-          : "text-slate-400 hover:text-slate-200"
+          ? "text-white"
+          : "text-slate-500 hover:text-slate-300"
       }`}
+      style={
+        mode === m
+          ? {
+              background: "linear-gradient(100deg,#7c3aed,#c026d3)",
+              boxShadow: "0 0 16px -4px rgba(217,70,239,0.8)",
+            }
+          : undefined
+      }
     >
       {label}
     </button>
   );
 
   return (
-    <div>
-      <div className="flex rounded-lg border border-line bg-black/30 p-1 gap-1">
+    <div className={compact ? "" : "grid gap-1.5"}>
+      <div
+        className={`flex gap-1 rounded-xl border border-white/10 bg-black/40 p-1 backdrop-blur ${
+          compact ? "w-[104px]" : ""
+        }`}
+      >
         {btn("v1", "v1", "Server automation (campaigns → clips → post)")}
         {btn("v2", "v2", "Phone automation (app cookies, schedule, Run Now)")}
       </div>
-      <div className="text-[11px] text-slate-500 mt-1.5 leading-snug">
-        {mode === "v1"
-          ? "v1 · server-side clipping automation"
-          : "v2 · phone automation — sara data v1 se separate"}
-      </div>
+      {!compact && (
+        <p className="text-[11px] leading-snug text-slate-500">
+          {mode === "v1"
+            ? "v1 · server-side clipping automation"
+            : "v2 · phone automation — sara data v1 se separate"}
+        </p>
+      )}
     </div>
   );
 }
