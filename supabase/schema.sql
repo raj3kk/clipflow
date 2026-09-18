@@ -347,6 +347,7 @@ create table if not exists devices (
   status text not null default 'active',
   paused_until timestamptz,
   last_seen timestamptz,
+  schedule_json jsonb not null default '{"mode":"interval","interval_hours":12}',
   created_at timestamptz not null default now()
 );
 create index if not exists devices_user_idx on devices (user_id);

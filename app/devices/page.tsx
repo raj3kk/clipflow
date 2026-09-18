@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useApi } from "../components/useApi";
 import SetupBanner from "../components/SetupBanner";
 import StatusPill from "@/lib/status-pill";
@@ -121,10 +121,146 @@ function DeviceCard({ d, onSelect, selected }: { d: Device; onSelect: () => void
   );
 }
 
+interface Schedule {
+  mode: "interval" | "times";
+  interval_hours?: number;
+  times?: string[];
+  timezone?: string;
+}
+
+function ScheduleCard({ deviceId }: { deviceId: string }) {
+  const { data, loading, reload } = useApi<{ schedule: Schedule }>(
+    `/api/devices/${deviceId}/schedule`
+  );
+  const [mode, setMode] = useState<"interval" | "times">("interval");
+  const [hours, setHours] = useState("12");
+  const [times, setTimes] = useState("09:00, 21:00");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (data?.schedule) {
+      setMode(data.schedule.mode);
+      if (data.schedule.interval_hours) setHours(String(data.schedule.interval_hours));
+      if (data.schedule.times) setTimes(data.schedule.times.join(", "));
+    }
+  }, [data]);
+
+  const save = async () => {
+    setSaving(true);
+    setMsg(null);
+    try {
+      const schedule =
+        mode === "interval"
+          ? { mode, interval_hours: parseInt(hours, 10) }
+          : {
+              mode,
+              times: times.split(",").map((t) => t.trim()).filter(Boolean),
+              timezone: "Asia/Calcutta",
+            };
+      const r = await fetch(`/api/devices/${deviceId}/schedule`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ schedule }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? r.status);
+      setMsg("Schedule save ho gaya — phone agli run se naya schedule uthayega.");
+      reload();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const current = data?.schedule
+    ? data.schedule.mode === "interval"
+      ? `har ${data.schedule.interval_hours} ghante`
+      : `roz ${(data.schedule.times ?? []).join(", ")} baje`
+    : "…";
+
+  return (
+    <div className={cardCls}>
+      <div className="font-semibold text-sm mb-1">Schedule</div>
+      <p className="text-xs text-slate-400 mb-3">
+        Abhi: <span className="text-slate-200">{loading ? "…" : current}</span>
+        {" "}(phone WorkManager se chalata hai; Doze me ±10 min drift normal hai)
+      </p>
+      <div className="flex gap-2 mb-3">
+        {(["interval", "times"] as const).map((m) => (
+          <button
+            key={m}
+            onClick={() => setMode(m)}
+            className={`text-xs px-3 py-1.5 rounded-lg border ${
+              mode === m
+                ? "border-accent text-accent"
+                : "border-line text-slate-400"
+            }`}
+          >
+            {m === "interval" ? "Har N ghante" : "Fixed times"}
+          </button>
+        ))}
+      </div>
+      {mode === "interval" ? (
+        <label className="text-xs text-slate-400 block mb-3">
+          Interval (ghante, 1–48):{" "}
+          <input
+            value={hours}
+            onChange={(e) => setHours(e.target.value)}
+            className="bg-black/30 border border-line rounded-lg px-2 py-1 w-20 text-slate-200 ml-1"
+            inputMode="numeric"
+          />
+        </label>
+      ) : (
+        <label className="text-xs text-slate-400 block mb-3">
+          Times (24h, comma se alag):{" "}
+          <input
+            value={times}
+            onChange={(e) => setTimes(e.target.value)}
+            placeholder="09:00, 21:00"
+            className="bg-black/30 border border-line rounded-lg px-2 py-1 w-48 text-slate-200 ml-1"
+          />
+        </label>
+      )}
+      <button onClick={save} disabled={saving} className={btnPrimary}>
+        {saving ? "Save…" : "Schedule save karo"}
+      </button>
+      {msg && <p className="text-xs text-slate-300 mt-2">{msg}</p>}
+    </div>
+  );
+}
+
 function JobsPanel({ deviceId }: { deviceId: string }) {
   const { data, loading, error } = useApi<JobsResp>(
     `/api/devices/${deviceId}/jobs`
   );
+  const [runMsg, setRunMsg] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
+
+  const runNow = async () => {
+    setRunning(true);
+    setRunMsg(null);
+    try {
+      const r = await fetch(`/api/devices/${deviceId}/run-now`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "automation" }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? r.status);
+      setRunMsg(
+        d.via === "fcm"
+          ? "Job ban gaya — phone ko push bhej diya, turant chalega."
+          : `Job ban gaya — phone agle schedule pe uthayega. (${d.reason ?? ""})`
+      );
+    } catch (e) {
+      setRunMsg(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setRunning(false);
+    }
+  };
+
   if (loading) return <p className="text-slate-400 text-sm">Loading jobs…</p>;
   if (error || !data)
     return <Msg msg={error ?? "No data"} />;
@@ -133,6 +269,21 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
 
   return (
     <div className="space-y-4">
+      <div className={cardCls}>
+        <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+          <div className="font-semibold text-sm">Abhi chalao</div>
+          <button onClick={runNow} disabled={running} className={btnPrimary}>
+            {running ? "Bhej raha hai…" : "Run Now"}
+          </button>
+        </div>
+        {runMsg && <p className="text-xs text-slate-300">{runMsg}</p>}
+        <p className="text-xs text-slate-500 mt-1">
+          "Jab chahe" trigger — cap (4/48h) yahan bhi lagu hota hai.
+        </p>
+      </div>
+
+      <ScheduleCard deviceId={deviceId} />
+
       <div className={cardCls}>
         <div className="flex items-center justify-between mb-2">
           <div className="font-semibold text-sm">
