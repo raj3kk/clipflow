@@ -300,36 +300,79 @@ def _is_direct_media(url: str) -> bool:
         any(path.endswith(e) for e in (".mp4", ".mov", ".webm"))
 
 
+def _valid_video(path: str, min_bytes: int = 50 * 1024) -> tuple[bool, str]:
+    """Downloaded file asli video hai ya khaali/toota? (ffprobe check)."""
+    try:
+        sz = os.path.getsize(path)
+    except OSError:
+        return False, "file missing"
+    if sz < min_bytes:
+        return False, f"too small ({sz} bytes)"
+    try:
+        p = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=codec_name,width",
+             "-of", "csv=p=0", path],
+            capture_output=True, timeout=30)
+        info = (p.stdout or b"").decode(errors="replace").strip()
+        if p.returncode == 0 and info:
+            return True, f"{sz} bytes, {info}"
+        return False, f"ffprobe fail ({sz} bytes)"
+    except Exception as ex:  # noqa: BLE001
+        return False, f"ffprobe error: {type(ex).__name__}"
+
+
 def download_section(url: str, start: int, end: int, tmp: str) -> str:
-    """Moment ke aas-paas ka section download karo. Returns video path."""
+    """Moment ke aas-paas ka section download karo. Returns video path.
+
+    HARDENED (2026-09-19): YouTube datacenter IP ko throttle karta hai —
+    isliye (1) poora stderr log hota hai, (2) file validate hoti hai
+    (khaali 262-byte file silent pass nahi hogi), (3) player_client
+    fallback (android→ios→web), (4) exponential backoff.
+    """
     out = os.path.join(tmp, "src.mp4")
     if _is_youtube(url):
         s, e = max(0, start - 10), end + 10
         last: Exception | None = None
+        clients = ["android", "ios", "web"]
         for i in range(3):
             if os.path.exists(out):
                 os.remove(out)
+            client = clients[i % len(clients)]
             cmd = [config.YTDLP, "--no-check-certificate",
                    "--js-runtimes", "node",
-                   "--extractor-args", "youtube:player_client=android",
+                   "--extractor-args", f"youtube:player_client={client}",
                    "--download-sections", f"*{s}-{e}",
                    "--force-keyframes-at-cuts",
                    "-f", "bv*[height<=1080]+ba/b[height<=1080]/b",
                    "--merge-output-format", "mp4",
                    "-o", out, url]
-            log(f"yt-dlp section {s}-{e}s (try {i + 1}/3) …")
+            log(f"yt-dlp section {s}-{e}s (try {i + 1}/3, client={client}) …")
             try:
-                subprocess.run(cmd, check=True, capture_output=True,
-                               timeout=900)
-                last = None
-                break
+                proc = subprocess.run(cmd, check=True, capture_output=True,
+                                      timeout=900)
+                ok, why = _valid_video(out)
+                size_note = f"downloaded: {why}"
+                if ok:
+                    log(size_note)
+                    last = None
+                    break
+                # exit 0 lekin file khaali/tooti — ye silent fail hai
+                err_tail = (proc.stderr or b"").decode(
+                    errors="replace")[-1500:]
+                log(f"yt-dlp try {i + 1}: file invalid ({why}); "
+                    f"stderr: {err_tail.strip()[-800:]}")
+                last = RuntimeError(f"invalid download: {why}")
             except subprocess.CalledProcessError as ex:
-                tail = (ex.stderr or b"").decode(errors="replace")[-200:]
-                log(f"yt-dlp try {i + 1} failed: {tail.strip()[-120:]}")
+                full_err = (ex.stderr or b"").decode(errors="replace")
+                # poora stderr log karo (truncate nahi) — root cause dikhe
+                log(f"yt-dlp try {i + 1} CalledProcessError "
+                    f"(exit {ex.returncode}): {full_err.strip()[-2000:]}")
                 last = ex
-                time.sleep(5 * (i + 1))
+            time.sleep(10 * (2 ** i))  # 10s, 20s, 40s backoff
         if last is not None:
-            raise RuntimeError("yt-dlp section download 3 tries me fail")
+            raise RuntimeError(
+                f"yt-dlp section download 3 tries me fail: {last}")
     elif _is_direct_media(url):
         log("direct media download …")
         subprocess.run(["curl", "-L", "--fail", "--max-time", "570",
@@ -601,8 +644,12 @@ def plan_once(dry_run: bool) -> str:
         try:
             outcome = attempt_campaign(uid, campaign, score, dry_run)
         except Exception as e:  # noqa: BLE001
+            # CalledProcessError ka str() sirf command dikhata hai —
+            # asli wajah (stderr) download_section pehle hi log kar chuka hai.
+            # Yahan cause chain bhi dikhao taaki root cause turant mile.
+            cause = f" | cause: {e.__cause__}" if e.__cause__ else ""
             log(f"campaign {campaign.get('id')} error: "
-                f"{type(e).__name__}: {str(e)[:200]} — agla try")
+                f"{type(e).__name__}: {str(e)[:500]}{cause} — agla try")
             last_skip = "skipped:error"
             continue
         if outcome in ("enqueued", "dryrun"):
