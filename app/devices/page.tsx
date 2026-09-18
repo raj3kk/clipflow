@@ -95,6 +95,11 @@ function EnrollBox({ onDone }: { onDone: () => void }) {
 
 function DeviceCard({ d, onSelect, selected }: { d: Device; onSelect: () => void; selected: boolean }) {
   const paused = d.status === "paused";
+  const fingerprint = d.id.slice(0, 8).toUpperCase();
+  const copyId = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard?.writeText(d.id).catch(() => {});
+  };
   return (
     <button
       onClick={onSelect}
@@ -105,6 +110,25 @@ function DeviceCard({ d, onSelect, selected }: { d: Device; onSelect: () => void
       <div className="flex items-center justify-between gap-2">
         <div className="font-semibold">{d.device_name}</div>
         <StatusPill status={d.status} />
+      </div>
+      {/* device fingerprint — phone app me bhi yahi dikhta hai, match karo */}
+      <div className="mt-2 flex items-center gap-2">
+        <span
+          className="font-mono text-sm font-bold tracking-[0.2em] magic-text"
+          title={d.id}
+        >
+          {fingerprint}
+        </span>
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={copyId}
+          onKeyDown={(e) => e.key === "Enter" && copyId(e as unknown as React.MouseEvent)}
+          className="text-[10px] text-slate-500 hover:text-slate-300 underline underline-offset-2"
+          title="Full device ID copy karo"
+        >
+          ID copy
+        </span>
       </div>
       <div className="text-xs text-slate-400 mt-2 space-y-1">
         <div>
