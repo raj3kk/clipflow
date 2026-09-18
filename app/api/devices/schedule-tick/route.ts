@@ -3,6 +3,7 @@ import { getSupabase, isConfigured } from "@/lib/supabase";
 import { requireWorkerAuth } from "@/lib/worker_auth";
 import { createAutomationJob } from "@/lib/device_jobs";
 import { validateClipPackage, buildAutomationPayload } from "@/lib/v2_workflow";
+import { sendWakePush } from "@/lib/fcm";
 
 /**
  * Schedule ticker — server khud schedule pe automation job banata hai.
@@ -28,6 +29,7 @@ interface TickDevice {
   status: string;
   last_seen: string | null;
   schedule_json: Record<string, unknown> | null;
+  fcm_token: string | null;
 }
 
 function tzParts(tz: string): { ymd: string; minutes: number } {
@@ -61,7 +63,7 @@ export async function POST(req: Request) {
 
   const { data: devices } = await sb
     .from("devices")
-    .select("id, user_id, device_name, app_version, status, last_seen, schedule_json")
+    .select("id, user_id, device_name, app_version, status, last_seen, schedule_json, fcm_token")
     .eq("status", "active");
 
   const now = Date.now();
@@ -169,6 +171,20 @@ export async function POST(req: Request) {
       );
       if (res.ok && !res.deduped) {
         created.push({ device_id: d.id, job_id: res.job_id, slot: key });
+        // Best-effort wake push: phone turant jaag jaye. FCM fail ho to bhi
+        // job queue me safe hai — phone agle poll pe utha lega. Request kabhi fail nahi hogi.
+        if (d.fcm_token) {
+          try {
+            const w = await sendWakePush(d.fcm_token);
+            const entry = created[created.length - 1] as Record<string, unknown>;
+            entry.wake = w.via;
+            if (!w.sent) entry.wake_reason = w.reason;
+          } catch (e) {
+            const entry = created[created.length - 1] as Record<string, unknown>;
+            entry.wake = "poll";
+            entry.wake_reason = e instanceof Error ? e.message : "wake failed";
+          }
+        }
       } else if (res.ok) {
         skipped.push({ device_id: d.id, reason: "already_queued_for_slot", slot: key });
       } else {
