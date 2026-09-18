@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { getSupabase, isConfigured } from "@/lib/supabase";
 import { getRouteUserId } from "@/lib/auth";
+import { getWhopOAuthAppConfig } from "@/lib/whop-oauth";
 
 /** Tells the Connections UI whether Whop OAuth is configured and connected. */
 export async function GET(req: Request) {
-  const configured = !!(
-    process.env.WHOP_OAUTH_CLIENT_ID && process.env.WHOP_OAUTH_CLIENT_SECRET
-  );
+  const appCfg = await getWhopOAuthAppConfig();
+  const configured = !!appCfg;
   const _ident = await getRouteUserId(req);
   if ("error" in _ident || !isConfigured()) {
     return NextResponse.json({ configured, connected: false });

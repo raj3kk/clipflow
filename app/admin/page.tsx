@@ -230,6 +230,110 @@ export default function AdminPage() {
       </div>
 
       <Msg msg={msg} />
+
+      <WhopOAuthCard />
+    </div>
+  );
+}
+
+// ---------- Whop OAuth app credentials (owner pastes here, no Vercel needed) ----------
+const WHOP_REDIRECT_URI = "https://clipflow-webbuilder1.vercel.app/api/oauth/whop/callback";
+
+function WhopOAuthCard() {
+  const [st, setSt] = useState<{ configured: boolean; source: string | null; clientIdMasked: string | null } | null>(null);
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg2, setMsg2] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  async function refresh() {
+    const r = await fetch("/api/admin/whop-oauth");
+    if (r.ok) setSt(await r.json());
+  }
+  useEffect(() => { refresh(); }, []);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setMsg2("");
+    const r = await fetch("/api/admin/whop-oauth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret }),
+    });
+    const j = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (!r.ok) {
+      setMsg2(j.error || "Save nahi hua.");
+      return;
+    }
+    setClientId("");
+    setClientSecret("");
+    setMsg2("Save ho gaya — ab Connections page se “Login with Whop” kaam karega.");
+    await refresh();
+  }
+
+  return (
+    <div className={cardCls}>
+      <h2 className="font-semibold mb-1">Whop OAuth app</h2>
+      <p className="text-sm text-slate-400 mb-3">
+        Status:{" "}
+        {st == null ? "…" : st.configured ? (
+          <span className="text-emerald-300 font-medium">
+            configured {st.source === "env" ? "(Vercel env)" : "(yahan paste kiya hua)"}
+            {st.clientIdMasked ? ` · ${st.clientIdMasked}` : ""}
+          </span>
+        ) : (
+          <span className="text-amber-300 font-medium">not set up yet</span>
+        )}
+      </p>
+      <ol className="text-sm text-slate-400 list-decimal ml-5 grid gap-1 mb-3">
+        <li>
+          <a className="text-sky-400 underline" href="https://whop.com/dashboard" target="_blank" rel="noreferrer">
+            whop.com/dashboard
+          </a>{" "}
+          → Developer → Apps → Create app
+        </li>
+        <li>
+          OAuth tab me ye redirect URI <span className="font-medium text-slate-200">exact</span> daalo:{" "}
+          <code className="text-xs bg-slate-800 px-1 py-0.5 rounded break-all">{WHOP_REDIRECT_URI}</code>{" "}
+          <button
+            className={btnGhost}
+            onClick={() => { navigator.clipboard.writeText(WHOP_REDIRECT_URI); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+          >
+            {copied ? "Copied!" : "Copy"}
+          </button>
+        </li>
+        <li>Permissions me <code className="text-xs bg-slate-800 px-1 rounded">oauth:token_exchange</code> enable karo</li>
+        <li>Client ID (<code className="text-xs bg-slate-800 px-1 rounded">app_…</code>) aur Client Secret neeche paste karke Save dabao</li>
+      </ol>
+      <form onSubmit={save} className="grid gap-2 max-w-md">
+        <input
+          className={inputCls}
+          placeholder="Client ID (app_…)"
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+          autoComplete="off"
+        />
+        <input
+          className={inputCls}
+          type="password"
+          placeholder="Client Secret"
+          value={clientSecret}
+          onChange={(e) => setClientSecret(e.target.value)}
+          autoComplete="new-password"
+        />
+        <div>
+          <button className={btnPrimary} disabled={busy || !clientId.trim() || !clientSecret.trim()}>
+            {busy ? "Saving…" : "Save Whop OAuth app"}
+          </button>
+        </div>
+      </form>
+      <Msg msg={msg2} />
+      <p className="text-xs text-slate-500 mt-2">
+        Secret encrypted save hota hai — kabhi screen ya API se wapas nahi dikhega.
+      </p>
     </div>
   );
 }

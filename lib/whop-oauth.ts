@@ -41,3 +41,54 @@ export function pkceChallenge(verifier: string): string {
 export function oauthState(): string {
   return randomBytes(16).toString("hex");
 }
+
+/**
+ * Resolves the Whop OAuth *app* credentials (client ID + secret).
+ *
+ * Precedence:
+ *   1. Vercel env vars WHOP_OAUTH_CLIENT_ID / WHOP_OAUTH_CLIENT_SECRET.
+ *   2. Owner-pasted credentials stored encrypted in the connections table
+ *      (service=whop, method=oauth-app) via the Admin panel — so the owner
+ *      can finish setup from the UI without touching Vercel.
+ *
+ * Returns null when neither is present. Never logs the secret.
+ */
+export async function getWhopOAuthAppConfig(): Promise<{
+  clientId: string;
+  clientSecret: string;
+  source: "env" | "admin";
+} | null> {
+  const envId = process.env.WHOP_OAUTH_CLIENT_ID?.trim();
+  const envSecret = process.env.WHOP_OAUTH_CLIENT_SECRET?.trim();
+  if (envId && envSecret) {
+    return { clientId: envId, clientSecret: envSecret, source: "env" };
+  }
+  try {
+    const { getSupabase, isConfigured } = await import("./supabase");
+    const { decryptSecret } = await import("./crypto");
+    const sb = getSupabase();
+    if (!sb || !isConfigured()) return null;
+    const { data } = await sb
+      .from("connections")
+      .select("secret_enc")
+      .eq("service", "whop")
+      .eq("method", "oauth-app")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!data?.secret_enc) return null;
+    const s = decryptSecret<{ client_id?: string; client_secret?: string }>(
+      data.secret_enc as string
+    );
+    if (s.client_id && s.client_secret) {
+      return {
+        clientId: s.client_id,
+        clientSecret: s.client_secret,
+        source: "admin",
+      };
+    }
+  } catch {
+    // fall through to null
+  }
+  return null;
+}

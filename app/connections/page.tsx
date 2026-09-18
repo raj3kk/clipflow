@@ -152,8 +152,10 @@ function WhopOAuthForm({ onMsg }: { onMsg: (m: string) => void }) {
       <div className="grid gap-3">
         <p className="text-sm text-slate-400">
           Whop OAuth is <span className="text-amber-300 font-medium">not set up yet</span>:
-          it needs a Whop OAuth app for ClipFlow (one-time setup, ~2 min in the
-          Whop dashboard → Developer settings). Ask in chat for the setup steps.
+          it needs a Whop OAuth app for ClipFlow (one-time setup, ~2 min).
+          Whop dashboard → Developer → naya app banao, phir Client ID + Secret{" "}
+          <a className="text-sky-400 underline" href="/admin">Admin panel</a> me
+          “Whop OAuth app” section me paste karke Save karo.
         </p>
       </div>
     );

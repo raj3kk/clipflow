@@ -7,6 +7,7 @@ import {
   WHOP_TOKEN_URL,
   WHOP_USERINFO_URL,
   whopCallbackUrl,
+  getWhopOAuthAppConfig,
 } from "@/lib/whop-oauth";
 
 /**
@@ -39,12 +40,13 @@ export async function GET(req: Request) {
     return fail("OAuth state mismatch — please try again.");
   }
 
-  const clientId = process.env.WHOP_OAUTH_CLIENT_ID;
-  const clientSecret = process.env.WHOP_OAUTH_CLIENT_SECRET;
+  const appCfg = await getWhopOAuthAppConfig();
   const sb = getSupabase();
-  if (!clientId || !clientSecret || !sb || !isConfigured()) {
+  if (!appCfg || !sb || !isConfigured()) {
     return fail("Server not configured for Whop OAuth.");
   }
+  const clientId = appCfg.clientId;
+  const clientSecret = appCfg.clientSecret;
   // Bind the connection to the signed-in ClipFlow user (multi-user).
   const sessionUser = await getSessionUser();
   if (!sessionUser) {

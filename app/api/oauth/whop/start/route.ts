@@ -7,22 +7,24 @@ import {
   pkceVerifier,
   pkceChallenge,
   oauthState,
+  getWhopOAuthAppConfig,
 } from "@/lib/whop-oauth";
 
 /**
  * Starts the official "Login with Whop" OAuth dance (PKCE).
  * Redirects the user's browser to Whop's consent screen.
- * Only works when WHOP_OAUTH_CLIENT_ID/SECRET are configured
- * (see /api/oauth/whop/status).
+ * Works when the Whop OAuth app is configured via Vercel env vars or
+ * pasted in the Admin panel (see /api/admin/whop-oauth).
  */
 export async function GET(req: Request) {
-  const clientId = process.env.WHOP_OAUTH_CLIENT_ID;
-  if (!clientId || !process.env.WHOP_OAUTH_CLIENT_SECRET) {
+  const appCfg = await getWhopOAuthAppConfig();
+  if (!appCfg) {
     return NextResponse.json(
       { error: "Whop OAuth is not configured on the server yet." },
       { status: 503 }
     );
   }
+  const clientId = appCfg.clientId;
   // Only signed-in users can start OAuth (the connection binds to them).
   const user = await getSessionUser();
   if (!user) {
