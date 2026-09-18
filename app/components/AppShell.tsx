@@ -21,7 +21,7 @@ function Aurora() {
     <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden" aria-hidden>
       <div className="absolute -top-32 -left-24 h-[34rem] w-[34rem] rounded-full bg-magic/25 blur-[110px] animate-drift1" />
       <div className="absolute top-1/3 -right-32 h-[30rem] w-[30rem] rounded-full bg-spell/20 blur-[110px] animate-drift2" />
-      <div className="absolute -bottom-40 left-1/3 h-[32rem] w-[32rem] rounded-full bg-mana/15 blur-[120px] animate-drift3" />
+      <div className="absolute -bottom-40 left-1/3 h-[32rem] w-[32rem] rounded-full bg-mana/20 blur-[120px] animate-drift3" />
       {/* twinkling stars */}
       {[
         "left-[12%] top-[18%]",
@@ -122,7 +122,7 @@ function MobileTabs() {
   return (
     <>
       <nav
-        className="fixed bottom-0 inset-x-0 z-40 md:hidden border-t border-white/10 bg-abyss/85 backdrop-blur-xl"
+        className="fixed bottom-0 inset-x-0 z-40 md:hidden border-t border-white/10 bg-abyss/90 backdrop-blur-xl"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         <div className="flex items-stretch justify-around px-2 pt-1.5 pb-1">
@@ -180,7 +180,7 @@ function MobileTabs() {
                     href={t.href}
                     className={`flex items-center gap-3 rounded-xl border p-3 text-sm transition-all ${
                       active
-                        ? "border-magic/60 bg-magic/15 text-white shadow-magic-sm"
+                        ? "border-magic/60 bg-magic/20 text-white shadow-magic-sm"
                         : "border-white/10 bg-white/[0.04] text-slate-300"
                     }`}
                   >

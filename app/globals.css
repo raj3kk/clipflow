@@ -72,7 +72,7 @@ body {
 
   /* ---- ghost / danger buttons ---- */
   .btn-ghost-magic {
-    @apply rounded-xl border border-white/12 bg-white/[0.04] px-3 py-1.5 text-xs text-slate-200 backdrop-blur;
+    @apply rounded-xl border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-slate-200 backdrop-blur;
     transition: border-color 0.2s ease, background 0.2s ease, transform 0.15s ease;
   }
   .btn-ghost-magic:hover { border-color: rgba(139, 92, 246, 0.6); background: rgba(139, 92, 246, 0.12); }
