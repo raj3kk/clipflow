@@ -4,12 +4,12 @@ import { getSupabase, isConfigured } from "@/lib/supabase";
 
 /**
  * Device ke recent jobs + latest run + screenshot signed URLs (dashboard).
- * Saath me cap meter: last 48h me kitne automations hue (max 4).
+ * Saath me cap meter: last 24h me kitne automations hue (max 4).
  *
  * GET /api/devices/:id/jobs  →  { device, jobs, cap_used, cap_max }
  */
 const CAP_COUNT = 4;
-const CAP_WINDOW_HOURS = 48;
+const CAP_WINDOW_HOURS = 24;
 
 export async function GET(
   req: Request,

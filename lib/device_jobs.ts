@@ -1,12 +1,12 @@
 /**
  * Automation job creation ka shared helper (cap enforcement ke saath).
  *
- * CAP (user-set 2026-09-18): MAX 4 automations per rolling 48 hours (per user).
+ * CAP (user-set 2026-09-18): MAX 4 automations per rolling 24 hours (per user).
  * Cap cross hone pe { capped: true } — phone ko kabhi 5th job milega hi nahi.
  */
 
 export const CAP_COUNT = 4;
-export const CAP_WINDOW_HOURS = 48;
+export const CAP_WINDOW_HOURS = 24;
 
 export type JobCreateResult =
   | { ok: true; job_id: string; status: string; deduped?: boolean }
@@ -37,7 +37,7 @@ export async function createAutomationJob(
     };
   }
 
-  // Cap: last 48h me live jobs gino
+  // Cap: last 24h me live jobs gino
   const since = new Date(
     Date.now() - CAP_WINDOW_HOURS * 3600 * 1000
   ).toISOString();

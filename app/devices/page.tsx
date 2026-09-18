@@ -522,7 +522,7 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
         )}
         {runMsg && <p className="text-xs text-slate-300">{runMsg}</p>}
         <p className="text-xs text-slate-500 mt-1">
-          "Jab chahe" trigger — cap (4/48h) yahan bhi lagu hota hai.
+          "Jab chahe" trigger — cap (4/24h) yahan bhi lagu hota hai.
         </p>
       </div>
 

@@ -14,7 +14,7 @@ import { createAutomationJob } from "@/lib/device_jobs";
  *   - times mode: pichhle 20 min me aaya hua scheduled time → job banao
  *   - interval mode: current epoch-anchored period → job banao (dedupe by key)
  * Idempotency key (`sched:<device>:<slot>`) double-creation rokta hai;
- * cap (4/48h) aur paused-device check createAutomationJob me hota hai.
+ * cap (4/24h) aur paused-device check createAutomationJob me hota hai.
  * Phone har 15 min poll karke queued job utha leta hai (FCM optional).
  */
 const GRACE_MIN = 20;
