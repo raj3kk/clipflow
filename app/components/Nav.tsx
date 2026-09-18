@@ -39,6 +39,7 @@ export const NAV_V1: TabItem[] = [
 
 export const NAV_V2: TabItem[] = [
   { href: "/devices", label: "Devices", icon: IconPhone },
+  { href: "/devices/live", label: "Live", icon: IconActivity },
 ];
 
 /** backward-compat: purana NAV export v1 hai */
@@ -88,18 +89,27 @@ export default function Nav() {
   }, []);
 
   const base = mode === "v2" ? NAV_V2 : NAV_V1;
+  // sabse lamba match jeetta hai — /devices/live pe sirf Live highlight ho
+  const allItems = [...base, PROFILE_ITEM, ...(showAdmin ? [ADMIN_ITEM] : [])];
+  const activeHref = allItems.reduce<string | null>(
+    (best, n) =>
+      isActiveTab(n.href, path) && (best === null || n.href.length > best.length)
+        ? n.href
+        : best,
+    null
+  );
   return (
     <nav className="flex flex-col gap-1">
       {base.map((n) => (
-        <TabLink key={n.href} item={n} active={isActiveTab(n.href, path)} />
+        <TabLink key={n.href} item={n} active={n.href === activeHref} />
       ))}
       <div className="glow-line my-2" />
       <TabLink
         item={PROFILE_ITEM}
-        active={isActiveTab(PROFILE_ITEM.href, path)}
+        active={PROFILE_ITEM.href === activeHref}
       />
       {showAdmin && (
-        <TabLink item={ADMIN_ITEM} active={isActiveTab(ADMIN_ITEM.href, path)} />
+        <TabLink item={ADMIN_ITEM} active={ADMIN_ITEM.href === activeHref} />
       )}
     </nav>
   );

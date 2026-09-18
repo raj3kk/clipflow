@@ -114,6 +114,14 @@ function MobileTabs() {
   const base = mode === "v2" ? NAV_V2 : NAV_V1;
   const primary = base.slice(0, 4);
   const overflow = tabs.filter((t) => !primary.some((p) => p.href === t.href));
+  // sabse lamba match jeetta hai — /devices/live pe sirf Live highlight ho
+  const activeHref = [...primary, ...overflow].reduce<string | null>(
+    (best, t) =>
+      isActiveTab(t.href, path) && (best === null || t.href.length > best.length)
+        ? t.href
+        : best,
+    null
+  );
 
   useEffect(() => {
     setSheetOpen(false);
@@ -128,7 +136,7 @@ function MobileTabs() {
         <div className="flex items-stretch justify-around px-2 pt-1.5 pb-1">
           {primary.map((t) => {
             const Icon = t.icon;
-            const active = isActiveTab(t.href, path);
+            const active = t.href === activeHref;
             return (
               <Link key={t.href} href={t.href} className={`mtab ${active ? "active" : ""}`}>
                 <span className="mdot" />
@@ -173,7 +181,7 @@ function MobileTabs() {
             <div className="grid grid-cols-2 gap-2">
               {overflow.map((t) => {
                 const Icon = t.icon;
-                const active = isActiveTab(t.href, path);
+                const active = t.href === activeHref;
                 return (
                   <Link
                     key={t.href}
