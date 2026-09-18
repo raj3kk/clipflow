@@ -1,7 +1,7 @@
 {
  "campaigns": [
   {
-   "budget_remaining_usd": 14962,
+   "budget_remaining_usd": 7578,
    "caption_template": "Joe Rogan: \"I just ask Perplexity\" instead of sifting through Google searches 🤯 #PerplexityPartner",
    "hashtags": [
     "#PerplexityPartner"
@@ -58,14 +58,14 @@
   "instagram": {
    "account": "@viralshortz_45",
    "status": "ok",
-   "last_verified": "2026-09-18T19:02:00+05:30",
-   "note": "Verified logged in 19:02 IST 09-18 (@viralshortz_45); reel posted 19:06 IST."
+   "last_verified": "2026-09-19T01:26:04+05:30",
+   "note": "Logged in @viralshortz_45; reel posted 01:05 IST 09-19."
   },
   "whop": {
    "account": "flipify.com@gmail.com (Flipify Clips)",
    "status": "ok",
-   "last_verified": "2026-09-18T19:02:00+05:30",
-   "note": "Session RECOVERED 19:02 IST 09-18: logged in as Flipify Clips (flipify.com@gmail.com), Flipify Clips workspace visible. (Was logged out 09-17 18:53 → 09-18 12:42; owner notified 4x, no longer needed.)"
+   "last_verified": "2026-09-19T01:26:04+05:30",
+   "note": "Logged in (Flipify Clips); 'Clip submitted' confirmed 01:10 IST 09-19 (~6 min after post)."
   }
  },
  "guards": [
@@ -85,9 +85,52 @@
   "https://www.instagram.com/p/DdQ37CXBcLY/",
   "https://www.instagram.com/reel/DdQvohrhVDU/",
   "https://www.instagram.com/reel/DdVvHoOB-ar/",
-  "https://www.instagram.com/reel/Ddbjl8DBQsp/"
+  "https://www.instagram.com/reel/Ddbjl8DBQsp/",
+  "https://www.instagram.com/reel/DdcMtTnB3L1/"
  ],
  "runs": [
+  {
+   "id": "run-2026-09-19-perplexity-1",
+   "started_at": "2026-09-19T00:41:44+05:30",
+   "status": "success",
+   "reel_url": "https://www.instagram.com/reel/DdcMtTnB3L1/",
+   "whop_status": "Clip submitted",
+   "error": null,
+   "steps": [
+    {
+     "t": "00:41",
+     "msg": "State read: today reset 2026-09-18 -> 2026-09-19, 0/4 submitted. Campaign: Perplexity JRE Clipping ($1.50/1K, ~$7,578 remaining)."
+    },
+    {
+     "t": "00:45",
+     "msg": "Found perplexity_jre_clip1_vp9.mp4 CORRUPT (moov atom missing). Re-encoded from H.264 master."
+    },
+    {
+     "t": "00:50",
+     "msg": "Frame audit: hook started at 7% from top (below locked 10% rule). Fixed clip_factory.py top-center overlay: margin+60 (5.2%) -> margin+160 (10.4%)."
+    },
+    {
+     "t": "00:52",
+     "msg": "Re-rendered perplexity_jre_clip1_v2.mp4 (33s, 1080x1920, source 29.7-62.7s) with corrected hook; hook verified at 12.1% from top, brand overlay + captions inside frame."
+    },
+    {
+     "t": "00:58",
+     "msg": "VP9 encode complete: perplexity_jre_clip1_v2_vp9.mp4 (33s, 1080x1920, VP9+Opus, 25MB)."
+    },
+    {
+     "t": "01:01",
+     "msg": "Read-only session check: IG logged in (@viralshortz_45); Whop logged in (Flipify Clips workspace); Content Rewards reachable."
+    },
+    {
+     "t": "01:05",
+     "msg": "Reel POSTED: https://www.instagram.com/reel/DdcMtTnB3L1/ — Original 9:16, no crop/trim, exact caption 'Joe Rogan: \"I just ask Perplexity\" instead of sifting through Google searches 🤯 #PerplexityPartner'."
+    },
+    {
+     "t": "01:10",
+     "msg": "Whop CONFIRMED verbatim 'Clip submitted' (~6 min after posting, inside 20-min target / 30-min window). Submissions -> Pending (5) lists 'Perplexity JRE Clipping / CPM / Sep 19, 2026' with Open-on-Instagram href = reel URL. Independent verification task confirmed same."
+    }
+   ]
+  },
   {
    "id": "run-2026-09-18-syberjet-4",
    "started_at": "2026-09-18T19:01:00+05:30",
@@ -424,12 +467,19 @@
    "status": "pending",
    "submitted_at": "2026-09-18",
    "views": null
+  },
+  {
+   "campaign": "Perplexity JRE Clipping",
+   "instagram_url": "https://www.instagram.com/reel/DdcMtTnB3L1/",
+   "status": "pending",
+   "submitted_at": "2026-09-19",
+   "views": null
   }
  ],
  "today": {
-  "date": "2026-09-18",
+  "date": "2026-09-19",
   "submitted": 1,
   "target": 4
  },
- "updated_at": "2026-09-18T19:20:00+05:30"
+ "updated_at": "2026-09-19T01:26:04+05:30"
 }
