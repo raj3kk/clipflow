@@ -9,6 +9,7 @@ export const NAV = [
   { href: "/campaigns", label: "Campaigns" },
   { href: "/clips", label: "Clips" },
   { href: "/post-submit", label: "Post & Submit" },
+  { href: "/devices", label: "Devices" },
   { href: "/connections", label: "Connections" },
   { href: "/interventions", label: "Interventions" },
   { href: "/activity", label: "Activity" },
