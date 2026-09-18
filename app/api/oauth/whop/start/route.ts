@@ -7,6 +7,7 @@ import {
   pkceVerifier,
   pkceChallenge,
   oauthState,
+  oauthNonce,
   getWhopOAuthAppConfig,
 } from "@/lib/whop-oauth";
 
@@ -34,6 +35,7 @@ export async function GET(req: Request) {
   }
   const state = oauthState();
   const verifier = pkceVerifier();
+  const nonce = oauthNonce();
   const redirectUri = whopCallbackUrl(req);
   const url = new URL(WHOP_AUTHORIZE_URL);
   url.searchParams.set("response_type", "code");
@@ -41,6 +43,7 @@ export async function GET(req: Request) {
   url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("scope", WHOP_SCOPES);
   url.searchParams.set("state", state);
+  url.searchParams.set("nonce", nonce);
   url.searchParams.set("code_challenge", pkceChallenge(verifier));
   url.searchParams.set("code_challenge_method", "S256");
 
@@ -54,5 +57,6 @@ export async function GET(req: Request) {
   };
   res.cookies.set("cf_whop_oauth_state", state, cookieOpts);
   res.cookies.set("cf_whop_pkce_verifier", verifier, cookieOpts);
+  res.cookies.set("cf_whop_oauth_nonce", nonce, cookieOpts);
   return res;
 }

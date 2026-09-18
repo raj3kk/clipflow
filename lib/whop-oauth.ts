@@ -42,6 +42,11 @@ export function oauthState(): string {
   return randomBytes(16).toString("hex");
 }
 
+/** OIDC nonce — Whop requires `nonce` when the `openid` scope is requested. */
+export function oauthNonce(): string {
+  return randomBytes(16).toString("base64url");
+}
+
 /**
  * Resolves the Whop OAuth *app* credentials (client ID + secret).
  *

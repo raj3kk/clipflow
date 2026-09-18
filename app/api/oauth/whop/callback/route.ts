@@ -34,8 +34,10 @@ export async function GET(req: Request) {
   const jar = cookies();
   const expectedState = jar.get("cf_whop_oauth_state")?.value;
   const verifier = jar.get("cf_whop_pkce_verifier")?.value;
+  const expectedNonce = jar.get("cf_whop_oauth_nonce")?.value;
   jar.delete("cf_whop_oauth_state");
   jar.delete("cf_whop_pkce_verifier");
+  jar.delete("cf_whop_oauth_nonce");
   if (!code || !state || !expectedState || state !== expectedState || !verifier) {
     return fail("OAuth state mismatch — please try again.");
   }
@@ -72,6 +74,20 @@ export async function GET(req: Request) {
       return fail(
         `Token exchange failed: ${tokens.error_description ?? tokens.error ?? tokenRes.status}`
       );
+    }
+
+    // 1b. Verify the OIDC nonce inside the id_token when Whop returns one.
+    if (tokens.id_token && expectedNonce) {
+      try {
+        const payload = JSON.parse(
+          Buffer.from(tokens.id_token.split(".")[1], "base64url").toString("utf8")
+        );
+        if (payload.nonce !== expectedNonce) {
+          return fail("OAuth nonce mismatch — please try again.");
+        }
+      } catch {
+        return fail("Could not verify the Whop sign-in token — please try again.");
+      }
     }
 
     // 2. Who is this for?
