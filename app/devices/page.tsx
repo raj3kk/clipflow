@@ -267,6 +267,10 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
 
   const pct = Math.min(100, Math.round((data.cap_used / data.cap_max) * 100));
   const devPaused = data.device.status === "paused";
+  // latest failed/blocked run — user ko sabse upar kaaran dikhe
+  const lastBad = data.jobs.find(
+    (j) => j.run && (j.run.status === "failed" || j.run.status === "blocked")
+  );
 
   const togglePause = async () => {
     try {
@@ -285,19 +289,28 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
 
   return (
     <div className="space-y-4">
-      <div className={cardCls}>
-        <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
-          <div className="font-semibold text-sm">Abhi chalao</div>
+      <div className={`${cardCls} border-accent/40`}>
+        <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
+          <div>
+            <div className="font-bold text-base">Abhi chalao</div>
+            <div className="text-xs text-slate-400">
+              Jab chahe — schedule ka wait nahi karna
+            </div>
+          </div>
           <div className="flex gap-2">
             <button
               onClick={togglePause}
-              className="text-xs px-3 py-2 rounded-lg border border-line text-slate-300 hover:border-slate-400"
+              className="text-xs px-3 py-3 rounded-lg border border-line text-slate-300 hover:border-slate-400"
               title={devPaused ? "Device wapas active karo" : "Device ko rok do (koi job nahi milega)"}
             >
               {devPaused ? "Resume device" : "Pause device"}
             </button>
-            <button onClick={runNow} disabled={running || devPaused} className={btnPrimary}>
-              {running ? "Bhej raha hai…" : "Run Now"}
+            <button
+              onClick={runNow}
+              disabled={running || devPaused}
+              className={`${btnPrimary} text-base px-8 py-3 font-bold`}
+            >
+              {running ? "Bhej raha hai…" : "▶ Run Now"}
             </button>
           </div>
         </div>
@@ -311,6 +324,21 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
           "Jab chahe" trigger — cap (4/48h) yahan bhi lagu hota hai.
         </p>
       </div>
+
+      {lastBad?.run && (
+        <div className="rounded-xl border border-red-500/50 bg-red-500/10 p-4">
+          <div className="font-bold text-red-300 text-sm mb-1">
+            Last automation {lastBad.run.status === "blocked" ? "BLOCK hui" : "FAIL hui"} — kaaran:
+          </div>
+          <p className="text-sm text-slate-200">
+            {lastBad.run.result?.error ?? "kaaran nahi mila"}
+          </p>
+          <p className="text-xs text-slate-500 mt-1">
+            Phone pe bhi notification aaya hoga. Neeche poori job list me
+            detail + screenshot proof hai.
+          </p>
+        </div>
+      )}
 
       <ScheduleCard deviceId={deviceId} />
 
