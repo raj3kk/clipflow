@@ -21,6 +21,9 @@ recreate it — the phone app is the only poster.
 | `run_planner.sh` | cron entrypoint (every 6h): venv python `planner_v2.py --once`, logs to `logs/planner_v2.log` |
 | `run_pipeline_watch.sh` | cron entrypoint (every 1 min): `pipeline_watch.py`, logs to `logs/pipeline_watch.log` |
 | `run_once.sh` | legacy v1 entrypoint — orphaned (its `pipeline_worker.py` is deleted) |
+| `ops_monitor.py` | ops monitor: stuck `device_jobs` detect → auto-requeue + `resume_from_step` checkpoint (payload me), attempts khatm → `failed` (terminal) |
+| `ops_monitor_resume_spec.md` | server↔app resume contract spec (app-side JobEngine change agle APK me pending) |
+| `run_ops_monitor.sh` | cron entrypoint (every 1 min): `python3 ops_monitor.py` (`--dry-run` supported), logs to `logs/ops_monitor.log` |
 
 ## Env
 
