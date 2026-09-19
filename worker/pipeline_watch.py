@@ -453,7 +453,7 @@ def reconcile_device_jobs() -> None:
                     "status": "queued",
                     "run_after": (datetime.now(timezone.utc)
                                   + timedelta(minutes=1)).isoformat()})
-                config.sb_request("POST", "/rest/v1/job_runs", payload=[{
+                config.sb_request("POST", "/rest/v1/job_runs", body=[{
                     "user_id": uid, "device_id": did, "job_id": jid,
                     "status": "timeout_requeued",
                     "finished_at": now_iso(),
@@ -464,7 +464,7 @@ def reconcile_device_jobs() -> None:
                 # (note column nahi hai — wajah job_runs.result me hai)
                 config.sb_patch("device_jobs", jid, {
                     "status": "timeout"})
-                config.sb_request("POST", "/rest/v1/job_runs", payload=[{
+                config.sb_request("POST", "/rest/v1/job_runs", body=[{
                     "user_id": uid, "device_id": did, "job_id": jid,
                     "status": "timeout",
                     "finished_at": now_iso(),
@@ -473,7 +473,7 @@ def reconcile_device_jobs() -> None:
                 # activity_log ka asli schema: user_id, actor, event,
                 # detail(jsonb), ts — kind/title/ref_type wale purane
                 # column kabhi the hi nahi (2026-09-19 fix).
-                config.sb_request("POST", "/rest/v1/activity_log", payload=[{
+                config.sb_request("POST", "/rest/v1/activity_log", body=[{
                     "user_id": uid, "actor": "worker",
                     "event": "job_timeout",
                     "detail": {"text": ("Phone se heartbeat band (watchdog) — "
