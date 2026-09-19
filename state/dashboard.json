@@ -2,22 +2,22 @@
  "campaigns": [
   {
    "budget_remaining_usd": 7578,
-   "caption_template": "Joe Rogan: \"I just ask Perplexity\" instead of sifting through Google searches \ud83e\udd2f #PerplexityPartner",
+   "caption_template": "Joe Rogan: \"I just ask Perplexity\" instead of sifting through Google searches 🤯 #PerplexityPartner",
    "hashtags": [
     "#PerplexityPartner"
    ],
    "id": "perplexity-jre",
    "max_payout_usd": 450,
    "min_payout_usd": 150,
-   "name": "Perplexity JRE Clipping \u2014 ClipFarm",
+   "name": "Perplexity JRE Clipping — ClipFarm",
    "payout_per_1k_usd": 1.5,
-   "requirements": "15\u201360s. Only listed brief moments. Perplexity clearly heard AND seen. No fake screens. Caption must include #PerplexityPartner. Likes visible. \u22650.20% engagement. \u226540% views from US/UK/CA/AU. Keep live 30 days. No boosting/bots.",
+   "requirements": "15–60s. Only listed brief moments. Perplexity clearly heard AND seen. No fake screens. Caption must include #PerplexityPartner. Likes visible. ≥0.20% engagement. ≥40% views from US/UK/CA/AU. Keep live 30 days. No boosting/bots.",
    "sponsor": "Perplexity",
    "status": "active"
   },
   {
    "budget_remaining_usd": 0,
-   "caption_template": "The Diablo V reveal is here \ud83d\udd25 #BlizzardPartner #DiabloV",
+   "caption_template": "The Diablo V reveal is here 🔥 #BlizzardPartner #DiabloV",
    "hashtags": [
     "#BlizzardPartner",
     "#DiabloV"
@@ -25,24 +25,24 @@
    "id": "blizzard-blizzcon",
    "name": "Blizzard BlizzCon 2026 Trailer Clipping",
    "payout_per_1k_usd": 1.5,
-   "requirements": "Official trailer-folder footage only. Caption #BlizzardPartner + franchise hashtag. Keep live 30 days. [2026-09-16: Submissions CLOSED \u2014 budget $41.6K/$41.6K 100% used. Submit button disabled.]",
+   "requirements": "Official trailer-folder footage only. Caption #BlizzardPartner + franchise hashtag. Keep live 30 days. [2026-09-16: Submissions CLOSED — budget $41.6K/$41.6K 100% used. Submit button disabled.]",
    "sponsor": "Blizzard",
    "status": "closed"
   },
   {
-   "budget_remaining_usd": null,
-   "caption_template": "What is MoonPay CLI? Ivan Soto explains how AI agents can transact with one line of code.",
+   "budget_remaining_usd": 3982,
+   "caption_template": "Caption: English, about what Ivan said + @moonpay (required) + #MoonPay (required). On-screen title: one of 4 fixed templates (e.g. 'What is ______? Ivan Soto-Wright explains.').",
    "hashtags": [],
    "id": "moonpay-soto",
    "name": "Ivan Soto x Moonpay",
    "payout_per_1k_usd": 1.5,
-   "requirements": "Follow the campaign brief moments. Keep live 30 days.",
+   "requirements": "15-50s. Footage ONLY from @Ivansotowright. REQUIRED moment: 'The Moment MoonPay Got Its Name' 05:53-06:52 of fZtY0OeR8h8 (1988 moon map story) [2026-09-19: that video UNAVAILABLE, @Ivansotowright channel 404 — footage currently unobtainable]. Ivan speaking >=80%. Do NOT name other companies/coins/NFTs. No price/pump talk. Likes visible. >=0.20% engagement. >=40% US/UK/CA/AU. Keep live 30 days. No boosting/bots. RISK FLAG 2026-09-19: 09-14 submission used Solana-channel footage (outside official link) + no #MoonPay + 'OpenClaw' mention — may be rejected.",
    "sponsor": "MoonPay",
    "status": "active"
   },
   {
    "id": "syberjet-speed-record",
-   "name": "Syberjet Speed Record \u2014 1DS",
+   "name": "Syberjet Speed Record — 1DS",
    "sponsor": "1DS",
    "payout_per_1k_usd": 3.0,
    "min_payout_usd": 9,
@@ -58,23 +58,23 @@
   "instagram": {
    "account": "@viralshortz_45",
    "status": "ok",
-   "last_verified": "2026-09-19T07:41:38+05:30",
-   "note": "Logged in @viralshortz_45; reel Ddc0f6XhdVC posted 06:58 IST 09-19, live-verified."
+   "last_verified": "2026-09-19T13:15:00+05:30",
+   "note": "Logged in @viralshortz_45 (verified 12:44 IST); upload task closed before posting (compliance stop), nothing posted."
   },
   "whop": {
    "account": "flipify.com@gmail.com (Flipify Clips)",
    "status": "ok",
-   "last_verified": "2026-09-19T07:41:38+05:30",
-   "note": "Logged in (Flipify Clips); Syberjet clip2 submitted ~07:04 IST 09-19, list shows Pending."
+   "last_verified": "2026-09-19T13:15:00+05:30",
+   "note": "Logged in (Flipify Clips); MoonPay brief read live; no submissions made this run."
   }
  },
  "guards": [
-  "Post \u2192 Whop submit within 20 minutes (campaign hard-rejects after 30 min).",
-  "Never submit a reel older than 30 min \u2014 repost fresh instead.",
+  "Post → Whop submit within 20 minutes (campaign hard-rejects after 30 min).",
+  "Never submit a reel older than 30 min — repost fresh instead.",
   "Never delete a reel that has a Whop submission (protected list below).",
   "Only mark 'submitted' when Whop shows exactly 'Clip submitted'.",
   "Caption = exact campaign template + required hashtag. No location unless brief asks.",
-  "Upload Original 9:16, no crop/zoom/trim. Hook \u226510% below top; captions ~72% height.",
+  "Upload Original 9:16, no crop/zoom/trim. Hook ≥10% below top; captions ~72% height.",
   "Verify the LIVE reel before submitting.",
   "Use VP9 file for upload (server Chromium cannot read H.264 uploads).",
   "Max 4 posts/day, spaced out. On Instagram action-block: pause + notify owner.",
@@ -91,6 +91,36 @@
  ],
  "runs": [
   {
+   "id": "run-2026-09-19-moonpay-1",
+   "started_at": "2026-09-19T12:41:44+05:30",
+   "status": "blocked",
+   "reel_url": null,
+   "whop_status": null,
+   "error": "MoonPay brief (fetched live 2026-09-19) unsatisfiable: required CLIP-1 video fZtY0OeR8h8 unavailable on all clients; @Ivansotowright channel 404; only working source (Solana Accelerate interview kI2w01qOLy4) is from @solana = outside official link. Rendered clip scrapped (mentioned OpenClaw = other-company violation; missing required #MoonPay). Upload browser task closed BEFORE posting — nothing posted, no reel exists. Syberjet has no unused official footage (hero9x16.mp4: 0-44s and 55.6-93.2s used; 11.6s gap < 30s brief minimum). Perplexity brief allows only listed moments (already used today 00:41). Ending day at 2/4 per SOP: never force low-quality submissions.",
+   "steps": [
+    {
+     "t": "12:41",
+     "msg": "State read: today 2026-09-19, 2/4 submitted. Sessions live (IG @viralshortz_45, Whop). Picked MoonPay ($1.50/1K, $3,982 remaining, not submitted today)."
+    },
+    {
+     "t": "12:50",
+     "msg": "Read full MoonPay Clipper Brief via Whop: REQUIRED CLIP-1 moment 05:53-06:52 of fZtY0OeR8h8 ('1988 moon map' naming story); footage ONLY from @Ivansotowright; no other companies/coins/NFTs named; Ivan >=80% speaking; caption English about what Ivan said + @moonpay (required) + #MoonPay (required); title from 4 fixed templates; 15-50s; likes visible; 30 days live."
+    },
+    {
+     "t": "12:52",
+     "msg": "Rendered moonpay_clip_02 (24.6s, 1080x1920, hook at 12.2% top) from Solana interview CLI segment 243.5-268.1s. Hook verified Ivan on-screen from frame 1 (re-rendered after first pass opened on interviewer)."
+    },
+    {
+     "t": "13:15",
+     "msg": "COMPLIANCE FAIL on own render: (1) source kI2w01qOLy4 is from @solana, NOT @Ivansotowright -> 'outside the official link' = no pay; (2) Ivan names 'OpenClaw' = other-company violation; (3) caption lacked required #MoonPay. Stopped the IG-upload browser task BEFORE any post. Clip scrapped, nothing posted."
+    },
+    {
+     "t": "13:20",
+     "msg": "Attempted required footage: fZtY0OeR8h8 unavailable on android/ios/web (4-round grab + oEmbed 404); @Ivansotowright/videos 404 on android+web. Required moment currently unclippable. No compliant 3rd submission available today. Day ends 2/4."
+    }
+   ]
+  },
+  {
    "id": "run-2026-09-19-syberjet-2",
    "started_at": "2026-09-19T06:41:44+05:30",
    "status": "success",
@@ -100,15 +130,15 @@
    "steps": [
     {
      "t": "06:41",
-     "msg": "State read: today 2026-09-19, 1/4 submitted. Campaign: Syberjet Speed Record \u2014 1DS ($3.00/1K, ~$7,134 remaining). Highest score; not yet submitted today."
+     "msg": "State read: today 2026-09-19, 1/4 submitted. Campaign: Syberjet Speed Record — 1DS ($3.00/1K, ~$7,134 remaining). Highest score; not yet submitted today."
     },
     {
      "t": "06:46",
-     "msg": "Rendered syberjet_clip2 from unused 0.0\u201344.0s segment (hero9x16.mp4, official campaign footage). Hook 'SJ30 BROKE THE RECORD / 4H 7M COAST TO COAST' at 13.1% (\u226510% rule); captions ~71\u201378%; 1080x1920; VP9 moov verified valid."
+     "msg": "Rendered syberjet_clip2 from unused 0.0–44.0s segment (hero9x16.mp4, official campaign footage). Hook 'SJ30 BROKE THE RECORD / 4H 7M COAST TO COAST' at 13.1% (≥10% rule); captions ~71–78%; 1080x1920; VP9 moov verified valid."
     },
     {
      "t": "06:58",
-     "msg": "Reel POSTED: https://www.instagram.com/reels/Ddc0f6XhdVC/ \u2014 Original 9:16, no crop/trim, exact caption 'SJ30 broke the transcontinental speed record: 4h 7m coast to coast at 505 mph. @TREVORMILTONOFFICIAL @SYBERJETAERO'."
+     "msg": "Reel POSTED: https://www.instagram.com/reels/Ddc0f6XhdVC/ — Original 9:16, no crop/trim, exact caption 'SJ30 broke the transcontinental speed record: 4h 7m coast to coast at 505 mph. @TREVORMILTONOFFICIAL @SYBERJETAERO'."
     },
     {
      "t": "07:04",
@@ -154,7 +184,7 @@
     },
     {
      "t": "01:05",
-     "msg": "Reel POSTED: https://www.instagram.com/reel/DdcMtTnB3L1/ \u2014 Original 9:16, no crop/trim, exact caption 'Joe Rogan: \"I just ask Perplexity\" instead of sifting through Google searches \ud83e\udd2f #PerplexityPartner'."
+     "msg": "Reel POSTED: https://www.instagram.com/reel/DdcMtTnB3L1/ — Original 9:16, no crop/trim, exact caption 'Joe Rogan: \"I just ask Perplexity\" instead of sifting through Google searches 🤯 #PerplexityPartner'."
     },
     {
      "t": "01:10",
@@ -172,15 +202,15 @@
    "steps": [
     {
      "t": "19:01",
-     "msg": "State read: today 2026-09-18, 0/4 submitted. Campaign: Syberjet Speed Record \u2014 1DS ($3.00/1K). Ready clip syberjet_clip1_vp9.mp4 (37.6s, 1080x1920, VP9) from 2026-09-16."
+     "msg": "State read: today 2026-09-18, 0/4 submitted. Campaign: Syberjet Speed Record — 1DS ($3.00/1K). Ready clip syberjet_clip1_vp9.mp4 (37.6s, 1080x1920, VP9) from 2026-09-16."
     },
     {
      "t": "19:02",
-     "msg": "Read-only browser session check: IG logged in (@viralshortz_45); Whop logged in as Flipify Clips (flipify.com@gmail.com) \u2014 session recovered (was logged out 09-17/09-18 morning). Campaign accepting clips."
+     "msg": "Read-only browser session check: IG logged in (@viralshortz_45); Whop logged in as Flipify Clips (flipify.com@gmail.com) — session recovered (was logged out 09-17/09-18 morning). Campaign accepting clips."
     },
     {
      "t": "19:06",
-     "msg": "Reel POSTED: https://www.instagram.com/reel/Ddbjl8DBQsp/ \u2014 Original 9:16, no crop/trim, exact caption 'SJ30 broke the transcontinental speed record: 4h 7m coast to coast at 505 mph. @TREVORMILTONOFFICIAL @SYBERJETAERO'. Hook text verified fully inside frame on live reel; embed player renders/advances (main sandbox player can't play any reel = environment media limit, not the upload)."
+     "msg": "Reel POSTED: https://www.instagram.com/reel/Ddbjl8DBQsp/ — Original 9:16, no crop/trim, exact caption 'SJ30 broke the transcontinental speed record: 4h 7m coast to coast at 505 mph. @TREVORMILTONOFFICIAL @SYBERJETAERO'. Hook text verified fully inside frame on live reel; embed player renders/advances (main sandbox player can't play any reel = environment media limit, not the upload)."
     },
     {
      "t": "19:16",
@@ -198,11 +228,11 @@
    "status": "blocked",
    "reel_url": null,
    "whop_status": "not attempted",
-   "error": "Whop session STILL logged out at 12:42 IST check (whop.com shows only 'Sign in'; no Flipify Clips workspace). Owner notified by email (priyadarshirajindia@gmail.com) 12:45 IST \u2014 asked to sign in via 'Continue with Google' (flipify.com@gmail.com, Flipify Clips workspace); previously asked 18:53 IST 09-17, 00:45 and 06:45 IST 09-18. No credentials entered, no IG upload performed, nothing submitted; daily counter stays 0/4.",
+   "error": "Whop session STILL logged out at 12:42 IST check (whop.com shows only 'Sign in'; no Flipify Clips workspace). Owner notified by email (priyadarshirajindia@gmail.com) 12:45 IST — asked to sign in via 'Continue with Google' (flipify.com@gmail.com, Flipify Clips workspace); previously asked 18:53 IST 09-17, 00:45 and 06:45 IST 09-18. No credentials entered, no IG upload performed, nothing submitted; daily counter stays 0/4.",
    "steps": [
     {
      "t": "12:41",
-     "msg": "State read: today 2026-09-18, 0/4 submitted. Campaign ready: Syberjet Speed Record \u2014 1DS ($3.00/1K, ~$8,374 remaining). Ready clip syberjet_clip1_vp9.mp4 (37.6s, 1080x1920) on disk from 2026-09-16."
+     "msg": "State read: today 2026-09-18, 0/4 submitted. Campaign ready: Syberjet Speed Record — 1DS ($3.00/1K, ~$8,374 remaining). Ready clip syberjet_clip1_vp9.mp4 (37.6s, 1080x1920) on disk from 2026-09-16."
     },
     {
      "t": "12:42",
@@ -220,11 +250,11 @@
    "status": "blocked",
    "reel_url": null,
    "whop_status": "not attempted",
-   "error": "Whop session STILL logged out at 06:43 IST check (whop.com shows only 'Sign in'; no Flipify Clips workspace). Owner notified by email (priyadarshirajindia@gmail.com) 06:45 IST \u2014 asked to sign in via 'Continue with Google' (flipify.com@gmail.com, Flipify Clips workspace); first asked 18:53 IST 09-17. No credentials entered, no IG upload performed, nothing submitted; daily counter stays 0/4.",
+   "error": "Whop session STILL logged out at 06:43 IST check (whop.com shows only 'Sign in'; no Flipify Clips workspace). Owner notified by email (priyadarshirajindia@gmail.com) 06:45 IST — asked to sign in via 'Continue with Google' (flipify.com@gmail.com, Flipify Clips workspace); first asked 18:53 IST 09-17. No credentials entered, no IG upload performed, nothing submitted; daily counter stays 0/4.",
    "steps": [
     {
      "t": "06:41",
-     "msg": "State read: today 2026-09-18, 0/4 submitted. Campaign ready: Syberjet Speed Record \u2014 1DS ($3.00/1K, ~$8,374 remaining). Ready clip syberjet_clip1_vp9.mp4 (37.6s, 1080x1920) on disk from 2026-09-16."
+     "msg": "State read: today 2026-09-18, 0/4 submitted. Campaign ready: Syberjet Speed Record — 1DS ($3.00/1K, ~$8,374 remaining). Ready clip syberjet_clip1_vp9.mp4 (37.6s, 1080x1920) on disk from 2026-09-16."
     },
     {
      "t": "06:42",
@@ -250,7 +280,7 @@
    "steps": [
     {
      "t": "00:41",
-     "msg": "State read: today 2026-09-18 (reset from 2026-09-17), 0/4 submitted. Campaign picked: Syberjet Speed Record \u2014 1DS ($3.00/1K, ~$8,374 remaining). Ready clip syberjet_clip1_vp9.mp4 (37.6s, 1080x1920) on disk from 2026-09-16"
+     "msg": "State read: today 2026-09-18 (reset from 2026-09-17), 0/4 submitted. Campaign picked: Syberjet Speed Record — 1DS ($3.00/1K, ~$8,374 remaining). Ready clip syberjet_clip1_vp9.mp4 (37.6s, 1080x1920) on disk from 2026-09-16"
     },
     {
      "t": "00:42",
@@ -276,7 +306,7 @@
    "steps": [
     {
      "t": "18:41",
-     "msg": "State read: today 2026-09-17, 0/4 submitted. Campaign picked: Syberjet Speed Record \u2014 1DS ($3.00/1K, ~$8,374 remaining). Chose ready clip syberjet_clip1_vp9.mp4 (37.6s, 1080x1920) over re-posting the already-posted Perplexity clip"
+     "msg": "State read: today 2026-09-17, 0/4 submitted. Campaign picked: Syberjet Speed Record — 1DS ($3.00/1K, ~$8,374 remaining). Chose ready clip syberjet_clip1_vp9.mp4 (37.6s, 1080x1920) over re-posting the already-posted Perplexity clip"
     },
     {
      "t": "18:42",
@@ -300,7 +330,7 @@
     },
     {
      "t": "18:53",
-     "msg": "Owner emailed correction (same thread): Whop is fully logged out \u2014 needs 'Continue with Google' sign-in (flipify.com@gmail.com, Flipify Clips workspace); IG needs no action"
+     "msg": "Owner emailed correction (same thread): Whop is fully logged out — needs 'Continue with Google' sign-in (flipify.com@gmail.com, Flipify Clips workspace); IG needs no action"
     }
    ]
   },
@@ -322,7 +352,7 @@
     },
     {
      "t": "12:43",
-     "msg": "Owner re-notified by email (priyadarshirajindia@gmail.com) \u2014 3rd notice today, asking to log @viralshortz_45 back in on their phone"
+     "msg": "Owner re-notified by email (priyadarshirajindia@gmail.com) — 3rd notice today, asking to log @viralshortz_45 back in on their phone"
     }
    ]
   },
@@ -340,7 +370,7 @@
     },
     {
      "t": "06:42",
-     "msg": "VP9 clip verified ready (perplexity_clip1_vp9.mp4, 33s, 1080x1920; hook >=10% below top, captions ~78% \u2014 frames checked)"
+     "msg": "VP9 clip verified ready (perplexity_clip1_vp9.mp4, 33s, 1080x1920; hook >=10% below top, captions ~78% — frames checked)"
     },
     {
      "t": "06:43",
@@ -393,7 +423,7 @@
      "t": "12:06"
     },
     {
-     "msg": "Instagram session OK \u2014 uploaded reel via web (Original 9:16)",
+     "msg": "Instagram session OK — uploaded reel via web (Original 9:16)",
      "t": "12:19"
     },
     {
@@ -409,7 +439,7 @@
      "t": "12:18"
     },
     {
-     "msg": "Reposted fresh reel, submitted within 3 min \u2192 'Clip submitted' confirmed",
+     "msg": "Reposted fresh reel, submitted within 3 min → 'Clip submitted' confirmed",
      "t": "12:22"
     },
     {
@@ -424,7 +454,7 @@
    "started_at": "2026-09-16T12:40:00+05:30",
    "reel_url": "https://www.instagram.com/reel/DdVvHoOB-ar/",
    "status": "reel_live_no_submission",
-   "whop_status": "Submission failed \u2014 campaign closed (budget 100% used)",
+   "whop_status": "Submission failed — campaign closed (budget 100% used)",
    "steps": [
     {
      "t": "12:40",
@@ -436,7 +466,7 @@
     },
     {
      "t": "12:48",
-     "msg": "Instagram session dead (password dialog) \u2014 restored via saved login (owner-authorized)"
+     "msg": "Instagram session dead (password dialog) — restored via saved login (owner-authorized)"
     },
     {
      "t": "12:51",
@@ -448,7 +478,7 @@
     },
     {
      "t": "13:00",
-     "msg": "Whop session dead \u2014 restored via Google OAuth (owner approved Tap Yes)"
+     "msg": "Whop session dead — restored via Google OAuth (owner approved Tap Yes)"
     },
     {
      "t": "13:04",
@@ -493,7 +523,7 @@
    "views": null
   },
   {
-   "campaign": "Syberjet Speed Record \u2014 1DS",
+   "campaign": "Syberjet Speed Record — 1DS",
    "instagram_url": "https://www.instagram.com/reel/Ddbjl8DBQsp/",
    "status": "pending",
    "submitted_at": "2026-09-18",
@@ -507,7 +537,7 @@
    "views": null
   },
   {
-   "campaign": "Syberjet Speed Record \u2014 1DS",
+   "campaign": "Syberjet Speed Record — 1DS",
    "instagram_url": "https://www.instagram.com/reels/Ddc0f6XhdVC/",
    "status": "pending",
    "submitted_at": "2026-09-19",
@@ -519,5 +549,5 @@
   "submitted": 2,
   "target": 4
  },
- "updated_at": "2026-09-19T07:41:38+05:30"
+ "updated_at": "2026-09-19T13:25:00+05:30"
 }
