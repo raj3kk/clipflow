@@ -59,6 +59,9 @@ export async function POST(
   }
 
   // Ek device pe ek hi request pending/running ho sakti hai.
+  // DB me partial unique index bhi hai (pipeline_requests_active_device_uniq)
+  // — race me bhi double-enqueue impossible; unique violation ko 409 me
+  // badalte hain.
   const { data: existing } = await sb
     .from("pipeline_requests")
     .select("id")
@@ -83,8 +86,15 @@ export async function POST(
     .select("id")
     .single();
   if (insErr || !req) {
+    const msg = insErr?.message ?? "Insert failed.";
+    if (/duplicate key|unique constraint|23505/i.test(msg)) {
+      return NextResponse.json(
+        { error: "Pipeline already pending/running for this device." },
+        { status: 409 }
+      );
+    }
     return NextResponse.json(
-      { error: insErr?.message ?? "Insert failed." },
+      { error: msg },
       { status: 500 }
     );
   }

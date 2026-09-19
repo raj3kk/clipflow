@@ -1,23 +1,28 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { getSupabase, isConfigured } from "@/lib/supabase";
-import { createAutomationJob } from "@/lib/device_jobs";
-import { validateClipPackage, buildAutomationPayload } from "@/lib/v2_workflow";
-import { sendWakePush } from "@/lib/fcm";
 
 /**
  * "Jab chahe" trigger — user dashboard se turant automation chalaye.
  *
  * POST /api/devices/:id/run-now
- *   { type?, video_url?, caption?, whop_submit_url? }  →  { job_id, via, ... }
+ *   → 200 { ok, request_id } | 409 { error } (already pending/running)
+ *   → 400 { error } agar body me manual clip fields hon (override hata diya
+ *      gaya hai — round-6 Worker E)
  *
- * Clip package: body me aaye to wahi, nahi to device ke schedule_json.clip
- * (website pe saved). Bina valid clip package ke job nahi banta — pehle
- * website pe "Clip package" bharna hota hai.
- * Job turant queue hota hai (cap check ke saath), phir phone ko FCM
- * wake bhejne ki koshish hoti hai. FCM na ho to phone agle poll pe
- * (max ~15 min) job utha lega — via:"poll".
+ * 2026-09-19 (round-6): manual clip override (body me video_url / caption /
+ * whop_submit_url) HATA DIYA. Ab ye route bilkul `run-pipeline` jaisa
+ * automatic hai: `pipeline_requests` me `pending` row banti hai, VM pe
+ * `pipeline_watch.py` watcher (1-min cron) ise uthata hai aur `planner_v2.py`
+ * (campaign → render → phone enqueue) chalata hai. User ko kuch bharna nahi
+ * padta (zero-touch). Koi UI caller nahi tha (AI agent + Devices page dono
+ * `run-pipeline` pe hain) — ye route sirf backward-compat ke liye zinda hai.
  */
+
+function isUniqueViolation(message: string): boolean {
+  return /duplicate key|unique constraint|23505/i.test(message);
+}
+
 export async function POST(
   req: Request,
   { params }: { params: { id: string } }
@@ -28,7 +33,10 @@ export async function POST(
   }
   const sb = getSupabase();
   if (!sb || !isConfigured()) {
-    return NextResponse.json({ error: "Supabase not configured." }, { status: 503 });
+    return NextResponse.json(
+      { error: "Supabase not configured." },
+      { status: 503 }
+    );
   }
 
   let body: Record<string, unknown> = {};
@@ -37,75 +45,75 @@ export async function POST(
   } catch {
     /* body optional */
   }
-  const type = String(body.type ?? "automation");
 
-  // Clip package: body override → device saved → error
-  const { data: dev } = await sb
-    .from("devices")
-    .select("schedule_json, fcm_token")
-    .eq("id", params.id)
-    .eq("user_id", user.id)
-    .single();
-  if (!dev) {
-    return NextResponse.json({ error: "Unknown device." }, { status: 404 });
-  }
-  const savedClip = (dev.schedule_json as Record<string, unknown> | null)?.clip;
-  const clipInput =
-    body.video_url || body.caption || body.whop_submit_url
-      ? {
-          video_url: body.video_url,
-          caption: body.caption,
-          whop_submit_url: body.whop_submit_url,
-        }
-      : savedClip;
-  const clipCheck = validateClipPackage(clipInput);
-  if (!clipCheck.ok || !clipCheck.pkg) {
+  // Manual clip override HATA DIYA — aise fields ab reject hote hain.
+  if (
+    body.video_url !== undefined ||
+    body.caption !== undefined ||
+    body.whop_submit_url !== undefined
+  ) {
     return NextResponse.json(
       {
         error:
-          "Is manual (testing) run ke liye clip chahiye — upar fields me video URL + caption + Whop URL do, ya device card me manual clip save karo.",
-        detail: clipCheck.error,
+          "Manual clip override hata diya gaya hai. Ye route ab automatic hai — pipeline khud clip banayegi. Kuch bhejne ki zaroorat nahi.",
       },
       { status: 400 }
     );
   }
-  const payload = {
-    ...buildAutomationPayload(clipCheck.pkg),
-    trigger: "manual",
-  };
 
-  const res = await createAutomationJob(
-    sb,
-    user.id,
-    params.id,
-    type,
-    payload,
-    { run_after: new Date().toISOString() }
-  );
-  if (!res.ok) {
-    const { ok: _ok, code, ...rest } = res as { ok: false; code: number } & Record<string, unknown>;
-    return NextResponse.json(rest, { status: code });
+  const { data: device } = await sb
+    .from("devices")
+    .select("id, status")
+    .eq("id", params.id)
+    .eq("user_id", user.id)
+    .single();
+  if (!device) {
+    return NextResponse.json({ error: "Unknown device." }, { status: 404 });
+  }
+  if (device.status !== "active") {
+    return NextResponse.json(
+      { error: `Device not active (status: ${device.status}).` },
+      { status: 409 }
+    );
   }
 
-  // phone jagao (best-effort)
-  let via: "fcm" | "poll" = "poll";
-  let fcm_sent = false;
-  let reason: string | undefined;
-  const fcmToken = (dev as { fcm_token?: string | null })?.fcm_token;
-  if (fcmToken) {
-    const r = await sendWakePush(fcmToken);
-    via = r.via;
-    fcm_sent = r.sent;
-    reason = r.reason;
-  } else {
-    reason = "FCM token nahi hai — phone agle schedule pe job uthayega.";
+  // Ek device pe ek hi request pending/running ho sakti hai (run-pipeline
+  // jaisa). DB me partial unique index bhi hai
+  // (pipeline_requests_active_device_uniq) — race me bhi double-enqueue
+  // impossible; unique violation ko 409 me badalte hain.
+  const { data: existing } = await sb
+    .from("pipeline_requests")
+    .select("id")
+    .eq("device_id", params.id)
+    .eq("user_id", user.id)
+    .in("status", ["pending", "running"])
+    .limit(1);
+  if (existing && existing.length > 0) {
+    return NextResponse.json(
+      { error: "Pipeline already pending/running for this device." },
+      { status: 409 }
+    );
   }
 
-  return NextResponse.json({
-    job_id: res.job_id,
-    status: "queued",
-    via,
-    fcm_sent,
-    reason,
-  });
+  const { data: pr, error: insErr } = await sb
+    .from("pipeline_requests")
+    .insert({
+      user_id: user.id,
+      device_id: params.id,
+      status: "pending",
+      note: "run-now (manual trigger) — pipeline khud clip banayegi",
+    })
+    .select("id")
+    .single();
+  if (insErr || !pr) {
+    const msg = insErr?.message ?? "Insert failed.";
+    if (isUniqueViolation(msg)) {
+      return NextResponse.json(
+        { error: "Pipeline already pending/running for this device." },
+        { status: 409 }
+      );
+    }
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true, request_id: pr.id });
 }

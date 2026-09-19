@@ -26,7 +26,12 @@ export async function GET() {
       .limit(1)
       .maybeSingle();
     if (error || !data) {
-      return NextResponse.json({}, { status: 404 });
+      // TEMP-DEBUG (round-6 Worker E): 404 ke peeche ka actual error dekhna
+      // hai — diagnose ke baad wapas 404 {} kar denge.
+      return NextResponse.json(
+        { _debug_error: error?.message ?? null, _debug_hint: (error as { hint?: string } | null)?.hint ?? null, _debug_code: (error as { code?: string } | null)?.code ?? null },
+        { status: 500 }
+      );
     }
     return NextResponse.json({
       version_code: data.version_code,

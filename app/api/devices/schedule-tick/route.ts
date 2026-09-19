@@ -27,6 +27,10 @@ import { sendWakePush } from "@/lib/fcm";
  * User ko kuch bharna nahi padta (zero-touch, 2026-09-19).
  * Idempotency key (`sched:<device>:<slot>`) double-creation rokta hai;
  * cap (4/24h) aur paused-device check createAutomationJob me hota hai.
+ * pipeline_requests ke liye slot-level dedup DB me hai (slot_key +
+ * pipeline_requests_device_slot_uniq) + ek-device-ek-active-request
+ * (pipeline_requests_active_device_uniq) — concurrent tick race bhi ab
+ * double-enqueue nahi kar sakti.
  * Phone har 15 min poll karke queued job utha leta hai (FCM optional).
  *
  * 2026-09-19 (round-6): har tick pe reconcileStaleJobs bhi chalta hai —
@@ -215,17 +219,37 @@ export async function POST(req: Request) {
           user_id: d.user_id,
           device_id: d.id,
           status: "pending",
+          // Slot-level dedup (round-6): deterministic key per due slot-set.
+          // Unique index pipeline_requests_device_slot_uniq same slot ki
+          // dobara row rokta hai — chahe purani row done/failed ho chuki ho
+          // aur slot abhi bhi grace window me ho.
+          slot_key: [...slots].sort().join(","),
           note: `schedule slot (${slots.join(", ")}) — pipeline khud clip banayegi`,
         })
         .select("id")
         .single();
       if (pipeErr || !pipeReq) {
-        skipped.push({
-          device_id: d.id,
-          reason: "pipeline_request_failed",
-          detail: pipeErr?.message ?? "insert failed",
-          slots,
-        });
+        const detail = pipeErr?.message ?? "insert failed";
+        if (/pipeline_requests_device_slot_uniq|23505/.test(detail)) {
+          skipped.push({
+            device_id: d.id,
+            reason: "slot_already_enqueued",
+            slots,
+          });
+        } else if (/pipeline_requests_active_device_uniq/.test(detail)) {
+          skipped.push({
+            device_id: d.id,
+            reason: "pipeline_already_pending",
+            slots,
+          });
+        } else {
+          skipped.push({
+            device_id: d.id,
+            reason: "pipeline_request_failed",
+            detail,
+            slots,
+          });
+        }
       } else {
         created.push({
           device_id: d.id,
