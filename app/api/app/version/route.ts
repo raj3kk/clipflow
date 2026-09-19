@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 
 /**
  * GET /api/app/version — PUBLIC, no auth.
@@ -8,6 +7,11 @@ import { createClient } from "@supabase/supabase-js";
  * Koi release publish nahi hui to 404 + {}.
  *
  * Anon key se padhta hai taaki RLS ("public read app_releases") enforce ho.
+ *
+ * NOTE (2026-09-19, round-6 Worker E): yahan @supabase/supabase-js use NAHI
+ * karte — uska request Vercel runtime me khaali result deta hai jabki same
+ * URL+key pe raw fetch 200 + row deta hai (debug me verify). Isliye seedha
+ * PostgREST REST call hai. Koi secret kabhi log/response me nahi aata.
  */
 export const dynamic = "force-dynamic";
 
@@ -18,18 +22,25 @@ export async function GET() {
     return NextResponse.json({}, { status: 404 });
   }
   try {
-    const sb = createClient(url, anon);
-    // NOTE: .maybeSingle() yahan use NAHI karte — uska
-    // `Accept: application/vnd.pgrst.object+json` header Vercel runtime me
-    // khaali result deta hai (2026-09-19 debug: raw fetch 200 + row milti
-    // hai, maybeSingle null deta hai). .limit(1) + data[0] reliable hai.
-    const { data, error } = await sb
-      .from("app_releases")
-      .select("version_code, version_name, apk_url, changelog, force_update")
-      .order("version_code", { ascending: false })
-      .limit(1);
-    const row = (data ?? [])[0];
-    if (error || !row) {
+    const r = await fetch(
+      `${url.replace(/\/$/, "")}/rest/v1/app_releases?select=version_code,version_name,apk_url,changelog,force_update&order=version_code.desc&limit=1`,
+      {
+        headers: { apikey: anon, Authorization: `Bearer ${anon}` },
+        cache: "no-store",
+      }
+    );
+    if (!r.ok) {
+      return NextResponse.json({}, { status: 404 });
+    }
+    const rows = (await r.json()) as Array<{
+      version_code: number;
+      version_name: string;
+      apk_url: string;
+      changelog?: string | null;
+      force_update?: boolean | null;
+    }>;
+    const row = rows?.[0];
+    if (!row) {
       return NextResponse.json({}, { status: 404 });
     }
     return NextResponse.json({
