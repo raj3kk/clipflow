@@ -57,11 +57,15 @@ export async function GET(req: Request) {
   //     - Fresh heartbeat (3 min, hb>0) = koi worker ZINDA hai → 204, taaki
   //       do worker ek hi job na chalaye (duplicate IG post ka khatra).
   const HOLD_FRESH_MS = 3 * 60 * 1000;
+  const nowIso = new Date().toISOString();
   const { data: held } = await sb
     .from("device_jobs")
     .select("id, type, payload, heartbeat_count, last_heartbeat, created_at")
     .eq("device_id", ident.deviceId)
     .in("status", ["dispatched", "running"])
+    // run_after future me hai to abhi wapas mat do (hold ka samman —
+    // jaise queued path karta hai). NULL run_after = turant eligible.
+    .or(`run_after.is.null,run_after.lte.${nowIso}`)
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
