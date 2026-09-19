@@ -7,7 +7,7 @@ export default function SetupBanner() {
     "Create a NEW Supabase project at supabase.com (free tier is fine).",
     "In the Supabase SQL editor, run supabase/schema.sql from the clipflow folder.",
     "Set Vercel env vars: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY.",
-    "Run worker/render_worker.py on the VM with CLIPFLOW_URL + SUPABASE_URL + SUPABASE_SERVICE_KEY.",
+    "On the VM, run worker/run_planner.sh (every 6h) and worker/run_pipeline_watch.sh (every 1 min) via cron — env comes from ~/.config/clipflow/worker.env.",
   ];
   return (
     <div className="mb-6 rounded-xl border border-gold/40 bg-gold/10 p-5">

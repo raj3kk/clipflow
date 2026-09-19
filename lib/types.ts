@@ -17,7 +17,6 @@ export type ConnectionStatus =
   | "verified"
   | "broken";
 
-export type InterventionStatus = "pending" | "resolved" | "consumed" | "expired";
 
 export interface Campaign {
   id: string;
@@ -136,20 +135,6 @@ export interface Connection {
   has_secret: boolean;
   meta: unknown;
   created_at?: string;
-}
-
-export interface Intervention {
-  id: string;
-  kind: string;
-  clip_id: string | null;
-  question: string;
-  detail: unknown;
-  status: InterventionStatus;
-  email_sent_at: string | null;
-  resolved_at: string | null;
-  resolved_via: string | null;
-  created_at?: string;
-  // value_enc and any decrypted value are NEVER included in API responses
 }
 
 export interface ActivityEntry {

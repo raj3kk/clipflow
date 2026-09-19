@@ -7,7 +7,7 @@ import { NextResponse } from "next/server";
  * header. If WORKER_SECRET is unset, the guard is disabled (no auth required).
  *
  * Guarded routes: /api/jobs*, POST /api/activity, PATCH /api/posts/[id],
- * POST /api/interventions (worker creates), POST /api/submissions.
+ * POST /api/submissions.
  *
  * Returns null when the request is allowed, otherwise a 401 NextResponse.
  */

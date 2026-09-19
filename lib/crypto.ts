@@ -1,6 +1,5 @@
 /**
- * Server-side only: AES-256-GCM encrypt/decrypt for connection secrets and
- * one-time intervention values.
+ * Server-side only: AES-256-GCM encrypt/decrypt for connection secrets.
  *
  * Key: process.env.CONNECTIONS_ENCRYPT_KEY — 64 hex chars (32 random bytes).
  * Payload: base64(JSON.stringify({ iv, tag, data }))

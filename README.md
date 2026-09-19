@@ -17,17 +17,13 @@ Production dashboard + automation backend for the Whop Content Rewards clipping 
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY` (server-only)
    - `INSTAGRAM_CONNECTED` = `true` once the Meta authorization for `@viralshortz_45` completes (currently stuck at the Accounts Center "already added" step — until then `/api/clips/[id]/post` honestly reports blocked).
-3. **Render worker** (on the VM with the edit stack):
-   ```bash
-   export CLIPFLOW_URL=https://clipflow-xxx.vercel.app
-   export SUPABASE_URL=...
-   export SUPABASE_SERVICE_KEY=...   # server-side only, never in chat
-   export WORKER_SECRET=...          # optional shared secret
-   python3 worker/render_worker.py
-   ```
-   The worker polls `/api/jobs?status=queued`, renders with `clip_factory.py`
-   (9:16, hook, karaoke captions, effects), uploads the mp4 + preview frames to
-   the `clips` storage bucket, and marks the job `preview`.
+3. **Phone-automation worker** (v2, on the VM with the edit stack):
+   `worker/run_planner.sh` (cron, every 6h) → campaign pick → yt-dlp section
+   download → clip_factory 9:16 render → phone job enqueue.
+   `worker/run_pipeline_watch.sh` (cron, every 1 min) → Run Now triggers
+   (`pipeline_requests`) → planner run → stage tracking.
+   Env comes from `~/.config/clipflow/worker.env` (mode 600) — never in the repo.
+   The phone app is the only poster (IG upload + Whop submit).
 
 ## Workflow
 

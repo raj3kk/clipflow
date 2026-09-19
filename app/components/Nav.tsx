@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import {
   IconActivity,
   IconCampaign,
+  IconClock,
   IconConnections,
   IconPhone,
   IconSettings,
@@ -26,7 +27,7 @@ export const NAV: TabItem[] = [
   { href: "/devices/live", label: "Live", icon: IconActivity },
   { href: "/campaigns", label: "Campaigns", icon: IconCampaign },
   { href: "/connections", label: "Connections", icon: IconConnections },
-  { href: "/activity", label: "Activity", icon: IconActivity },
+  { href: "/activity", label: "Activity", icon: IconClock },
   { href: "/settings", label: "Settings", icon: IconSettings },
 ];
 

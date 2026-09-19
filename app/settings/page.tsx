@@ -19,7 +19,6 @@ type FormState = Pick<
   | "notify_email"
   | "pause_on_block"
   | "platforms"
-  | "autopilot_enabled"
   | "auto_approve"
 >;
 
@@ -117,7 +116,7 @@ export default function SettingsPage() {
   return (
     <div>
       <h1 className="text-2xl font-bold mb-1">Settings</h1>
-      <p className="text-slate-600 text-sm mb-6">Autopilot limits &amp; platforms</p>
+      <p className="text-slate-600 text-sm mb-6">Phone automation limits &amp; platforms</p>
 
       {data && !data.configured && <SetupBanner />}
       <Msg msg={msg} />
@@ -160,22 +159,6 @@ export default function SettingsPage() {
 
         <div className="flex items-start justify-between gap-4 rounded-lg border border-line p-4">
           <div>
-            <div className="text-sm font-semibold">Autopilot agent</div>
-            <p className="text-xs text-slate-500 mt-1">
-              ON rakho to agent khud campaign chunta hai, viral moment nikalta
-              hai, clip render karta hai, post karta hai aur Whop me submit
-              karta hai — bina kuch manual kiye. Sirf action-block ya OTP jaisi
-              rukavaton par rukkar aapko batayega.
-            </p>
-          </div>
-          <Toggle
-            checked={current.autopilot_enabled ?? true}
-            onChange={(v) => set("autopilot_enabled", v)}
-          />
-        </div>
-
-        <div className="flex items-start justify-between gap-4 rounded-lg border border-line p-4">
-          <div>
             <div className="text-sm font-semibold">Auto-approve previews</div>
             <p className="text-xs text-slate-500 mt-1">
               Render ke baad QA-passed preview ko agent khud approve karke
@@ -194,7 +177,7 @@ export default function SettingsPage() {
             <div className="text-sm font-semibold">Pause on action-block</div>
             <p className="text-xs text-slate-500 mt-1">
               Locked ON — if Instagram rate-limits or action-blocks the account,
-              the autopilot pauses itself and notifies the owner instead of
+              phone automation pauses itself and notifies the owner instead of
               risking the account. This guard cannot be turned off.
             </p>
           </div>

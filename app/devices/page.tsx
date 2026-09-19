@@ -571,107 +571,6 @@ function ScheduleCard({ deviceId }: { deviceId: string }) {
   );
 }
 
-function ClipPackageCard({ deviceId }: { deviceId: string }) {
-  const { data, reload } = useApi<ScheduleResp>(
-    `/api/devices/${deviceId}/schedule`
-  );
-  const [videoUrl, setVideoUrl] = useState("");
-  const [caption, setCaption] = useState("");
-  const [whopUrl, setWhopUrl] = useState("");
-  const [msg, setMsg] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    const c = data?.schedule?.clip;
-    if (c) {
-      setVideoUrl(c.video_url ?? "");
-      setCaption(c.caption ?? "");
-      setWhopUrl(c.whop_submit_url ?? "");
-    }
-  }, [data]);
-
-  const hasClip = !!(data?.schedule?.clip?.video_url && data?.schedule?.clip?.caption);
-
-  const save = async () => {
-    setSaving(true);
-    setMsg(null);
-    try {
-      const cur = data?.schedule ?? { mode: "interval", interval_hours: 12, enabled: true };
-      const schedule = {
-        ...cur,
-        clip: {
-          video_url: videoUrl.trim(),
-          caption: caption.trim(),
-          whop_submit_url: whopUrl.trim() || "https://whop.com/content-rewards/",
-        },
-      };
-      const r = await fetch(`/api/devices/${deviceId}/schedule`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ schedule }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error ?? r.status);
-      setMsg("Manual clip save ho gaya — testing wale run isi ko istemal karenge.");
-      reload();
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Failed");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className={cardL}>
-      <div className="flex items-center justify-between mb-1">
-        <div className="font-semibold text-sm">Manual clip (optional — testing ke liye)</div>
-        {hasClip && (
-          <span className="text-[11px] px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border border-emerald-300">
-            manual clip set hai
-          </span>
-        )}
-      </div>
-      <p className="text-xs text-slate-500 mb-3">
-        Bharna zaroori nahi hai — schedule slot ya Run Now pe pipeline khud
-        campaign se clip (video + caption + hashtags) bana leti hai. Ye form
-        sirf testing ke liye hai, jab koi khaas video chalana ho.
-      </p>
-      <label className="text-xs text-slate-600 block mb-2">
-        Video URL (direct MP4 link):
-        <input
-          value={videoUrl}
-          onChange={(e) => setVideoUrl(e.target.value)}
-          placeholder="https://…/clip.mp4"
-          className="mt-1 w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900"
-        />
-      </label>
-      <label className="text-xs text-slate-600 block mb-2">
-        Caption + hashtags:
-        <textarea
-          value={caption}
-          onChange={(e) => setCaption(e.target.value)}
-          rows={3}
-          placeholder="Hook line… #tag1 #tag2"
-          className="mt-1 w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900"
-        />
-      </label>
-      <label className="text-xs text-slate-600 block mb-3">
-        Whop submit page URL:
-        <input
-          value={whopUrl}
-          onChange={(e) => setWhopUrl(e.target.value)}
-          placeholder="https://whop.com/content-rewards/"
-          className="mt-1 w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900"
-        />
-      </label>
-      <button onClick={save} disabled={saving} className={btnPL}>
-        {saving ? "Save…" : "Clip package save karo"}
-      </button>
-      {msg && <p className="text-xs text-slate-700 mt-2">{msg}</p>}
-    </div>
-  );
-}
-
 function CancelJobButton({
   deviceId,
   jobId,
@@ -870,10 +769,6 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
   );
   const [runMsg, setRunMsg] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
-  const [showClip, setShowClip] = useState(false);
-  const [ovVideo, setOvVideo] = useState("");
-  const [ovCaption, setOvCaption] = useState("");
-  const [ovWhop, setOvWhop] = useState("");
   const [pipe, setPipe] = useState<{
     id: string;
     status: string;
@@ -919,36 +814,6 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
       if (!r.ok) throw new Error(d.error ?? r.status);
       setRunMsg("Pipeline shuru ho gayi.");
       await fetchPipeline();
-    } catch (e) {
-      setRunMsg(e instanceof Error ? e.message : "Failed");
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  /** Purana direct run-now (manual clip override) — testing ke liye Advanced me. */
-  const runNowManual = async () => {
-    setRunning(true);
-    setRunMsg(null);
-    try {
-      const body: Record<string, string> = { type: "automation" };
-      if (ovVideo.trim() || ovCaption.trim() || ovWhop.trim()) {
-        body.video_url = ovVideo.trim();
-        body.caption = ovCaption.trim();
-        body.whop_submit_url = ovWhop.trim();
-      }
-      const r = await fetch(`/api/devices/${deviceId}/run-now`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error ?? r.status);
-      setRunMsg(
-        d.via === "fcm"
-          ? "Job ban gaya — phone ko push bhej diya, turant chalega."
-          : `Job ban gaya — phone agle schedule pe uthayega. (${d.reason ?? ""})`
-      );
     } catch (e) {
       setRunMsg(e instanceof Error ? e.message : "Failed");
     } finally {
@@ -1063,47 +928,6 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
               </div>
             );
           })()}
-        <details className="mt-2">
-          <summary className="text-xs text-slate-500 underline cursor-pointer">
-            Advanced (testing ke liye purana direct run-now)
-          </summary>
-          <button
-            onClick={() => setShowClip((v) => !v)}
-            className="text-xs text-slate-500 underline mt-2 block"
-          >
-            {showClip ? "Clip fields chhupao" : "Is baar alag clip chalana hai?"}
-          </button>
-          {showClip && (
-            <div className="mt-2 space-y-2">
-              <input
-                value={ovVideo}
-                onChange={(e) => setOvVideo(e.target.value)}
-                placeholder="Video URL (khali = saved clip package)"
-                className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900"
-              />
-              <textarea
-                value={ovCaption}
-                onChange={(e) => setOvCaption(e.target.value)}
-                rows={2}
-                placeholder="Caption + hashtags (khali = saved)"
-                className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900"
-              />
-              <input
-                value={ovWhop}
-                onChange={(e) => setOvWhop(e.target.value)}
-                placeholder="Whop submit URL (khali = saved)"
-                className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900"
-              />
-            </div>
-          )}
-          <button
-            onClick={runNowManual}
-            disabled={running || devPaused}
-            className="text-xs mt-2 px-3 py-2 rounded-lg border border-slate-200 text-slate-700 hover:border-slate-400"
-          >
-            {running ? "Bhej raha hai…" : "Purana Run Now bhejo (direct job)"}
-          </button>
-        </details>
         <p className="text-xs text-slate-500 mt-1">
           "Jab chahe" trigger — cap (4/24h) yahan bhi lagu hota hai.
         </p>
@@ -1125,8 +949,6 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
       )}
 
       <ScheduleCard deviceId={deviceId} />
-
-      <ClipPackageCard deviceId={deviceId} />
 
       <div className={cardL}>
         <div className="flex items-center justify-between mb-2">
