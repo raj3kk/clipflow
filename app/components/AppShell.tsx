@@ -11,49 +11,22 @@ import Nav, {
   useAllTabs,
 } from "./Nav";
 import ModeToggle from "./ModeToggle";
-import { IconMore, IconSparkles, IconUser, IconX, IconLogout } from "./icons";
+import { IconMore, IconClips, IconUser, IconX, IconLogout } from "./icons";
 import { AppMode, MODE_EVENT, getMode } from "./mode";
 import { getBrowserSupabase } from "@/lib/supabase-browser";
-
-/* ---------- animated magic background ---------- */
-function Aurora() {
-  return (
-    <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden" aria-hidden>
-      <div className="absolute -top-32 -left-24 h-[34rem] w-[34rem] rounded-full bg-magic/25 blur-[110px] animate-drift1" />
-      <div className="absolute top-1/3 -right-32 h-[30rem] w-[30rem] rounded-full bg-spell/20 blur-[110px] animate-drift2" />
-      <div className="absolute -bottom-40 left-1/3 h-[32rem] w-[32rem] rounded-full bg-mana/20 blur-[120px] animate-drift3" />
-      {/* twinkling stars */}
-      {[
-        "left-[12%] top-[18%]",
-        "left-[78%] top-[12%]",
-        "left-[55%] top-[70%]",
-        "left-[28%] top-[85%]",
-        "left-[88%] top-[55%]",
-        "left-[42%] top-[32%]",
-      ].map((pos, i) => (
-        <span
-          key={i}
-          className={`absolute ${pos} h-1 w-1 rounded-full bg-white animate-twinkle`}
-          style={{ animationDelay: `${i * 0.7}s` }}
-        />
-      ))}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_45%,rgba(5,3,16,0.75)_100%)]" />
-    </div>
-  );
-}
 
 /* ---------- logo ---------- */
 function Logo({ compact }: { compact?: boolean }) {
   return (
     <Link href="/" className="group flex items-center gap-2.5">
-      <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-magic via-spell to-mana text-white shadow-magic transition-transform duration-300 group-hover:rotate-12 group-hover:scale-110">
-        <IconSparkles className="h-5 w-5" />
+      <span className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-600 text-white shadow-sm transition-transform duration-300 group-hover:scale-105">
+        <IconClips className="h-5 w-5" />
       </span>
       {!compact && (
         <span className="leading-tight">
-          <span className="font-display text-lg font-bold magic-text">ClipFlow</span>
-          <span className="block text-[10px] tracking-widest text-slate-500 uppercase">
-            magic autopilot
+          <span className="text-lg font-bold tracking-tight text-slate-900">ClipFlow</span>
+          <span className="block text-[10px] uppercase tracking-widest text-slate-500">
+            clipping autopilot
           </span>
         </span>
       )}
@@ -80,15 +53,9 @@ function ProfileIcon() {
     <Link
       href={PROFILE_ITEM.href}
       title={email ?? "Profile"}
-      className={`grid h-10 w-10 place-items-center rounded-full font-display text-sm font-bold text-white transition-transform hover:scale-105 active:scale-95 ${
-        active ? "shadow-magic" : ""
+      className={`grid h-10 w-10 place-items-center rounded-full bg-emerald-600 text-sm font-bold text-white transition-transform hover:scale-105 active:scale-95 ${
+        active ? "ring-2 ring-emerald-300 ring-offset-2" : ""
       }`}
-      style={{
-        background: "linear-gradient(135deg,#7c3aed,#c026d3 55%,#0891b2)",
-        boxShadow: active
-          ? "0 0 20px -2px rgba(217,70,239,0.9)"
-          : "0 0 12px -4px rgba(139,92,246,0.7)",
-      }}
     >
       {email ? initial : <IconUser className="h-5 w-5" />}
     </Link>
@@ -130,10 +97,10 @@ function MobileTabs() {
   return (
     <>
       <nav
-        className="fixed bottom-0 inset-x-0 z-40 md:hidden border-t border-white/10 bg-abyss/90 backdrop-blur-xl"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur md:hidden"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
-        <div className="flex items-stretch justify-around px-2 pt-1.5 pb-1">
+        <div className="flex items-stretch justify-around px-2 pb-1 pt-1.5">
           {primary.map((t) => {
             const Icon = t.icon;
             const active = t.href === activeHref;
@@ -161,18 +128,18 @@ function MobileTabs() {
       {sheetOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
           <div
-            className="absolute inset-0 bg-black/70 backdrop-blur-sm animate-fade-up"
+            className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm animate-fade-up"
             onClick={() => setSheetOpen(false)}
           />
-          <div className="absolute bottom-0 inset-x-0 rounded-t-3xl border-t border-white/10 bg-abyss/95 backdrop-blur-xl p-5 animate-fade-up"
+          <div className="absolute inset-x-0 bottom-0 rounded-t-3xl border-t border-slate-200 bg-white p-5 animate-fade-up"
             style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 1.25rem)" }}
           >
-            <div className="mx-auto mb-4 h-1 w-12 rounded-full bg-white/20" />
+            <div className="mx-auto mb-4 h-1 w-12 rounded-full bg-slate-300" />
             <div className="mb-3 flex items-center justify-between">
-              <span className="font-display text-sm font-semibold magic-text">All sections</span>
+              <span className="text-sm font-semibold text-slate-900">All sections</span>
               <button
                 onClick={() => setSheetOpen(false)}
-                className="grid h-8 w-8 place-items-center rounded-full bg-white/5 text-slate-300"
+                className="grid h-8 w-8 place-items-center rounded-full bg-slate-100 text-slate-600"
                 aria-label="Close"
               >
                 <IconX className="h-4 w-4" />
@@ -188,8 +155,8 @@ function MobileTabs() {
                     href={t.href}
                     className={`flex items-center gap-3 rounded-xl border p-3 text-sm transition-all ${
                       active
-                        ? "border-magic/60 bg-magic/20 text-white shadow-magic-sm"
-                        : "border-white/10 bg-white/[0.04] text-slate-300"
+                        ? "border-emerald-300 bg-emerald-50 font-medium text-emerald-800"
+                        : "border-slate-200 bg-white text-slate-600"
                     }`}
                   >
                     <Icon className="h-5 w-5" />
@@ -231,20 +198,17 @@ function Sidebar() {
   }, []);
   const initial = (email?.[0] ?? "?").toUpperCase();
   return (
-    <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col gap-5 overflow-y-auto border-r border-white/10 bg-abyss/60 p-5 backdrop-blur-xl md:flex">
+    <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col gap-5 overflow-y-auto border-r border-slate-200 bg-white p-5 md:flex">
       <Logo />
       <ModeToggle />
       <Nav />
-      <div className="mt-auto grid gap-3 border-t border-white/10 pt-4">
+      <div className="mt-auto grid gap-3 border-t border-slate-200 pt-4">
         <Link href={PROFILE_ITEM.href} className="tab-item">
-          <span
-            className="grid h-8 w-8 place-items-center rounded-full font-display text-xs font-bold text-white"
-            style={{ background: "linear-gradient(135deg,#7c3aed,#c026d3 55%,#0891b2)" }}
-          >
+          <span className="grid h-8 w-8 place-items-center rounded-full bg-emerald-600 text-xs font-bold text-white">
             {email ? initial : <IconUser className="h-4 w-4" />}
           </span>
           <span className="min-w-0">
-            <span className="block truncate text-xs font-semibold text-slate-200">
+            <span className="block truncate text-xs font-semibold text-slate-800">
               {email ?? "Profile"}
             </span>
             <span className="block text-[10px] text-slate-500">View profile</span>
@@ -271,19 +235,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const bare = path === "/login" || path === "/signup";
   if (bare) {
     return (
-      <>
-        <Aurora />
-        <main className="min-h-screen p-4 sm:p-8">
-          <PageTransition>{children}</PageTransition>
-        </main>
-      </>
+      <main className="min-h-screen p-4 sm:p-8">
+        <PageTransition>{children}</PageTransition>
+      </main>
     );
   }
   return (
     <>
-      <Aurora />
       {/* mobile header */}
-      <header className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-white/10 bg-abyss/80 px-4 py-3 backdrop-blur-xl md:hidden">
+      <header className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur md:hidden">
         <Logo />
         <div className="flex items-center gap-3">
           <ModeToggle compact />

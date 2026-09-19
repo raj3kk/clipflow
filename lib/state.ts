@@ -71,10 +71,10 @@ export async function getDashboard(): Promise<DashboardState | null> {
 export function statusColor(status: string) {
   const s = status.toLowerCase();
   return s === "ok" || s === "submitted" || s === "approved"
-    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+    ? "border-emerald-600/30 bg-emerald-50 text-emerald-700"
     : s === "pending" || s === "needed"
-      ? "border-gold/40 bg-gold/10 text-gold"
+      ? "border-amber-600/30 bg-amber-50 text-amber-700"
       : s === "rejected" || s === "error" || s === "failed"
-        ? "border-red-500/40 bg-red-500/10 text-red-300"
-        : "border-line bg-panel text-slate-300";
+        ? "border-red-300 bg-red-50 text-red-700"
+        : "border-line bg-panel text-slate-600";
 }

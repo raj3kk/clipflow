@@ -4,12 +4,12 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // legacy tokens (purane pages tootenge nahi)
+        // legacy tokens — remapped to light theme (white-dominant)
         ink: "#0b0f17",
-        panel: "#121826",
-        line: "#1f2a3d",
-        accent: "#22d3ee",
-        gold: "#fbbf24",
+        panel: "#ffffff",
+        line: "#e2e8f0",
+        accent: "#059669",
+        gold: "#b45309",
         // magic premium palette
         void: "#050310",
         abyss: "#0a0618",

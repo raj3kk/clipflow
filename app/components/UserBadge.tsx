@@ -27,9 +27,9 @@ export default function UserBadge() {
 
   return (
     <div className="mt-auto pt-4 border-t border-line grid gap-2">
-      <p className="text-xs text-slate-400 truncate" title={email}>{email}</p>
+      <p className="text-xs text-slate-600 truncate" title={email}>{email}</p>
       <button
-        className="text-xs text-slate-400 hover:text-red-300 text-left"
+        className="text-xs text-slate-600 hover:text-red-700 text-left"
         onClick={async () => {
           await getBrowserSupabase().auth.signOut();
           router.push("/login");

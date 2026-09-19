@@ -12,18 +12,18 @@ export default function SetupBanner() {
   return (
     <div className="mb-6 rounded-xl border border-gold/40 bg-gold/10 p-5">
       <h2 className="font-bold text-gold text-lg mb-1">Supabase not configured</h2>
-      <p className="text-sm text-slate-300 mb-3">
+      <p className="text-sm text-slate-700 mb-3">
         The database is not connected yet, so all numbers below are hidden —
         nothing is faked. Complete the setup to see live data:
       </p>
-      <ol className="text-sm text-slate-300 space-y-1.5 list-decimal list-inside">
+      <ol className="text-sm text-slate-700 space-y-1.5 list-decimal list-inside">
         {steps.map((s, i) => (
           <li key={i}>{s}</li>
         ))}
       </ol>
       <Link
         href="/settings"
-        className="inline-block mt-4 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-ink"
+        className="inline-block mt-4 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white"
       >
         Go to Settings
       </Link>

@@ -41,12 +41,12 @@ export default function ActivityPage() {
     );
   }, [data, filter]);
 
-  if (loading) return <p className="text-slate-400">Loading activity…</p>;
+  if (loading) return <p className="text-slate-600">Loading activity…</p>;
   if (error) {
     return (
       <div>
         <h1 className="text-2xl font-bold mb-4">Activity</h1>
-        <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-5 text-sm text-red-200">
+        <div className="rounded-xl border border-red-300 bg-red-50 p-5 text-sm text-red-700">
           API error: {error}
         </div>
       </div>
@@ -59,12 +59,12 @@ export default function ActivityPage() {
         <h1 className="text-2xl font-bold">Activity</h1>
         <button
           onClick={reload}
-          className="rounded-lg border border-line px-3 py-1.5 text-xs text-slate-300 hover:bg-line"
+          className="rounded-lg border border-line px-3 py-1.5 text-xs text-slate-700 hover:bg-line"
         >
           ↻ Refresh
         </button>
       </div>
-      <p className="text-slate-400 text-sm mb-6">
+      <p className="text-slate-600 text-sm mb-6">
         Append-only event log — auto-refreshes every 30s.
       </p>
 
@@ -97,12 +97,12 @@ export default function ActivityPage() {
             <tbody>
               {entries.map((e) => (
                 <tr key={e.id} className="border-b border-line last:border-0">
-                  <td className="py-2 pr-3 text-xs text-slate-400 whitespace-nowrap">
+                  <td className="py-2 pr-3 text-xs text-slate-600 whitespace-nowrap">
                     {fmtDT(e.ts)}
                   </td>
-                  <td className="py-2 pr-3 text-slate-300">{e.actor}</td>
+                  <td className="py-2 pr-3 text-slate-700">{e.actor}</td>
                   <td className="py-2 pr-3 text-accent">{e.event}</td>
-                  <td className="py-2 text-slate-400 text-xs max-w-md break-words">
+                  <td className="py-2 text-slate-600 text-xs max-w-md break-words">
                     {renderDetail(e.detail)}
                   </td>
                 </tr>

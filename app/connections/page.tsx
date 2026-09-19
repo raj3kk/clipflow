@@ -81,8 +81,8 @@ function IgCookiesForm({ save }: { save: SaveFn }) {
 function IgMetaApiForm() {
   return (
     <div className="grid gap-3">
-      <p className="text-sm text-slate-400">
-        Meta app authorization is <span className="text-amber-300 font-medium">not available</span>:
+      <p className="text-sm text-slate-600">
+        Meta app authorization is <span className="text-amber-700 font-medium">not available</span>:
         the Accounts Center flow dead-ends at “already added” and there is no
         Meta developer app connected to ClipFlow, so there is nothing to
         authorize against. Use <span className="font-medium">Session cookies</span> or{" "}
@@ -150,11 +150,11 @@ function WhopOAuthForm({ onMsg }: { onMsg: (m: string) => void }) {
   if (status === "missing") {
     return (
       <div className="grid gap-3">
-        <p className="text-sm text-slate-400">
-          Whop OAuth is <span className="text-amber-300 font-medium">not set up yet</span>:
+        <p className="text-sm text-slate-600">
+          Whop OAuth is <span className="text-amber-700 font-medium">not set up yet</span>:
           it needs a Whop OAuth app for ClipFlow (one-time setup, ~2 min).
           Whop dashboard → Developer → naya app banao, phir Client ID + Secret{" "}
-          <a className="text-sky-400 underline" href="/admin">Admin panel</a> me
+          <a className="text-emerald-700 underline" href="/admin">Admin panel</a> me
           “Whop OAuth app” section me paste karke Save karo.
         </p>
       </div>
@@ -163,7 +163,7 @@ function WhopOAuthForm({ onMsg }: { onMsg: (m: string) => void }) {
 
   return (
     <div className="grid gap-3">
-      <p className="text-sm text-slate-400">
+      <p className="text-sm text-slate-600">
         Official Whop sign-in. Whop asks you to approve; ClipFlow stores only
         an access token, encrypted — never your password, no code pasting.
         The worker uses it for campaign checks and submissions.
@@ -204,8 +204,8 @@ function GmailOAuthForm({ onMsg }: { onMsg: (m: string) => void }) {
   if (status === "missing") {
     return (
       <div className="grid gap-3">
-        <p className="text-sm text-slate-400">
-          Google OAuth is <span className="text-amber-300 font-medium">not set up yet</span>:
+        <p className="text-sm text-slate-600">
+          Google OAuth is <span className="text-amber-700 font-medium">not set up yet</span>:
           it needs a Google Cloud OAuth client for ClipFlow (one-time setup, ~5 min).
           Until then, use <span className="font-medium">App password</span> below —
           it works today. Ask in chat for the setup steps.
@@ -216,7 +216,7 @@ function GmailOAuthForm({ onMsg }: { onMsg: (m: string) => void }) {
 
   return (
     <div className="grid gap-3">
-      <p className="text-sm text-slate-400">
+      <p className="text-sm text-slate-600">
         Real Google sign-in for the Gmail account used for OTP auto-read.
         Google asks you to approve; ClipFlow stores only
         a refresh token, encrypted — never your password.
@@ -375,7 +375,7 @@ function ServiceSection({
                   last verified {c.last_verified ? age(c.last_verified) : "never"}
                   {" · "}
                   {c.has_secret ? (
-                    <span className="text-emerald-300">🔒 secret stored</span>
+                    <span className="text-emerald-700">🔒 secret stored</span>
                   ) : (
                     <span className="text-slate-500">○ no secret</span>
                   )}
@@ -428,7 +428,7 @@ function ServiceSection({
       </div>
 
       {active && (
-        <div className="rounded-lg border border-line p-4 bg-ink/40">
+        <div className="rounded-lg border border-line p-4 bg-slate-50">
           <div className="text-sm font-semibold mb-3">{active.title}</div>
           {active.form({ save, status: own.find((c) => c.method === active.key)?.status })}
         </div>
@@ -458,12 +458,12 @@ export default function ConnectionsPage() {
     }
   }, []);
 
-  if (loading) return <p className="text-slate-400">Loading connections…</p>;
+  if (loading) return <p className="text-slate-600">Loading connections…</p>;
   if (error) {
     return (
       <div>
         <h1 className="text-2xl font-bold mb-4">Connections</h1>
-        <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-5 text-sm text-red-200">
+        <div className="rounded-xl border border-red-300 bg-red-50 p-5 text-sm text-red-700">
           API error: {error}
         </div>
       </div>
@@ -513,14 +513,14 @@ export default function ConnectionsPage() {
   return (
     <div>
       <h1 className="text-2xl font-bold mb-1">Connections</h1>
-      <p className="text-slate-400 text-sm mb-6">
+      <p className="text-slate-600 text-sm mb-6">
         Instagram + Whop + Gmail + Content Rewards login health — worker har run me verify karta hai.
       </p>
 
       {data && !data.configured && <SetupBanner />}
       <Msg msg={msg} />
 
-      <div className="mb-6 rounded-xl border border-line bg-panel p-4 text-xs text-slate-400">
+      <div className="mb-6 rounded-xl border border-line bg-panel p-4 text-xs text-slate-600">
         🔐 Secrets are encrypted with the server key and never stored in the repo.
         Secret values are never rendered back to this UI.
       </div>

@@ -1,8 +1,11 @@
-// Shared UI primitives — "magic premium" theme. Saare tabs isi se style lete hain.
+// Shared UI primitives — light professional theme (white dominant, emerald accent).
+// Saare tabs isi se style lete hain.
 
 export const inputCls = "input-magic";
 
 export const btnPrimary = "btn-magic";
+
+export const btnSecondary = "btn-secondary";
 
 export const btnGhost = "btn-ghost-magic";
 

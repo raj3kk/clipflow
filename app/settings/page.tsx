@@ -65,12 +65,12 @@ export default function SettingsPage() {
   const [msg, setMsg] = useState("");
   const [saving, setSaving] = useState(false);
 
-  if (loading) return <p className="text-slate-400">Loading settings…</p>;
+  if (loading) return <p className="text-slate-600">Loading settings…</p>;
   if (error) {
     return (
       <div>
         <h1 className="text-2xl font-bold mb-4">Settings</h1>
-        <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-5 text-sm text-red-200">
+        <div className="rounded-xl border border-red-300 bg-red-50 p-5 text-sm text-red-700">
           API error: {error}
         </div>
       </div>
@@ -82,7 +82,7 @@ export default function SettingsPage() {
     return (
       <div>
         <h1 className="text-2xl font-bold mb-4">Settings</h1>
-        <p className="text-slate-400 text-sm">No settings returned by the API.</p>
+        <p className="text-slate-600 text-sm">No settings returned by the API.</p>
       </div>
     );
   }
@@ -117,7 +117,7 @@ export default function SettingsPage() {
   return (
     <div>
       <h1 className="text-2xl font-bold mb-1">Settings</h1>
-      <p className="text-slate-400 text-sm mb-6">Autopilot limits &amp; platforms</p>
+      <p className="text-slate-600 text-sm mb-6">Autopilot limits &amp; platforms</p>
 
       {data && !data.configured && <SetupBanner />}
       <Msg msg={msg} />

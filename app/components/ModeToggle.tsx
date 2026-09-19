@@ -31,19 +31,11 @@ export default function ModeToggle({ compact }: { compact?: boolean }) {
     <button
       onClick={() => pick(m)}
       title={title}
-      className={`relative flex-1 rounded-lg px-3 py-1.5 font-display text-xs font-bold tracking-wide transition-all duration-300 ${
+      className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-bold tracking-wide transition-all ${
         mode === m
-          ? "text-white"
-          : "text-slate-500 hover:text-slate-300"
+          ? "bg-emerald-600 text-white shadow-sm"
+          : "text-slate-500 hover:text-slate-800"
       }`}
-      style={
-        mode === m
-          ? {
-              background: "linear-gradient(100deg,#7c3aed,#c026d3)",
-              boxShadow: "0 0 16px -4px rgba(217,70,239,0.8)",
-            }
-          : undefined
-      }
     >
       {label}
     </button>
@@ -52,7 +44,7 @@ export default function ModeToggle({ compact }: { compact?: boolean }) {
   return (
     <div className={compact ? "" : "grid gap-1.5"}>
       <div
-        className={`flex gap-1 rounded-xl border border-white/10 bg-black/40 p-1 backdrop-blur ${
+        className={`flex gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1 ${
           compact ? "w-[104px]" : ""
         }`}
       >

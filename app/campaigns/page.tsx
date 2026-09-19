@@ -48,12 +48,12 @@ function CampaignCard({
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="font-semibold text-lg">{c.name}</h2>
-          <p className="text-sm text-slate-400">{c.sponsor}</p>
+          <p className="text-sm text-slate-600">{c.sponsor}</p>
         </div>
         <div className="text-right shrink-0">
           <div className="text-2xl font-bold text-accent">
             ${c.payout_per_1k_usd.toFixed(2)}
-            <span className="text-sm font-normal text-slate-400">/1k</span>
+            <span className="text-sm font-normal text-slate-600">/1k</span>
           </div>
           {(c.min_payout_usd != null || c.max_payout_usd != null) && (
             <div className="text-xs text-slate-500">
@@ -78,23 +78,23 @@ function CampaignCard({
       </div>
 
       <details className="mt-3 text-sm">
-        <summary className="cursor-pointer text-slate-300 hover:text-white">
+        <summary className="cursor-pointer text-slate-700 hover:text-slate-900">
           Brief requirements
         </summary>
-        <p className="text-slate-400 mt-2 whitespace-pre-wrap">{c.requirements || "—"}</p>
+        <p className="text-slate-600 mt-2 whitespace-pre-wrap">{c.requirements || "—"}</p>
         {c.caption_template && (
           <p className="text-slate-500 mt-2 text-xs">
-            Caption template: <span className="text-slate-400">{c.caption_template}</span>
+            Caption template: <span className="text-slate-600">{c.caption_template}</span>
           </p>
         )}
       </details>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2 border-t border-line pt-4">
         <div className="text-sm">
-          <div className="text-slate-400 mb-1">
+          <div className="text-slate-600 mb-1">
             Budget remaining:{" "}
             {editingBudget ? null : (
-              <span className="text-slate-200 font-semibold">
+              <span className="text-slate-800 font-semibold">
                 {c.budget_remaining_usd != null
                   ? `$${c.budget_remaining_usd.toLocaleString()}`
                   : "—"}
@@ -131,7 +131,7 @@ function CampaignCard({
             </button>
           )}
         </div>
-        <label className="text-sm text-slate-400">
+        <label className="text-sm text-slate-600">
           Join status
           <select
             value={joinStatus}
@@ -191,12 +191,12 @@ export default function CampaignsPage() {
   const [msg, setMsg] = useState("");
   const [adding, setAdding] = useState(false);
 
-  if (loading) return <p className="text-slate-400">Loading campaigns…</p>;
+  if (loading) return <p className="text-slate-600">Loading campaigns…</p>;
   if (error) {
     return (
       <div>
         <h1 className="text-2xl font-bold mb-4">Campaigns</h1>
-        <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-5 text-sm text-red-200">
+        <div className="rounded-xl border border-red-300 bg-red-50 p-5 text-sm text-red-700">
           API error: {error}
         </div>
       </div>
@@ -250,7 +250,7 @@ export default function CampaignsPage() {
           {showAdd ? "Close" : "+ Scout-add campaign"}
         </button>
       </div>
-      <p className="text-slate-400 text-sm mb-6">
+      <p className="text-slate-600 text-sm mb-6">
         {campaigns.length} campaigns · sorted by payout
       </p>
 

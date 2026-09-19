@@ -7,15 +7,15 @@ import { Msg, btnPrimary, btnGhost, cardCls, inputCls } from "../components/ui";
 import { Clip, Campaign, ClipStatus } from "@/lib/types";
 
 const STATUS_COLOR: Record<ClipStatus, string> = {
-  queued: "bg-slate-700 text-slate-200",
-  rendering: "bg-blue-900 text-blue-200",
-  preview: "bg-gold/20 text-gold",
-  approved: "bg-emerald-900 text-emerald-200",
-  scheduled: "bg-violet-900 text-violet-200",
-  posting: "bg-blue-900 text-blue-200",
-  posted: "bg-cyan-900 text-cyan-200",
-  submitted: "bg-emerald-900 text-emerald-200",
-  failed: "bg-red-900 text-red-200",
+  queued: "bg-slate-100 text-slate-700",
+  rendering: "bg-amber-100 text-amber-800",
+  preview: "bg-amber-100 text-amber-800",
+  approved: "bg-emerald-100 text-emerald-800",
+  scheduled: "bg-slate-100 text-slate-700",
+  posting: "bg-emerald-100 text-emerald-800",
+  posted: "bg-emerald-100 text-emerald-800",
+  submitted: "bg-emerald-100 text-emerald-800",
+  failed: "bg-red-100 text-red-700",
 };
 
 interface ClipsResp {
@@ -39,14 +39,14 @@ export default function ClipsPage() {
   const [busy, setBusy] = useState(false);
 
   const loading = clipsApi.loading || campsApi.loading;
-  if (loading) return <p className="text-slate-400">Loading clips…</p>;
+  if (loading) return <p className="text-slate-600">Loading clips…</p>;
 
   const err = clipsApi.error ?? campsApi.error;
   if (err) {
     return (
       <div>
         <h1 className="text-2xl font-bold mb-4">Clips</h1>
-        <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-5 text-sm text-red-200">
+        <div className="rounded-xl border border-red-300 bg-red-50 p-5 text-sm text-red-700">
           API error: {err}
         </div>
       </div>
@@ -103,7 +103,7 @@ export default function ClipsPage() {
   return (
     <div>
       <h1 className="text-2xl font-bold mb-1">Clips</h1>
-      <p className="text-slate-400 text-sm mb-6">
+      <p className="text-slate-600 text-sm mb-6">
         Render queue → preview → approve → schedule post (worker posts)
       </p>
 
@@ -156,11 +156,11 @@ export default function ClipsPage() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="font-semibold">{c.campaign_name ?? c.campaigns?.name ?? c.campaign_id}</div>
-                <div className="text-xs text-slate-400">
+                <div className="text-xs text-slate-600">
                   {c.start_sec}s → {c.end_sec}s · {c.end_sec - c.start_sec}s
                   {c.hook_text ? ` · “${c.hook_text}”` : ""}
                 </div>
-                {c.error && <div className="text-xs text-red-300 mt-1">{c.error}</div>}
+                {c.error && <div className="text-xs text-red-700 mt-1">{c.error}</div>}
               </div>
               <span className={`rounded px-2 py-1 text-xs ${STATUS_COLOR[c.status]}`}>{c.status}</span>
             </div>
@@ -174,12 +174,12 @@ export default function ClipsPage() {
             )}
             <div className="mt-3 flex gap-2 flex-wrap">
               {c.status === "preview" && (
-                <button disabled={busy} onClick={() => act(c.id, "approve")} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold hover:opacity-90 disabled:opacity-50">
+                <button disabled={busy} onClick={() => act(c.id, "approve")} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50">
                   Approve
                 </button>
               )}
               {c.status === "approved" && (
-                <button disabled={busy} onClick={() => act(c.id, "post")} className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-ink hover:opacity-90 disabled:opacity-50">
+                <button disabled={busy} onClick={() => act(c.id, "post")} className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50">
                   Schedule post
                 </button>
               )}

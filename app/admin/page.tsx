@@ -84,13 +84,13 @@ export default function AdminPage() {
     setGate("needPassword");
   }
 
-  if (gate === "loading") return <p className="text-slate-400">Loading…</p>;
+  if (gate === "loading") return <p className="text-slate-600">Loading…</p>;
 
   if (gate === "denied") {
     return (
       <div className={cardCls}>
         <h1 className="text-xl font-bold mb-2">Access denied</h1>
-        <p className="text-sm text-slate-400">Ye area sirf admin ke liye hai.</p>
+        <p className="text-sm text-slate-600">Ye area sirf admin ke liye hai.</p>
       </div>
     );
   }
@@ -99,8 +99,8 @@ export default function AdminPage() {
     return (
       <div className={cardCls}>
         <h1 className="text-xl font-bold mb-2">Admin panel tayyar hai — password bacha hai</h1>
-        <p className="text-sm text-slate-400 mb-3">
-          Vercel me <code className="text-amber-300">ADMIN_PANEL_PASSWORD</code> environment variable
+        <p className="text-sm text-slate-600 mb-3">
+          Vercel me <code className="text-amber-700">ADMIN_PANEL_PASSWORD</code> environment variable
           set karo (Production), phir redeploy karo. Uske baad ye page admin password mangega.
         </p>
         <a className={btnGhost} href="https://vercel.com/webbuilder1/clipflow/settings/environment-variables" target="_blank" rel="noreferrer">
@@ -114,7 +114,7 @@ export default function AdminPage() {
     return (
       <div className={`${cardCls} max-w-md`}>
         <h1 className="text-xl font-bold mb-2">Admin Panel</h1>
-        <p className="text-sm text-slate-400 mb-4">Admin password dalo.</p>
+        <p className="text-sm text-slate-600 mb-4">Admin password dalo.</p>
         <form onSubmit={submitPassword} className="grid gap-3">
           <input
             type="password"
@@ -154,7 +154,7 @@ export default function AdminPage() {
         ].map(([label, v]) => (
           <div key={label as string} className={cardCls}>
             <div className="text-2xl font-bold">{v}</div>
-            <div className="text-xs text-slate-400">{label}</div>
+            <div className="text-xs text-slate-600">{label}</div>
           </div>
         ))}
       </div>
@@ -164,7 +164,7 @@ export default function AdminPage() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-slate-400">
+              <tr className="text-left text-slate-600">
                 <th className="py-1 pr-3">Email</th><th className="py-1 pr-3">Joined</th>
                 <th className="py-1 pr-3">Campaigns</th><th className="py-1 pr-3">Clips</th>
                 <th className="py-1 pr-3">Posts</th><th className="py-1 pr-3">Submissions</th>
@@ -173,8 +173,8 @@ export default function AdminPage() {
             <tbody>
               {(data?.users ?? []).map((u) => (
                 <tr key={u.id} className="border-t border-line">
-                  <td className="py-1 pr-3"><a className="text-sky-400 underline" href={`/admin/users/${u.id}`}>{u.email}</a></td>
-                  <td className="py-1 pr-3 text-slate-400">{fmtDate(u.created_at)}</td>
+                  <td className="py-1 pr-3"><a className="text-emerald-700 underline" href={`/admin/users/${u.id}`}>{u.email}</a></td>
+                  <td className="py-1 pr-3 text-slate-600">{fmtDate(u.created_at)}</td>
                   <td className="py-1 pr-3">{u.campaigns}</td>
                   <td className="py-1 pr-3">{u.clips}</td>
                   <td className="py-1 pr-3">{u.posts}</td>
@@ -189,13 +189,13 @@ export default function AdminPage() {
       <div className={cardCls}>
         <h2 className="font-semibold mb-3">Pending inputs (sab users)</h2>
         {(data?.pendingInterventions ?? []).length === 0 ? (
-          <p className="text-sm text-slate-400">Kuch pending nahi hai.</p>
+          <p className="text-sm text-slate-600">Kuch pending nahi hai.</p>
         ) : (
           <ul className="text-sm grid gap-2">
             {(data?.pendingInterventions ?? []).map((i) => (
               <li key={i.id} className="border-b border-line pb-2">
                 <span className="font-medium">{i.kind}</span> — {i.email}
-                <span className="text-slate-400"> · {age(i.created_at)}</span>
+                <span className="text-slate-600"> · {age(i.created_at)}</span>
               </li>
             ))}
           </ul>
@@ -205,13 +205,13 @@ export default function AdminPage() {
       <div className={cardCls}>
         <h2 className="font-semibold mb-3">Connections (sab users)</h2>
         {(data?.connections ?? []).length === 0 ? (
-          <p className="text-sm text-slate-400">Koi connection nahi hai.</p>
+          <p className="text-sm text-slate-600">Koi connection nahi hai.</p>
         ) : (
           <ul className="text-sm grid gap-2">
             {(data?.connections ?? []).map((c) => (
               <li key={c.id} className="border-b border-line pb-2">
                 <span className="font-medium">{c.service}</span> — {c.email} — {c.status}
-                <span className="text-slate-400"> · verified {c.last_verified ? age(c.last_verified) : "kabhi nahi"}</span>
+                <span className="text-slate-600"> · verified {c.last_verified ? age(c.last_verified) : "kabhi nahi"}</span>
               </li>
             ))}
           </ul>
@@ -222,7 +222,7 @@ export default function AdminPage() {
         <h2 className="font-semibold mb-3">Recent activity</h2>
         <ul className="text-sm grid gap-1">
           {(data?.recentActivity ?? []).map((a) => (
-            <li key={a.id} className="text-slate-300">
+            <li key={a.id} className="text-slate-700">
               {a.action} <span className="text-slate-500">· {a.email} · {age(a.created_at)}</span>
             </li>
           ))}
@@ -277,27 +277,27 @@ function WhopOAuthCard() {
   return (
     <div className={cardCls}>
       <h2 className="font-semibold mb-1">Whop OAuth app</h2>
-      <p className="text-sm text-slate-400 mb-3">
+      <p className="text-sm text-slate-600 mb-3">
         Status:{" "}
         {st == null ? "…" : st.configured ? (
-          <span className="text-emerald-300 font-medium">
+          <span className="text-emerald-700 font-medium">
             configured {st.source === "env" ? "(Vercel env)" : "(yahan paste kiya hua)"}
             {st.clientIdMasked ? ` · ${st.clientIdMasked}` : ""}
           </span>
         ) : (
-          <span className="text-amber-300 font-medium">not set up yet</span>
+          <span className="text-amber-700 font-medium">not set up yet</span>
         )}
       </p>
-      <ol className="text-sm text-slate-400 list-decimal ml-5 grid gap-1 mb-3">
+      <ol className="text-sm text-slate-600 list-decimal ml-5 grid gap-1 mb-3">
         <li>
-          <a className="text-sky-400 underline" href="https://whop.com/dashboard" target="_blank" rel="noreferrer">
+          <a className="text-emerald-700 underline" href="https://whop.com/dashboard" target="_blank" rel="noreferrer">
             whop.com/dashboard
           </a>{" "}
           → Developer → Apps → Create app
         </li>
         <li>
-          OAuth tab me ye redirect URI <span className="font-medium text-slate-200">exact</span> daalo:{" "}
-          <code className="text-xs bg-slate-800 px-1 py-0.5 rounded break-all">{WHOP_REDIRECT_URI}</code>{" "}
+          OAuth tab me ye redirect URI <span className="font-medium text-slate-800">exact</span> daalo:{" "}
+          <code className="text-xs bg-slate-100 px-1 py-0.5 rounded break-all">{WHOP_REDIRECT_URI}</code>{" "}
           <button
             className={btnGhost}
             onClick={() => { navigator.clipboard.writeText(WHOP_REDIRECT_URI); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
@@ -305,8 +305,8 @@ function WhopOAuthCard() {
             {copied ? "Copied!" : "Copy"}
           </button>
         </li>
-        <li>Permissions me <code className="text-xs bg-slate-800 px-1 rounded">oauth:token_exchange</code> enable karo</li>
-        <li>Client ID (<code className="text-xs bg-slate-800 px-1 rounded">app_…</code>) aur Client Secret neeche paste karke Save dabao</li>
+        <li>Permissions me <code className="text-xs bg-slate-100 px-1 rounded">oauth:token_exchange</code> enable karo</li>
+        <li>Client ID (<code className="text-xs bg-slate-100 px-1 rounded">app_…</code>) aur Client Secret neeche paste karke Save dabao</li>
       </ol>
       <form onSubmit={save} className="grid gap-2 max-w-md">
         <input

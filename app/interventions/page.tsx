@@ -67,12 +67,12 @@ export default function InterventionsPage() {
   const { data, loading, error, reload } = useApi<Resp>("/api/interventions");
   const [msg, setMsg] = useState("");
 
-  if (loading) return <p className="text-slate-400">Loading interventions…</p>;
+  if (loading) return <p className="text-slate-600">Loading interventions…</p>;
   if (error) {
     return (
       <div>
         <h1 className="text-2xl font-bold mb-4">Interventions</h1>
-        <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-5 text-sm text-red-200">
+        <div className="rounded-xl border border-red-300 bg-red-50 p-5 text-sm text-red-700">
           API error: {error}
         </div>
       </div>
@@ -91,7 +91,7 @@ export default function InterventionsPage() {
   return (
     <div>
       <h1 className="text-2xl font-bold mb-1">Interventions</h1>
-      <p className="text-slate-400 text-sm mb-6">
+      <p className="text-slate-600 text-sm mb-6">
         Worker jab atak jaye (OTP, 2FA, captcha, approval) — yahan fill-in karo.
       </p>
 
@@ -103,7 +103,7 @@ export default function InterventionsPage() {
         <div className={`${cardCls} mb-8 text-center py-12`}>
           <div className="text-5xl mb-3">✅</div>
           <div className="font-semibold text-lg">All clear</div>
-          <p className="text-sm text-slate-400 mt-1">
+          <p className="text-sm text-slate-600 mt-1">
             Koi pending intervention nahi hai — worker bina ruke chal raha hai.
           </p>
         </div>
@@ -151,9 +151,9 @@ export default function InterventionsPage() {
             <tbody>
               {resolved.map((i) => (
                 <tr key={i.id} className="border-b border-line last:border-0">
-                  <td className="py-2 pr-3 text-slate-400">{i.kind}</td>
-                  <td className="py-2 pr-3 text-slate-300">{i.question}</td>
-                  <td className="py-2 pr-3 text-slate-400 text-xs">{fmtDT(i.resolved_at)}</td>
+                  <td className="py-2 pr-3 text-slate-600">{i.kind}</td>
+                  <td className="py-2 pr-3 text-slate-700">{i.question}</td>
+                  <td className="py-2 pr-3 text-slate-600 text-xs">{fmtDT(i.resolved_at)}</td>
                   <td className="py-2 text-slate-500 text-xs">{i.resolved_via ?? "—"}</td>
                 </tr>
               ))}

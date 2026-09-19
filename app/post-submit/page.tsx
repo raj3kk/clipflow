@@ -38,7 +38,7 @@ function PostCard({ p, sub }: { p: PostRow; sub: PostSubmission | null }) {
               {p.instagram_url}
             </a>
           ) : (
-            <div className="text-xs text-violet-300">
+            <div className="text-xs text-slate-600">
               Scheduled {p.posted_at ? `· ${countdown(p.posted_at)}` : ""}
             </div>
           )}
@@ -57,7 +57,7 @@ function PostCard({ p, sub }: { p: PostRow; sub: PostSubmission | null }) {
       </div>
 
       {p.verify_detail?.detail && (
-        <p className="text-xs text-slate-400 mt-2">{p.verify_detail.detail}</p>
+        <p className="text-xs text-slate-600 mt-2">{p.verify_detail.detail}</p>
       )}
       {frames.length > 0 && (
         <div className="flex gap-2 mt-2 overflow-x-auto">
@@ -68,18 +68,18 @@ function PostCard({ p, sub }: { p: PostRow; sub: PostSubmission | null }) {
         </div>
       )}
 
-      <div className="mt-3 text-xs text-slate-400 border-t border-line pt-3 flex flex-wrap gap-x-6 gap-y-1">
+      <div className="mt-3 text-xs text-slate-600 border-t border-line pt-3 flex flex-wrap gap-x-6 gap-y-1">
         <span>
-          Whop submitted: <span className="text-slate-300">{fmtDT(sub?.submitted_at)}</span>
+          Whop submitted: <span className="text-slate-700">{fmtDT(sub?.submitted_at)}</span>
         </span>
         <span>
           Post → submit:{" "}
           {mins == null ? (
             <span className="text-slate-500">—</span>
           ) : mins > 20 ? (
-            <span className="text-red-300 font-semibold">{mins} min ⚠ over 20-min rule</span>
+            <span className="text-red-700 font-semibold">{mins} min ⚠ over 20-min rule</span>
           ) : (
-            <span className="text-emerald-300">{mins} min ✓</span>
+            <span className="text-emerald-700">{mins} min ✓</span>
           )}
         </span>
       </div>
@@ -101,14 +101,14 @@ export default function PostSubmitPage() {
   });
 
   const loading = postsApi.loading || settingsApi.loading;
-  if (loading) return <p className="text-slate-400">Loading posts…</p>;
+  if (loading) return <p className="text-slate-600">Loading posts…</p>;
 
   const err = postsApi.error ?? settingsApi.error;
   if (err) {
     return (
       <div>
         <h1 className="text-2xl font-bold mb-4">Post &amp; Submit</h1>
-        <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-5 text-sm text-red-200">
+        <div className="rounded-xl border border-red-300 bg-red-50 p-5 text-sm text-red-700">
           API error: {err}
         </div>
       </div>
@@ -180,7 +180,7 @@ export default function PostSubmitPage() {
   return (
     <div>
       <h1 className="text-2xl font-bold mb-1">Post &amp; Submit</h1>
-      <p className="text-slate-400 text-sm mb-6">
+      <p className="text-slate-600 text-sm mb-6">
         Schedule queue (≥{spacingH}h spacing · max {maxPerDay}/day) · manual posts · verification · Whop submissions
       </p>
 
@@ -190,7 +190,7 @@ export default function PostSubmitPage() {
       <div className={`${cardCls} mb-8`}>
         <h2 className="font-semibold mb-3">Schedule queue</h2>
         {violations.map((v, i) => (
-          <div key={i} className="mb-2 rounded-lg border border-red-500/40 bg-red-500/10 p-2.5 text-xs text-red-200">
+          <div key={i} className="mb-2 rounded-lg border border-red-300 bg-red-50 p-2.5 text-xs text-red-700">
             {v}
           </div>
         ))}
@@ -209,7 +209,7 @@ export default function PostSubmitPage() {
               {scheduled.map((p) => (
                 <tr key={p.id} className="border-b border-line last:border-0">
                   <td className="py-2 pr-3">{postCampaignName(p)}</td>
-                  <td className="py-2 pr-3 text-slate-300">{fmtDT(p.posted_at)}</td>
+                  <td className="py-2 pr-3 text-slate-700">{fmtDT(p.posted_at)}</td>
                   <td className="py-2 text-accent">{countdown(p.posted_at)}</td>
                 </tr>
               ))}

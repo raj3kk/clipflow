@@ -2,6 +2,7 @@
 
 import { useApi } from "./components/useApi";
 import SetupBanner from "./components/SetupBanner";
+import AutomationPanel from "./components/AutomationPanel";
 import StatusPill from "@/lib/status-pill";
 import { cardCls, fmtDT, fmtDate } from "./components/ui";
 import { PostRow, isScheduled, postCampaignName, postSubmission } from "./components/models";
@@ -27,7 +28,7 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
   return (
     <div className={cardCls}>
       <div className="text-3xl font-bold text-accent">{value}</div>
-      <div className="text-sm text-slate-400 mt-1">{label}</div>
+      <div className="text-sm text-slate-600 mt-1">{label}</div>
       {sub && <div className="text-xs text-slate-500 mt-1">{sub}</div>}
     </div>
   );
@@ -39,14 +40,14 @@ export default function Dashboard() {
   const subs = useApi<SubsResp>("/api/submissions");
 
   const loading = stats.loading || posts.loading || subs.loading;
-  if (loading) return <p className="text-slate-400">Loading dashboard…</p>;
+  if (loading) return <p className="text-slate-600">Loading dashboard…</p>;
 
   const err = stats.error ?? posts.error ?? subs.error;
   if (err) {
     return (
       <div>
         <h1 className="text-2xl font-bold mb-4">Dashboard</h1>
-        <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-5 text-sm text-red-200">
+        <div className="rounded-xl border border-red-300 bg-red-50 p-5 text-sm text-red-700">
           API error: {err}
         </div>
       </div>
@@ -59,7 +60,7 @@ export default function Dashboard() {
     return (
       <div>
         <h1 className="text-2xl font-bold mb-4">Dashboard</h1>
-        <p className="text-slate-400 text-sm">No stats returned by the API.</p>
+        <p className="text-slate-600 text-sm">No stats returned by the API.</p>
       </div>
     );
   }
@@ -85,7 +86,7 @@ export default function Dashboard() {
         <h1 className="text-2xl font-bold">Dashboard</h1>
         <span className="text-xs text-slate-500">{fmtDate(s.date)}</span>
       </div>
-      <p className="text-slate-400 text-sm mb-6">
+      <p className="text-slate-600 text-sm mb-6">
         Aaj ka progress — target {s.target}/day · fully automated pipeline
       </p>
 
@@ -109,6 +110,8 @@ export default function Dashboard() {
         <StatCard label="In pipeline" value={String(s.in_pipeline)} />
         <StatCard label="Submissions today" value={`${s.submitted}/${s.target}`} />
       </div>
+
+      <AutomationPanel />
 
       <div className={`${cardCls} mb-8 overflow-x-auto`}>
         <h2 className="font-semibold mb-3">Tracking — everything in one place</h2>
@@ -141,8 +144,8 @@ export default function Dashboard() {
                         <span className="text-slate-500">scheduled</span>
                       )}
                     </td>
-                    <td className="py-2 pr-3 text-slate-300">{postCampaignName(p)}</td>
-                    <td className="py-2 pr-3 text-slate-400 text-xs">{fmtDT(p.posted_at)}</td>
+                    <td className="py-2 pr-3 text-slate-700">{postCampaignName(p)}</td>
+                    <td className="py-2 pr-3 text-slate-600 text-xs">{fmtDT(p.posted_at)}</td>
                     <td className="py-2 pr-3">
                       {p.verify_status ? <StatusPill status={p.verify_status} /> : <span className="text-slate-600 text-xs">—</span>}
                     </td>
@@ -153,10 +156,10 @@ export default function Dashboard() {
                         <span className="text-slate-600 text-xs">—</span>
                       )}
                     </td>
-                    <td className="py-2 pr-3 text-right text-slate-300">
+                    <td className="py-2 pr-3 text-right text-slate-700">
                       {sub?.views != null ? sub.views.toLocaleString() : "—"}
                     </td>
-                    <td className="py-2 text-right text-slate-300">
+                    <td className="py-2 text-right text-slate-700">
                       {sub?.earnings_usd != null ? `$${Number(sub.earnings_usd).toFixed(2)}` : "—"}
                     </td>
                   </tr>

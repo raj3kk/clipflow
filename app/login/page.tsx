@@ -39,9 +39,9 @@ function LoginForm() {
       <form onSubmit={onSubmit} className="w-full max-w-sm grid gap-4 rounded-2xl border border-line bg-panel p-8">
         <div>
           <div className="text-xl font-bold text-accent">ClipFlow</div>
-          <p className="text-sm text-slate-400 mt-1">Sign in to your clipping workspace.</p>
+          <p className="text-sm text-slate-600 mt-1">Sign in to your clipping workspace.</p>
         </div>
-        {msg && <p className="text-sm text-red-300">{msg}</p>}
+        {msg && <p className="text-sm text-red-700">{msg}</p>}
         <label className="grid gap-1 text-sm">
           Email
           <input className={inputCls} type="email" required value={email}
@@ -55,7 +55,7 @@ function LoginForm() {
         <button className={btnPrimary} disabled={busy}>
           {busy ? "Signing in…" : "Sign in"}
         </button>
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-slate-600">
           New here? <Link href="/signup" className="text-accent underline">Create an account</Link>
         </p>
       </form>
@@ -65,7 +65,7 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<p className="text-slate-400">Loading…</p>}>
+    <Suspense fallback={<p className="text-slate-600">Loading…</p>}>
       <LoginForm />
     </Suspense>
   );

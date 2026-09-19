@@ -17,9 +17,9 @@ interface Me {
 
 function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-white/5 py-2.5 last:border-0">
+    <div className="flex items-center justify-between gap-3 border-b border-slate-200 py-2.5 last:border-0">
       <span className="text-xs uppercase tracking-wider text-slate-500">{label}</span>
-      <span className={`text-sm text-slate-100 text-right break-all ${mono ? "font-mono text-xs" : ""}`}>
+      <span className={`text-sm text-slate-900 text-right break-all ${mono ? "font-mono text-xs" : ""}`}>
         {value}
       </span>
     </div>
@@ -70,24 +70,22 @@ export default function ProfilePage() {
     <div className="grid gap-5">
       <div>
         <h1 className="font-display text-2xl font-bold magic-text">Profile</h1>
-        <p className="text-sm text-slate-400">Tumhari account info aur automation stats</p>
+        <p className="text-sm text-slate-600">Tumhari account info aur automation stats</p>
       </div>
 
       {/* identity card */}
       <div className={`${cardCls} glass-hover relative overflow-hidden`}>
-        <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-spell/25 blur-[70px]" />
         <div className="flex items-center gap-4">
           <span
-            className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl font-display text-2xl font-bold text-white shadow-magic animate-floaty"
-            style={{ background: "linear-gradient(135deg,#7c3aed,#c026d3 55%,#0891b2)" }}
+            className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-emerald-600 text-2xl font-bold text-white shadow-sm"
           >
             {me ? initial : <IconUser className="h-7 w-7" />}
           </span>
           <div className="min-w-0">
-            <p className="truncate font-display text-lg font-semibold text-white">
+            <p className="truncate text-lg font-semibold text-slate-900">
               {me?.email ?? "Loading…"}
             </p>
-            <p className="flex items-center gap-1.5 text-xs text-emerald-300">
+            <p className="flex items-center gap-1.5 text-xs text-emerald-700">
               <IconCheck className="h-3.5 w-3.5" /> signed in ·{" "}
               {mode === "v2" ? "v2 phone mode" : "v1 server mode"}
             </p>
@@ -104,7 +102,7 @@ export default function ProfilePage() {
       {/* stats */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
         <div className={`${cardCls} glass-hover`}>
-          <div className="flex items-center gap-2 text-slate-400">
+          <div className="flex items-center gap-2 text-slate-600">
             <IconPhone className="h-4 w-4" />
             <span className="text-xs uppercase tracking-wider">Devices (v2)</span>
           </div>
@@ -113,7 +111,7 @@ export default function ProfilePage() {
           </p>
         </div>
         <div className={`${cardCls} glass-hover`}>
-          <div className="flex items-center gap-2 text-slate-400">
+          <div className="flex items-center gap-2 text-slate-600">
             <IconCampaign className="h-4 w-4" />
             <span className="text-xs uppercase tracking-wider">Posts today (v1)</span>
           </div>
@@ -122,7 +120,7 @@ export default function ProfilePage() {
           </p>
         </div>
         <div className={`${cardCls} glass-hover col-span-2 sm:col-span-1`}>
-          <div className="flex items-center gap-2 text-slate-400">
+          <div className="flex items-center gap-2 text-slate-600">
             <IconCheck className="h-4 w-4" />
             <span className="text-xs uppercase tracking-wider">Submitted today</span>
           </div>
@@ -134,7 +132,7 @@ export default function ProfilePage() {
 
       {/* actions */}
       <div className={cardCls}>
-        <p className="mb-3 text-sm font-semibold text-slate-200">Session</p>
+        <p className="mb-3 text-sm font-semibold text-slate-800">Session</p>
         <button onClick={signOut} className={`${btnDanger} flex items-center gap-2 px-4 py-2.5`}>
           <IconLogout className="h-4 w-4" /> Sign out
         </button>

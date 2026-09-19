@@ -43,16 +43,16 @@ export default function SignupPage() {
       <form onSubmit={onSubmit} className="w-full max-w-sm grid gap-4 rounded-2xl border border-line bg-panel p-8">
         <div>
           <div className="text-xl font-bold text-accent">ClipFlow</div>
-          <p className="text-sm text-slate-400 mt-1">Create your clipping workspace.</p>
+          <p className="text-sm text-slate-600 mt-1">Create your clipping workspace.</p>
         </div>
         {done ? (
-          <p className="text-sm text-emerald-300">
+          <p className="text-sm text-emerald-700">
             ✅ Account created — check <span className="font-medium">{email}</span> for the
             confirmation link, then sign in.
           </p>
         ) : (
           <>
-            {msg && <p className="text-sm text-red-300">{msg}</p>}
+            {msg && <p className="text-sm text-red-700">{msg}</p>}
             <label className="grid gap-1 text-sm">
               Email
               <input className={inputCls} type="email" required value={email}
@@ -68,7 +68,7 @@ export default function SignupPage() {
             </button>
           </>
         )}
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-slate-600">
           Already have an account? <Link href="/login" className="text-accent underline">Sign in</Link>
         </p>
       </form>
