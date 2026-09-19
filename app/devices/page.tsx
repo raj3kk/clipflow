@@ -218,17 +218,17 @@ function DeviceCard({
       }`}
     >
       <div className="flex items-center justify-between gap-2">
-        <div className="font-semibold text-slate-900">{d.device_name}</div>
-        <LightPill status={d.status} />
-      </div>
-      {/* device fingerprint — phone app me bhi yahi dikhta hai, match karo */}
-      <div className="mt-2 flex items-center gap-2">
+        {/* 8-char device code — sabse upar, BADA: phone app me bhi yahi dikhta hai (deviceId.take(8).uppercase()), dono match karo */}
         <span
-          className="font-mono text-sm font-bold tracking-[0.2em] text-slate-900"
-          title={d.id}
+          className="font-mono text-3xl font-extrabold tracking-[0.15em] text-emerald-700"
+          title={`Full device ID: ${d.id}`}
         >
           {fingerprint}
         </span>
+        <LightPill status={d.status} />
+      </div>
+      <div className="mt-1 flex items-center gap-2">
+        <div className="font-semibold text-slate-900">{d.device_name}</div>
         <span
           role="button"
           tabIndex={0}
@@ -1261,6 +1261,9 @@ function RecentlyDeleted({ onDone }: { onDone: () => void }) {
           >
             <div>
               <div className="font-semibold text-slate-900">{d.device_name}</div>
+              <div className="font-mono text-xs font-bold tracking-[0.2em] text-emerald-700" title={d.id}>
+                {d.id.slice(0, 8).toUpperCase()}
+              </div>
               <div className="text-xs text-slate-500">
                 Restore ke liye{" "}
                 <span className="font-medium text-slate-700">

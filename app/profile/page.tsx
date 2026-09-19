@@ -31,7 +31,8 @@ export default function ProfilePage() {
   const [me, setMe] = useState<Me | null>(null);
   const [mode] = useState(getMode());
   const devices = useApi<{ devices: { id: string }[] }>("/api/devices");
-  const stats = useApi<{ stats: { posts_today?: number; submitted_today?: number } }>("/api/stats");
+  // /api/stats returns DayStats: posted / submitted (DayStats fields) — real counts.
+  const stats = useApi<{ stats: { posted?: number; submitted?: number } }>("/api/stats");
 
   useEffect(() => {
     let s: ReturnType<typeof getBrowserSupabase> | null = null;
@@ -116,7 +117,7 @@ export default function ProfilePage() {
             <span className="text-xs uppercase tracking-wider">Posts today (v1)</span>
           </div>
           <p className="mt-2 font-display text-3xl font-bold magic-text stat-glow">
-            {stats.loading ? "…" : (stats.data?.stats?.posts_today ?? 0)}
+            {stats.loading ? "…" : (stats.data?.stats?.posted ?? 0)}
           </p>
         </div>
         <div className={`${cardCls} glass-hover col-span-2 sm:col-span-1`}>
@@ -125,7 +126,7 @@ export default function ProfilePage() {
             <span className="text-xs uppercase tracking-wider">Submitted today</span>
           </div>
           <p className="mt-2 font-display text-3xl font-bold magic-text stat-glow">
-            {stats.loading ? "…" : (stats.data?.stats?.submitted_today ?? 0)}
+            {stats.loading ? "…" : (stats.data?.stats?.submitted ?? 0)}
           </p>
         </div>
       </div>

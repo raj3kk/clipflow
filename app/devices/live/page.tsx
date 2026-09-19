@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useApi } from "../../components/useApi";
+import { cardCls } from "../../components/ui";
 
 interface LiveDevice {
   id: string;
@@ -41,9 +42,6 @@ interface LiveResp {
   recent: RecentRun[];
 }
 
-const cardCls =
-  "rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-4 shadow-[0_8px_32px_rgba(0,0,0,0.35)]";
-
 function timeAgo(iso: string | null): string {
   if (!iso) return "kabhi nahi";
   const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
@@ -63,17 +61,18 @@ function elapsed(iso: string): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+// Light theme status pills (white premium, emerald accent).
 const STATUS_STYLE: Record<string, string> = {
-  queued: "bg-sky-400/15 text-sky-300 border-sky-400/30",
-  claimed: "bg-amber-400/15 text-amber-300 border-amber-400/30",
-  running: "bg-violet-400/15 text-violet-300 border-violet-400/30",
-  succeeded: "bg-emerald-400/15 text-emerald-300 border-emerald-400/30",
-  failed: "bg-rose-400/15 text-rose-300 border-rose-400/30",
-  blocked: "bg-orange-400/15 text-orange-300 border-orange-400/30",
+  queued: "bg-slate-100 text-slate-700 border-slate-300",
+  claimed: "bg-amber-50 text-amber-700 border-amber-300",
+  running: "bg-blue-50 text-blue-700 border-blue-300",
+  succeeded: "bg-emerald-50 text-emerald-700 border-emerald-300",
+  failed: "bg-red-50 text-red-700 border-red-300",
+  blocked: "bg-orange-50 text-orange-700 border-orange-300",
 };
 
 function Pill({ status }: { status: string }) {
-  const cls = STATUS_STYLE[status] ?? "bg-slate-400/15 text-slate-300 border-slate-400/30";
+  const cls = STATUS_STYLE[status] ?? "bg-slate-100 text-slate-700 border-slate-300";
   return (
     <span className={`text-[11px] px-2 py-0.5 rounded-full border ${cls}`}>
       {status}
@@ -82,9 +81,9 @@ function Pill({ status }: { status: string }) {
 }
 
 const PRESENCE_DOT: Record<string, string> = {
-  online: "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]",
-  idle: "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.9)]",
-  offline: "bg-slate-600",
+  online: "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]",
+  idle: "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]",
+  offline: "bg-slate-400",
 };
 
 const PRESENCE_LABEL: Record<string, string> = {
@@ -111,12 +110,12 @@ export default function LivePage() {
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold magic-text">Live</h1>
-          <p className="text-sm text-slate-400">
+          <h1 className="text-2xl font-bold text-emerald-700">Live</h1>
+          <p className="text-sm text-slate-600">
             Abhi kya ho raha hai — automation ek nazar me
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-slate-400">
+        <div className="flex items-center gap-2 text-xs text-slate-500">
           <span className="relative flex h-2.5 w-2.5">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400" />
@@ -126,14 +125,14 @@ export default function LivePage() {
       </div>
 
       {loading && !data && (
-        <p className="text-slate-400 text-sm">Live status la rahe hain…</p>
+        <p className="text-slate-600 text-sm">Live status la rahe hain…</p>
       )}
       {error && (
-        <div className={`${cardCls} border-rose-400/30`}>
-          <p className="text-rose-300 text-sm">{error}</p>
+        <div className={`${cardCls} border-red-300`}>
+          <p className="text-red-600 text-sm">{error}</p>
           <button
             onClick={reload}
-            className="mt-2 text-xs underline underline-offset-2 text-slate-300"
+            className="mt-2 text-xs underline underline-offset-2 text-slate-600 hover:text-slate-900"
           >
             Dobara try karo
           </button>
@@ -144,14 +143,14 @@ export default function LivePage() {
         <>
           {/* abhi chal raha hai */}
           <section>
-            <h2 className="text-sm font-semibold text-slate-300 mb-2">
+            <h2 className="text-sm font-semibold text-slate-700 mb-2">
               Abhi chal raha hai
             </h2>
             {data.active.length === 0 ? (
               <div className={cardCls}>
-                <p className="text-sm text-slate-400">
+                <p className="text-sm text-slate-600">
                   Abhi koi automation nahi chal rahi. Devices tab se{" "}
-                  <span className="text-slate-200 font-medium">▶ Run Now</span>{" "}
+                  <span className="text-slate-900 font-medium">▶ Run Now</span>{" "}
                   dabao ya schedule ka wait karo.
                 </p>
               </div>
@@ -160,16 +159,16 @@ export default function LivePage() {
                 {data.active.map((j) => (
                   <div key={j.id} className={cardCls}>
                     <div className="flex items-center justify-between gap-2">
-                      <div className="font-semibold text-sm">{j.device_name}</div>
+                      <div className="font-semibold text-sm text-slate-900">{j.device_name}</div>
                       <Pill status={j.status} />
                     </div>
-                    <div className="mt-2 text-xs text-slate-400 space-y-1">
+                    <div className="mt-2 text-xs text-slate-600 space-y-1">
                       <div>
-                        Kaam: <span className="text-slate-200">{j.type}</span>
+                        Kaam: <span className="text-slate-900">{j.type}</span>
                       </div>
                       <div>
                         Shuru hue:{" "}
-                        <span className="text-slate-200 font-mono">
+                        <span className="text-slate-900 font-mono">
                           {elapsed(j.created_at)}
                         </span>{" "}
                         pehle
@@ -177,14 +176,14 @@ export default function LivePage() {
                       {j.last_heartbeat && (
                         <div>
                           Phone ka signal:{" "}
-                          <span className="text-slate-200">
+                          <span className="text-slate-900">
                             {timeAgo(j.last_heartbeat)}
                           </span>
                         </div>
                       )}
                       {j.attempts > 0 && (
                         <div>
-                          Koshish: <span className="text-slate-200">{j.attempts}</span>
+                          Koshish: <span className="text-slate-900">{j.attempts}</span>
                         </div>
                       )}
                     </div>
@@ -196,10 +195,10 @@ export default function LivePage() {
 
           {/* devices */}
           <section>
-            <h2 className="text-sm font-semibold text-slate-300 mb-2">Devices</h2>
+            <h2 className="text-sm font-semibold text-slate-700 mb-2">Devices</h2>
             {data.devices.length === 0 ? (
               <div className={cardCls}>
-                <p className="text-sm text-slate-400">
+                <p className="text-sm text-slate-600">
                   Koi device linked nahi. Devices tab me enroll karo.
                 </p>
               </div>
@@ -211,26 +210,26 @@ export default function LivePage() {
                       <span
                         className={`h-2.5 w-2.5 rounded-full ${PRESENCE_DOT[d.presence]}`}
                       />
-                      <div className="font-semibold text-sm">{d.device_name}</div>
+                      <div className="font-semibold text-sm text-slate-900">{d.device_name}</div>
                       <span className="text-[11px] text-slate-500">
                         {PRESENCE_LABEL[d.presence]}
                       </span>
                       {d.status === "paused" && (
-                        <span className="text-[11px] px-2 py-0.5 rounded-full border bg-orange-400/15 text-orange-300 border-orange-400/30">
+                        <span className="text-[11px] px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-300">
                           paused
                         </span>
                       )}
                     </div>
-                    <div className="mt-2 text-xs text-slate-400 space-y-1">
+                    <div className="mt-2 text-xs text-slate-600 space-y-1">
                       <div>
                         Code:{" "}
-                        <span className="font-mono font-bold tracking-[0.2em] magic-text">
+                        <span className="font-mono text-base font-extrabold tracking-[0.15em] text-emerald-700" title={d.id}>
                           {d.id.slice(0, 8).toUpperCase()}
                         </span>
                       </div>
                       <div>
                         Last seen:{" "}
-                        <span className="text-slate-200">{timeAgo(d.last_seen)}</span>
+                        <span className="text-slate-900">{timeAgo(d.last_seen)}</span>
                       </div>
                       <div>
                         {d.platform} · v{d.app_version}
@@ -244,24 +243,24 @@ export default function LivePage() {
 
           {/* pichhle 24 ghante */}
           <section>
-            <h2 className="text-sm font-semibold text-slate-300 mb-2">
+            <h2 className="text-sm font-semibold text-slate-700 mb-2">
               Pichhle 24 ghante
             </h2>
             {data.recent.length === 0 ? (
               <div className={cardCls}>
-                <p className="text-sm text-slate-400">
+                <p className="text-sm text-slate-600">
                   Pichhle 24 ghante me koi run nahi hui.
                 </p>
               </div>
             ) : (
-              <div className={`${cardCls} divide-y divide-white/5`}>
+              <div className={`${cardCls} divide-y divide-slate-200`}>
                 {data.recent.map((r) => (
                   <div
                     key={r.id}
                     className="py-2.5 flex items-start justify-between gap-3 first:pt-0 last:pb-0"
                   >
                     <div className="min-w-0">
-                      <div className="text-sm text-slate-200 truncate">
+                      <div className="text-sm text-slate-900 truncate">
                         {r.device_name}
                       </div>
                       {r.note && (
@@ -269,7 +268,7 @@ export default function LivePage() {
                           {r.note}
                         </div>
                       )}
-                      <div className="text-[11px] text-slate-600">
+                      <div className="text-[11px] text-slate-500">
                         {timeAgo(r.finished_at)}
                       </div>
                     </div>
