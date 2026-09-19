@@ -46,7 +46,9 @@ export function isTerminalFailure(j: {
   // count NAHI. attempts exhaust hone ke baad bhi jo job abhi
   // dispatched/running hai aur phone uspe kaam kar raha hai, wo GENUINE
   // attempt hai — terminal fail hote hi (failed/timeout) cap se bahar.
-  return status === "failed" || status === "timeout";
+  // NOTE: `status` yahan j.status hai — bare `status` DOM global
+  // (window.status) ko pakadta hai, Node me ReferenceError deta hai.
+  return j.status === "failed" || j.status === "timeout";
 }
 
 export type CapUsage = {
