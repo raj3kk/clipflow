@@ -44,6 +44,193 @@ interface LiveResp {
   recent: RecentRun[];
 }
 
+type CheckStatus = "done" | "active" | "pending" | "failed" | "active-unknown";
+
+interface CheckStep {
+  key: string;
+  label: string;
+  status: CheckStatus;
+  detail: string;
+  updated_at: string | null;
+}
+
+interface ActivityEvent {
+  at: string;
+  text: string;
+  kind: string;
+}
+
+interface ChecklistResp {
+  request: {
+    id: string;
+    status: string;
+    stage: string | null;
+    note: string;
+    created_at: string;
+    finished_at: string | null;
+  } | null;
+  job: {
+    id: string;
+    status: string;
+    device_name: string;
+    current_step: string | null;
+    last_heartbeat: string | null;
+    heartbeat_count: number | null;
+  } | null;
+  steps: CheckStep[];
+  activity: ActivityEvent[];
+}
+
+const CHECK_TICKET: Record<CheckStatus, { tick: string; dot: string; ring: string }> = {
+  done: { tick: "✓", dot: "bg-emerald-500", ring: "ring-emerald-200" },
+  active: { tick: "▶", dot: "bg-blue-500", ring: "ring-blue-200" },
+  pending: { tick: "○", dot: "bg-slate-300", ring: "ring-slate-200" },
+  failed: { tick: "✗", dot: "bg-red-500", ring: "ring-red-200" },
+  "active-unknown": { tick: "◐", dot: "bg-amber-400", ring: "ring-amber-200" },
+};
+
+const KIND_DOT: Record<string, string> = {
+  start: "bg-blue-500",
+  stage: "bg-indigo-400",
+  job: "bg-amber-400",
+  step: "bg-blue-400",
+  upload: "bg-pink-400",
+  verify: "bg-violet-400",
+  submit: "bg-emerald-400",
+  done: "bg-emerald-500",
+  fail: "bg-red-500",
+  retry: "bg-orange-400",
+};
+
+/** Automation checklist + live activity feed — har 10s auto-refresh. */
+function AutomationChecklist() {
+  const { data, loading, error, reload } = useApi<ChecklistResp>(
+    "/api/automation/checklist"
+  );
+
+  useEffect(() => {
+    const t = setInterval(() => reload(), 10000);
+    return () => clearInterval(t);
+  }, [reload]);
+
+  return (
+    <section>
+      <h2 className="text-sm font-semibold text-slate-700 mb-2">
+        Automation checklist
+      </h2>
+      <div className={cardCls}>
+        {loading && !data && (
+          <p className="text-slate-600 text-sm">Checklist la rahe hain…</p>
+        )}
+        {error && (
+          <div>
+            <p className="text-red-600 text-sm">{error}</p>
+            <button
+              onClick={reload}
+              className="mt-2 text-xs underline underline-offset-2 text-slate-600 hover:text-slate-900"
+            >
+              Dobara try karo
+            </button>
+          </div>
+        )}
+        {data && data.steps.length === 0 && (
+          <p className="text-sm text-slate-600">
+            Abhi koi automation nahi chal rahi. Devices tab se{" "}
+            <span className="text-slate-900 font-medium">▶ Run Now</span>{" "}
+            dabao ya schedule ka wait karo.
+          </p>
+        )}
+        {data && data.steps.length > 0 && (
+          <>
+            {/* request/job summary */}
+            <div className="text-xs text-slate-500 mb-3">
+              {data.request && (
+                <span>
+                  Request:{" "}
+                  <span className="text-slate-800 font-medium">
+                    {data.request.status}
+                  </span>
+                  {data.request.stage && ` · stage ${data.request.stage}`}
+                </span>
+              )}
+              {data.request && data.job && <span> · </span>}
+              {data.job && (
+                <span>
+                  Phone job:{" "}
+                  <span className="text-slate-800 font-medium">
+                    {data.job.status}
+                  </span>{" "}
+                  ({data.job.device_name})
+                </span>
+              )}
+            </div>
+
+            {/* vertical timeline */}
+            <ol className="relative ml-3 border-l-2 border-slate-200 space-y-4">
+              {data.steps.map((s) => {
+                const t = CHECK_TICKET[s.status];
+                return (
+                  <li key={s.key} className="pl-5 relative">
+                    <span
+                      className={`absolute -left-[13px] top-0 h-6 w-6 rounded-full ${t.dot} ring-4 ${t.ring} flex items-center justify-center text-white text-[11px] font-bold`}
+                    >
+                      {t.tick}
+                    </span>
+                    <div className="text-sm font-semibold text-slate-900">
+                      {s.label}
+                      {s.status === "active-unknown" && (
+                        <span className="ml-2 text-[11px] font-normal text-amber-700">
+                          (pata nahi kaunsa step — map nahi hua)
+                        </span>
+                      )}
+                    </div>
+                    {s.detail && (
+                      <div className="text-xs text-slate-600 mt-0.5 break-words">
+                        {s.detail}
+                      </div>
+                    )}
+                    {s.updated_at && (
+                      <div className="text-[11px] text-slate-400">
+                        {timeAgo(s.updated_at)}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+
+            {/* live activity feed */}
+            {data.activity.length > 0 && (
+              <div className="mt-5 pt-4 border-t border-slate-200">
+                <h3 className="text-xs font-semibold text-slate-600 mb-2">
+                  Abhi kya ho raha hai
+                </h3>
+                <ul className="space-y-2 max-h-64 overflow-y-auto">
+                  {data.activity.map((e, i) => (
+                    <li key={`${e.at}-${i}`} className="flex items-start gap-2">
+                      <span
+                        className={`mt-1.5 h-2 w-2 rounded-full shrink-0 ${KIND_DOT[e.kind] ?? "bg-slate-400"}`}
+                      />
+                      <div className="min-w-0">
+                        <div className="text-xs text-slate-800 leading-snug">
+                          {e.text}
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          {timeAgo(e.at)}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function timeAgo(iso: string | null): string {
   if (!iso) return "kabhi nahi";
   const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
@@ -153,6 +340,9 @@ export default function LivePage() {
 
       {data && (
         <>
+          {/* automation checklist — pipeline ke 9 steps + live activity */}
+          <AutomationChecklist />
+
           {/* abhi chal raha hai */}
           <section>
             <h2 className="text-sm font-semibold text-slate-700 mb-2">
