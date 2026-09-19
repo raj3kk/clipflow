@@ -36,12 +36,19 @@ export async function createAutomationJob(
 ): Promise<JobCreateResult> {
   const { data: device } = await sb
     .from("devices")
-    .select("id, status")
+    .select("id, status, deleted_at, disconnected_at")
     .eq("id", deviceId)
     .eq("user_id", userId)
     .single();
   if (!device) {
     return { ok: false, code: 404, error: "Unknown device." };
+  }
+  // 2026-09-19: soft-deleted ya disconnected device pe naya job NAHI banta.
+  if (device.deleted_at) {
+    return { ok: false, code: 409, error: "Device deleted." };
+  }
+  if (device.disconnected_at) {
+    return { ok: false, code: 409, error: "Device disconnected." };
   }
   if (device.status !== "active") {
     return {

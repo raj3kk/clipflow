@@ -348,9 +348,13 @@ create table if not exists devices (
   paused_until timestamptz,
   last_seen timestamptz,
   schedule_json jsonb not null default '{"mode":"interval","interval_hours":12}',
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- 2026-09-19: soft delete (7 din restore window) + disconnect
+  deleted_at timestamptz,
+  disconnected_at timestamptz
 );
 create index if not exists devices_user_idx on devices (user_id);
+create index if not exists devices_active_idx on devices (user_id) where deleted_at is null;
 
 create table if not exists device_enroll_codes (
   id uuid primary key default gen_random_uuid(),

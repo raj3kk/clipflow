@@ -59,6 +59,21 @@ export async function getDeviceIdentity(req: Request): Promise<DeviceIdentity> {
       ),
     };
   }
+  // 2026-09-19: soft-deleted ya disconnected device se phone koi
+  // request nahi karega — jobs/next bhi 401 dega (koi job nahi milega).
+  if (data.deleted_at) {
+    return {
+      error: NextResponse.json({ error: "Device deleted." }, { status: 401 }),
+    };
+  }
+  if (data.disconnected_at) {
+    return {
+      error: NextResponse.json(
+        { error: "Device disconnected." },
+        { status: 401 }
+      ),
+    };
+  }
   const want = Buffer.from(String(data.api_key_hash), "hex");
   const got = Buffer.from(hashApiKey(key), "hex");
   if (

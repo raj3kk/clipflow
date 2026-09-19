@@ -56,6 +56,7 @@ export async function PATCH(
     .update(patch)
     .eq("id", params.id)
     .eq("user_id", user.id)
+    .is("deleted_at", null)
     .select("id, status, paused_until")
     .single();
 
@@ -66,15 +67,17 @@ export async function PATCH(
 }
 
 /**
- * Device hatao (dashboard).
+ * Device hatao (dashboard) — SOFT DELETE.
  *
- * DELETE /api/devices/:id  → { ok: true }
+ * DELETE /api/devices/:id
+ *   → { ok: true, restore_until: <ISO>, message: "7 din ke andar restore ho sakta hai" }
  *
- * Device row delete hoti hai; device_jobs + job_runs FK cascade se
- * apne aap delete hote hain. Screenshots (device-shots bucket) best-effort
- * saaf hote hain — fail ho to device delete phir bhi hota hai.
- * Phone pe app ka local enroll bana rehta hai — dobara link karne ke
- * liye app data clear karke naya code se enroll karo.
+ * Row delete NAHI hoti — deleted_at = now() set hota hai. Jobs, runs aur
+ * screenshots bane rehte hain (restore pe sab wapas). 7 din purani
+ * soft-deleted rows schedule-tick cleanup hard-delete karta hai.
+ * POST /api/devices/:id/restore se wapas lao (7 din ke andar).
+ * Phone pe app ka local enroll bana rehta hai — naya device chahiye to
+ * app data clear karke naya code se enroll karo.
  */
 export async function DELETE(
   _req: Request,
@@ -89,38 +92,25 @@ export async function DELETE(
     return NextResponse.json({ error: "Supabase not configured." }, { status: 503 });
   }
 
-  const { data: device } = await sb
+  const now = new Date();
+  const { data: device, error } = await sb
     .from("devices")
-    .select("id")
+    .update({ deleted_at: now.toISOString() })
     .eq("id", params.id)
     .eq("user_id", user.id)
+    .is("deleted_at", null)
+    .select("id")
     .single();
-  if (!device) {
+  if (error || !device) {
     return NextResponse.json({ error: "Unknown device." }, { status: 404 });
   }
 
-  // screenshots best-effort saaf karo (bucket private hai)
-  try {
-    const { data: files } = await sb.storage
-      .from("device-shots")
-      .list(params.id, { limit: 1000 });
-    const paths = (files ?? [])
-      .filter((f) => f.name)
-      .map((f) => `${params.id}/${f.name}`);
-    if (paths.length > 0) {
-      await sb.storage.from("device-shots").remove(paths);
-    }
-  } catch {
-    /* best-effort — device delete phir bhi hoga */
-  }
-
-  const { error } = await sb
-    .from("devices")
-    .delete()
-    .eq("id", params.id)
-    .eq("user_id", user.id);
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-  return NextResponse.json({ ok: true });
+  const restoreUntil = new Date(
+    now.getTime() + 7 * 24 * 60 * 60 * 1000
+  ).toISOString();
+  return NextResponse.json({
+    ok: true,
+    restore_until: restoreUntil,
+    message: "7 din ke andar restore ho sakta hai",
+  });
 }

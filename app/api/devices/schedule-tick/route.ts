@@ -68,7 +68,9 @@ export async function POST(req: Request) {
   const { data: devices } = await sb
     .from("devices")
     .select("id, user_id, device_name, app_version, status, last_seen, schedule_json, fcm_token")
-    .eq("status", "active");
+    .eq("status", "active")
+    .is("deleted_at", null)
+    .is("disconnected_at", null);
 
   const now = Date.now();
   const created: Array<Record<string, unknown>> = [];
@@ -238,11 +240,48 @@ export async function POST(req: Request) {
     }
   }
 
+  // 2026-09-19: 7+ din purani soft-deleted devices ka auto hard-delete.
+  // FK cascade se device_jobs + job_runs apne aap delete hote hain;
+  // screenshots (device-shots bucket) best-effort saaf hote hain.
+  let hardDeleted = 0;
+  try {
+    const cutoff = new Date(
+      Date.now() - 7 * 24 * 60 * 60 * 1000
+    ).toISOString();
+    const { data: old } = await sb
+      .from("devices")
+      .select("id")
+      .lt("deleted_at", cutoff);
+    for (const d of old ?? []) {
+      try {
+        const { data: files } = await sb.storage
+          .from("device-shots")
+          .list(d.id, { limit: 1000 });
+        const paths = (files ?? [])
+          .filter((f) => f.name)
+          .map((f) => `${d.id}/${f.name}`);
+        if (paths.length > 0) {
+          await sb.storage.from("device-shots").remove(paths);
+        }
+      } catch {
+        /* best-effort */
+      }
+      const { error: delErr } = await sb
+        .from("devices")
+        .delete()
+        .eq("id", d.id);
+      if (!delErr) hardDeleted++;
+    }
+  } catch {
+    /* cleanup best-effort — tick kabhi fail nahi hogi */
+  }
+
   return NextResponse.json({
     ticked_at: new Date().toISOString(),
     devices_checked: (devices ?? []).length,
     devices: diag,
     created,
     skipped,
+    cleanup: { hard_deleted: hardDeleted },
   });
 }

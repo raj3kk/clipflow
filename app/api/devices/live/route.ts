@@ -33,9 +33,10 @@ export async function GET() {
   const { data: devices } = await sb
     .from("devices")
     .select(
-      "id, device_name, platform, app_version, status, paused_until, last_seen, created_at"
+      "id, device_name, platform, app_version, status, paused_until, last_seen, created_at, deleted_at, disconnected_at"
     )
     .eq("user_id", user.id)
+    .is("deleted_at", null)
     .order("created_at", { ascending: true });
 
   const now = Date.now();
@@ -43,7 +44,11 @@ export async function GET() {
     const seen = d.last_seen ? new Date(d.last_seen).getTime() : 0;
     const age = now - seen;
     const presence = !seen ? "offline" : age < ONLINE_MS ? "online" : "idle";
-    return { ...d, presence };
+    return {
+      ...d,
+      status: d.disconnected_at ? "disconnected" : d.status,
+      presence,
+    };
   });
   const nameById: Record<string, string> = {};
   for (const d of devList) nameById[d.id] = d.device_name;

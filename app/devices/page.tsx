@@ -3,8 +3,49 @@
 import { useEffect, useState } from "react";
 import { useApi } from "../components/useApi";
 import SetupBanner from "../components/SetupBanner";
-import StatusPill from "@/lib/status-pill";
-import { Msg, age, btnPrimary, cardCls, fmtDT } from "../components/ui";
+import { age, fmtDT } from "../components/ui";
+
+// Light theme (standard Tailwind) — app/devices ka apna theme.
+const cardL = "bg-white border border-slate-200 rounded-xl p-5 shadow-sm";
+const btnPL =
+  "bg-emerald-600 hover:bg-emerald-700 text-white text-sm px-4 py-2 rounded-lg font-medium disabled:opacity-50";
+const btnGL =
+  "border border-slate-300 text-slate-700 text-xs px-3 py-2 rounded-lg hover:border-slate-400 bg-white";
+const btnRL =
+  "border border-red-300 text-red-600 text-xs px-3 py-2 rounded-lg hover:bg-red-50";
+const btnRLA =
+  "border border-red-500 text-red-700 bg-red-50 text-xs px-3 py-2 rounded-lg";
+
+function LightMsg({ msg }: { msg: string }) {
+  if (!msg) return null;
+  return (
+    <div className="rounded-lg bg-slate-100 border border-slate-200 px-3 py-2 text-sm text-slate-700">
+      {msg}
+    </div>
+  );
+}
+
+function LightPill({ status }: { status: string }) {
+  const st = status.toLowerCase();
+  const cls =
+    st === "active" || st === "succeeded" || st === "done" || st === "submitted" || st === "approved"
+      ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+      : st === "paused" || st === "pending" || st === "needed"
+        ? "bg-amber-50 text-amber-700 border-amber-300"
+        : st === "disconnected"
+          ? "bg-slate-100 text-slate-600 border-slate-300"
+          : st === "failed" || st === "blocked" || st === "error" || st === "timeout" || st === "deleted"
+            ? "bg-red-50 text-red-700 border-red-300"
+            : "bg-slate-100 text-slate-600 border-slate-300";
+  return (
+    <span
+      className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-medium ${cls}`}
+    >
+      {status}
+    </span>
+  );
+}
+
 
 interface Device {
   id: string;
@@ -15,6 +56,9 @@ interface Device {
   paused_until: string | null;
   last_seen: string | null;
   created_at: string;
+  deleted_at: string | null;
+  disconnected_at: string | null;
+  restore_days_left: number | null;
 }
 interface DevicesResp {
   devices: Device[];
@@ -68,19 +112,19 @@ function EnrollBox({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <div className={cardCls}>
+    <div className={cardL}>
       <h2 className="font-semibold mb-2">Add device</h2>
-      <p className="text-sm text-slate-400 mb-3">
+      <p className="text-sm text-slate-600 mb-3">
         Phone pe ClipFlow Agent app kholo → ye code dalo (10 min valid).
         App me Whop + Instagram ek baar login karo — bas.
       </p>
       {!code ? (
-        <button onClick={make} disabled={busy} className={btnPrimary}>
+        <button onClick={make} disabled={busy} className={btnPL}>
           {busy ? "Ban raha hai…" : "Enroll code banao"}
         </button>
       ) : (
         <div>
-          <div className="font-mono text-4xl tracking-[0.3em] text-accent my-2">
+          <div className="font-mono text-4xl tracking-[0.3em] text-emerald-600 my-2">
             {code}
           </div>
           <p className="text-xs text-slate-500">
@@ -88,33 +132,99 @@ function EnrollBox({ onDone }: { onDone: () => void }) {
           </p>
         </div>
       )}
-      {err && <Msg msg={err ?? ""} />}
+      {err && <LightMsg msg={err ?? ""} />}
     </div>
   );
 }
 
-function DeviceCard({ d, onSelect, selected }: { d: Device; onSelect: () => void; selected: boolean }) {
+function DeviceCard({
+  d,
+  onSelect,
+  selected,
+  onChanged,
+}: {
+  d: Device;
+  onSelect: () => void;
+  selected: boolean;
+  onChanged: () => void;
+}) {
   const paused = d.status === "paused";
+  const disconnected = d.status === "disconnected";
   const fingerprint = d.id.slice(0, 8).toUpperCase();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
   const copyId = (e: React.MouseEvent) => {
     e.stopPropagation();
     navigator.clipboard?.writeText(d.id).catch(() => {});
   };
+
+  const doDisconnect = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (
+      !window.confirm(
+        `"${d.device_name}" ko disconnect karein?\nPhone ko koi job nahi milega.`
+      )
+    )
+      return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await fetch(`/api/devices/${d.id}/disconnect`, {
+        method: "POST",
+      });
+      const dd = await r.json();
+      if (!r.ok) throw new Error(dd.error ?? r.status);
+      onChanged();
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : "Disconnect failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (
+      !window.confirm(
+        `"${d.device_name}" delete karein?\n7 din ke andar Recently deleted se restore ho sakta hai.`
+      )
+    )
+      return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await fetch(`/api/devices/${d.id}`, { method: "DELETE" });
+      const dd = await r.json();
+      if (!r.ok) throw new Error(dd.error ?? r.status);
+      onChanged();
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : "Delete failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
-      className={`${cardCls} text-left w-full transition-colors ${
-        selected ? "border-accent/60" : "hover:border-slate-500"
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onSelect();
+      }}
+      className={`${cardL} text-left w-full transition-colors cursor-pointer ${
+        selected ? "border-emerald-600/60" : "hover:border-slate-300"
       }`}
     >
       <div className="flex items-center justify-between gap-2">
-        <div className="font-semibold">{d.device_name}</div>
-        <StatusPill status={d.status} />
+        <div className="font-semibold text-slate-900">{d.device_name}</div>
+        <LightPill status={d.status} />
       </div>
       {/* device fingerprint — phone app me bhi yahi dikhta hai, match karo */}
       <div className="mt-2 flex items-center gap-2">
         <span
-          className="font-mono text-sm font-bold tracking-[0.2em] magic-text"
+          className="font-mono text-sm font-bold tracking-[0.2em] text-slate-900"
           title={d.id}
         >
           {fingerprint}
@@ -124,24 +234,43 @@ function DeviceCard({ d, onSelect, selected }: { d: Device; onSelect: () => void
           tabIndex={0}
           onClick={copyId}
           onKeyDown={(e) => e.key === "Enter" && copyId(e as unknown as React.MouseEvent)}
-          className="text-[10px] text-slate-500 hover:text-slate-300 underline underline-offset-2"
+          className="text-[10px] text-slate-500 hover:text-slate-700 underline underline-offset-2"
           title="Full device ID copy karo"
         >
           ID copy
         </span>
       </div>
-      <div className="text-xs text-slate-400 mt-2 space-y-1">
+      <div className="text-xs text-slate-600 mt-2 space-y-1">
         <div>
           {d.platform} {d.app_version ? `· v${d.app_version}` : ""} · last seen{" "}
           {d.last_seen ? age(d.last_seen) : "kabhi nahi"}
         </div>
         {paused && d.paused_until && (
-          <div className="text-amber-300">
+          <div className="text-amber-700">
             Auto-paused (action-block) — resumes {fmtDT(d.paused_until)}
           </div>
         )}
+        {disconnected && (
+          <div className="text-slate-500">
+            Disconnected — phone ko koi job nahi milega
+          </div>
+        )}
       </div>
-    </button>
+      <div
+        className="mt-3 flex gap-2"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {!disconnected && (
+          <button onClick={doDisconnect} disabled={busy} className={btnGL}>
+            {busy ? "…" : "Disconnect"}
+          </button>
+        )}
+        <button onClick={doDelete} disabled={busy} className={btnRL}>
+          {busy ? "…" : "Delete device"}
+        </button>
+      </div>
+      {err && <p className="text-xs text-red-600 mt-2">{err}</p>}
+    </div>
   );
 }
 
@@ -318,15 +447,15 @@ function ScheduleCard({ deviceId }: { deviceId: string }) {
     : "…";
 
   return (
-    <div className={cardCls}>
+    <div className={cardL}>
       <div className="flex items-center justify-between mb-1">
         <div className="font-semibold text-sm">Schedule</div>
         {data && (
           <span
             className={`text-[11px] px-2 py-0.5 rounded-full border ${
               enabled
-                ? "bg-emerald-400/15 text-emerald-300 border-emerald-400/30"
-                : "bg-slate-400/15 text-slate-400 border-slate-400/30"
+                ? "bg-emerald-50 text-emerald-700 border border-emerald-300"
+                : "bg-slate-100 text-slate-500 border border-slate-300"
             }`}
           >
             {enabled ? "chalu hai" : "band hai"}
@@ -335,13 +464,13 @@ function ScheduleCard({ deviceId }: { deviceId: string }) {
       </div>
 
       {/* status: automation shuru hui ya sirf schedule hai */}
-      <div className="text-xs text-slate-400 mb-3 space-y-1">
+      <div className="text-xs text-slate-600 mb-3 space-y-1">
         <div>
-          Abhi: <span className="text-slate-200">{loading ? "…" : current}</span>
+          Abhi: <span className="text-slate-900">{loading ? "…" : current}</span>
           {enabled && data?.next_run && (
             <>
               {" "}· agla run:{" "}
-              <span className="text-slate-200 font-medium">
+              <span className="text-slate-900 font-medium">
                 {fmtNextRun(data.next_run)}
               </span>
             </>
@@ -351,13 +480,13 @@ function ScheduleCard({ deviceId }: { deviceId: string }) {
           {data?.last_run ? (
             <>
               Pichhli automation:{" "}
-              <span className="text-slate-200">
+              <span className="text-slate-900">
                 {age(data.last_run.finished_at)} pehle ({data.last_run.status})
               </span>
             </>
           ) : (
             !loading && (
-              <span className="text-amber-300">
+              <span className="text-amber-700">
                 Abhi tak koi automation nahi chali — sirf schedule hai.
               </span>
             )
@@ -378,8 +507,8 @@ function ScheduleCard({ deviceId }: { deviceId: string }) {
             onClick={() => setMode(m)}
             className={`text-xs px-3 py-1.5 rounded-lg border ${
               mode === m
-                ? "border-accent text-accent"
-                : "border-line text-slate-400"
+                ? "border-emerald-600 text-emerald-700"
+                : "border-slate-200 text-slate-600"
             }`}
           >
             {m === "interval" ? "Har N ghante" : "Fixed times"}
@@ -387,35 +516,35 @@ function ScheduleCard({ deviceId }: { deviceId: string }) {
         ))}
       </div>
       {mode === "interval" ? (
-        <label className="text-xs text-slate-400 block mb-3">
+        <label className="text-xs text-slate-600 block mb-3">
           Interval (ghante, 1–48):{" "}
           <input
             value={hours}
             onChange={(e) => setHours(e.target.value)}
-            className="bg-black/30 border border-line rounded-lg px-2 py-1 w-20 text-slate-200 ml-1"
+            className="bg-white border border-slate-300 rounded-lg px-2 py-1 w-20 text-slate-900 ml-1"
             inputMode="numeric"
           />
         </label>
       ) : (
-        <label className="text-xs text-slate-400 block mb-3">
+        <label className="text-xs text-slate-600 block mb-3">
           Times (12-hour, AM/PM, comma se alag):{" "}
           <input
             value={times}
             onChange={(e) => setTimes(e.target.value)}
             placeholder="7:30 AM, 7:30 PM"
-            className="bg-black/30 border border-line rounded-lg px-2 py-1 w-52 text-slate-200 ml-1"
+            className="bg-white border border-slate-300 rounded-lg px-2 py-1 w-52 text-slate-900 ml-1"
           />
         </label>
       )}
       <div className="flex gap-2 flex-wrap items-center">
-        <button onClick={() => save()} disabled={saving} className={btnPrimary}>
+        <button onClick={() => save()} disabled={saving} className={btnPL}>
           {saving ? "Save…" : "Schedule save karo"}
         </button>
         {data && (
           <button
             onClick={() => save(!enabled)}
             disabled={saving}
-            className="text-xs px-3 py-2 rounded-lg border border-line text-slate-300 hover:border-slate-400"
+            className="text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-700 hover:border-slate-400"
           >
             {enabled ? "Band karo" : "Chalu karo"}
           </button>
@@ -426,14 +555,14 @@ function ScheduleCard({ deviceId }: { deviceId: string }) {
           disabled={saving}
           className={`text-xs px-3 py-2 rounded-lg border ${
             confirmDel
-              ? "border-red-500 text-red-300 bg-red-500/10"
-              : "border-line text-slate-500 hover:text-red-300 hover:border-red-500/50"
+              ? "border-red-500 text-red-600 bg-red-500/10"
+              : "border-slate-200 text-slate-500 hover:text-red-600 hover:border-red-300"
           }`}
         >
           {confirmDel ? "Pakka? dobara dabao" : "Schedule hatao"}
         </button>
       </div>
-      {msg && <p className="text-xs text-slate-300 mt-2">{msg}</p>}
+      {msg && <p className="text-xs text-slate-700 mt-2">{msg}</p>}
       <p className="text-[11px] text-slate-600 mt-2">
         Server har 15 min me schedule check karke khud job banata hai; phone
         poll karke utha leta hai (FCM ho to turant).
@@ -493,11 +622,11 @@ function ClipPackageCard({ deviceId }: { deviceId: string }) {
   };
 
   return (
-    <div className={cardCls}>
+    <div className={cardL}>
       <div className="flex items-center justify-between mb-1">
         <div className="font-semibold text-sm">Manual clip (optional — testing ke liye)</div>
         {hasClip && (
-          <span className="text-[11px] px-2 py-0.5 rounded-full border bg-emerald-400/15 text-emerald-300 border-emerald-400/30">
+          <span className="text-[11px] px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border border-emerald-300">
             manual clip set hai
           </span>
         )}
@@ -507,38 +636,38 @@ function ClipPackageCard({ deviceId }: { deviceId: string }) {
         campaign se clip (video + caption + hashtags) bana leti hai. Ye form
         sirf testing ke liye hai, jab koi khaas video chalana ho.
       </p>
-      <label className="text-xs text-slate-400 block mb-2">
+      <label className="text-xs text-slate-600 block mb-2">
         Video URL (direct MP4 link):
         <input
           value={videoUrl}
           onChange={(e) => setVideoUrl(e.target.value)}
           placeholder="https://…/clip.mp4"
-          className="mt-1 w-full bg-black/30 border border-line rounded-lg px-3 py-2 text-slate-200"
+          className="mt-1 w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900"
         />
       </label>
-      <label className="text-xs text-slate-400 block mb-2">
+      <label className="text-xs text-slate-600 block mb-2">
         Caption + hashtags:
         <textarea
           value={caption}
           onChange={(e) => setCaption(e.target.value)}
           rows={3}
           placeholder="Hook line… #tag1 #tag2"
-          className="mt-1 w-full bg-black/30 border border-line rounded-lg px-3 py-2 text-slate-200"
+          className="mt-1 w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900"
         />
       </label>
-      <label className="text-xs text-slate-400 block mb-3">
+      <label className="text-xs text-slate-600 block mb-3">
         Whop submit page URL:
         <input
           value={whopUrl}
           onChange={(e) => setWhopUrl(e.target.value)}
           placeholder="https://whop.com/content-rewards/"
-          className="mt-1 w-full bg-black/30 border border-line rounded-lg px-3 py-2 text-slate-200"
+          className="mt-1 w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900"
         />
       </label>
-      <button onClick={save} disabled={saving} className={btnPrimary}>
+      <button onClick={save} disabled={saving} className={btnPL}>
         {saving ? "Save…" : "Clip package save karo"}
       </button>
-      {msg && <p className="text-xs text-slate-300 mt-2">{msg}</p>}
+      {msg && <p className="text-xs text-slate-700 mt-2">{msg}</p>}
     </div>
   );
 }
@@ -582,8 +711,8 @@ function CancelJobButton({
       disabled={busy}
       className={`text-xs px-3 py-1.5 rounded-lg border ${
         confirm
-          ? "border-red-500 text-red-200 bg-red-500/15"
-          : "border-line text-slate-400 hover:border-red-500/50 hover:text-red-300"
+          ? "border-red-500 text-red-700 bg-red-50"
+          : "border-slate-200 text-slate-600 hover:border-red-300 hover:text-red-600"
       }`}
     >
       {busy ? "Hata raha…" : confirm ? "Pakka? dobara dabao" : "Hatao"}
@@ -616,12 +745,12 @@ function DeleteDeviceButton({ deviceId }: { deviceId: string }) {
   };
 
   return (
-    <div className={`${cardCls} border-red-500/20`}>
-      <div className="font-semibold text-sm mb-1 text-red-300">Danger zone</div>
+    <div className={`${cardL} border-red-200`}>
+      <div className="font-semibold text-sm mb-1 text-red-600">Danger zone</div>
       <p className="text-xs text-slate-500 mb-3">
-        Device hatega to uski saari jobs, runs aur screenshots bhi delete ho
-        jayenge. Phone pe app ka data bana rahega — dobara link karne ke liye
-        app data clear karke naya code se enroll karo.
+        Device soft-delete hoga — 7 din ke andar neeche "Recently deleted" se
+        restore ho sakta hai. Jobs, runs aur screenshots bane rahenge; 7 din
+        baad hamesha ke liye delete ho jayega.
       </p>
       <button
         onClick={del}
@@ -629,13 +758,13 @@ function DeleteDeviceButton({ deviceId }: { deviceId: string }) {
         disabled={busy}
         className={`text-xs px-4 py-2 rounded-lg border ${
           confirm
-            ? "border-red-500 text-red-200 bg-red-500/15"
-            : "border-red-500/40 text-red-300 hover:bg-red-500/10"
+            ? "border-red-500 text-red-700 bg-red-50"
+            : "border-red-300 text-red-600 hover:bg-red-50"
         }`}
       >
         {busy ? "Hata raha hai…" : confirm ? "Pakka? dobara dabao" : "Device hatao"}
       </button>
-      {msg && <p className="text-xs text-red-300 mt-2">{msg}</p>}
+      {msg && <p className="text-xs text-red-600 mt-2">{msg}</p>}
     </div>
   );
 }
@@ -716,7 +845,7 @@ function PhoneProgress({
     : Infinity;
   if (!lastSeen || staleMs > 30 * 60 * 1000) {
     return (
-      <p className="mt-2 text-xs text-amber-300">
+      <p className="mt-2 text-xs text-amber-700">
         ⚠{" "}
         {lastSeen
           ? `Phone se ${hindiAgo(lastSeen)} se jawab nahi aa raha`
@@ -727,7 +856,7 @@ function PhoneProgress({
   }
   const ago = hindiAgo(lastSeen);
   return (
-    <p className="mt-2 text-xs text-slate-400">
+    <p className="mt-2 text-xs text-slate-600">
       {ago === "abhi-abhi"
         ? "Phone pe chal raha hai — abhi halchal hui ✓"
         : `Phone pe chal raha hai — aakhri halchal ${ago} pehle`}
@@ -827,9 +956,9 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
     }
   };
 
-  if (loading) return <p className="text-slate-400 text-sm">Loading jobs…</p>;
+  if (loading) return <p className="text-slate-600 text-sm">Loading jobs…</p>;
   if (error || !data)
-    return <Msg msg={error ?? "No data"} />;
+    return <LightMsg msg={error ?? "No data"} />;
 
   const pct = Math.min(100, Math.round((data.cap_used / data.cap_max) * 100));
   const devPaused = data.device.status === "paused";
@@ -855,11 +984,11 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
 
   return (
     <div className="space-y-4">
-      <div className={`${cardCls} border-accent/40`}>
+      <div className={`${cardL} border-emerald-600/40`}>
         <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
           <div>
             <div className="font-bold text-base">Abhi chalao</div>
-            <div className="text-xs text-slate-400">
+            <div className="text-xs text-slate-600">
               Jab chahe — schedule ka wait nahi karna
             </div>
           </div>
@@ -868,8 +997,8 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
               onClick={togglePause}
               className={`text-base px-8 py-3 rounded-xl font-bold border transition ${
                 devPaused
-                  ? "bg-amber-500/15 border-amber-400/60 text-amber-300 hover:bg-amber-500/25"
-                  : "bg-emerald-500/15 border-emerald-400/60 text-emerald-300 hover:bg-emerald-500/25"
+                  ? "bg-amber-50 border border-amber-500 text-amber-700 hover:bg-amber-100"
+                  : "bg-emerald-50 border border-emerald-500 text-emerald-700 hover:bg-emerald-100"
               }`}
               title={devPaused ? "Device wapas active karo — automation chalegi" : "Device offline karo — koi job nahi milega"}
             >
@@ -878,18 +1007,18 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
             <button
               onClick={runPipeline}
               disabled={running || devPaused}
-              className={`${btnPrimary} text-base px-8 py-3 font-bold`}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white text-base px-8 py-3 rounded-lg font-bold disabled:opacity-50"
             >
               {running ? "Bhej raha hai…" : "▶ Run Now"}
             </button>
           </div>
         </div>
         {devPaused && (
-          <p className="text-xs text-amber-300 mb-1">
+          <p className="text-xs text-amber-700 mb-1">
             Device paused hai — pehle Resume karo, tabhi Run Now chalega.
           </p>
         )}
-        {runMsg && <p className="text-xs text-slate-300">{runMsg}</p>}
+        {runMsg && <p className="text-xs text-slate-700">{runMsg}</p>}
         {pipe &&
           (() => {
             // Stage 15+ min se na badle to honest stuck hint (KAM 2).
@@ -911,10 +1040,10 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
                   pipe.status === "done"
                     ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40"
                     : pipe.status === "failed"
-                      ? "bg-red-500/15 text-red-300 border border-red-500/40"
+                      ? "bg-red-500/15 text-red-600 border border-red-500/40"
                       : pipe.status === "running"
                         ? "bg-blue-500/15 text-blue-300 border border-blue-500/40"
-                        : "bg-amber-500/15 text-amber-300 border border-amber-500/40"
+                        : "bg-amber-500/15 text-amber-700 border border-amber-500/40"
                 }`}
               >
                 Pipeline:{" "}
@@ -950,27 +1079,27 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
                 value={ovVideo}
                 onChange={(e) => setOvVideo(e.target.value)}
                 placeholder="Video URL (khali = saved clip package)"
-                className="w-full bg-black/30 border border-line rounded-lg px-3 py-2 text-xs text-slate-200"
+                className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900"
               />
               <textarea
                 value={ovCaption}
                 onChange={(e) => setOvCaption(e.target.value)}
                 rows={2}
                 placeholder="Caption + hashtags (khali = saved)"
-                className="w-full bg-black/30 border border-line rounded-lg px-3 py-2 text-xs text-slate-200"
+                className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900"
               />
               <input
                 value={ovWhop}
                 onChange={(e) => setOvWhop(e.target.value)}
                 placeholder="Whop submit URL (khali = saved)"
-                className="w-full bg-black/30 border border-line rounded-lg px-3 py-2 text-xs text-slate-200"
+                className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900"
               />
             </div>
           )}
           <button
             onClick={runNowManual}
             disabled={running || devPaused}
-            className="text-xs mt-2 px-3 py-2 rounded-lg border border-line text-slate-300 hover:border-slate-400"
+            className="text-xs mt-2 px-3 py-2 rounded-lg border border-slate-200 text-slate-700 hover:border-slate-400"
           >
             {running ? "Bhej raha hai…" : "Purana Run Now bhejo (direct job)"}
           </button>
@@ -981,11 +1110,11 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
       </div>
 
       {lastBad?.run && (
-        <div className="rounded-xl border border-red-500/50 bg-red-500/10 p-4">
-          <div className="font-bold text-red-300 text-sm mb-1">
+        <div className="rounded-xl border border-red-300 bg-red-50 p-4">
+          <div className="font-bold text-red-600 text-sm mb-1">
             Last automation {lastBad.run.status === "blocked" ? "BLOCK hui" : "FAIL hui"} — kaaran:
           </div>
-          <p className="text-sm text-slate-200">
+          <p className="text-sm text-slate-900">
             {lastBad.run.result?.error ?? "kaaran nahi mila"}
           </p>
           <p className="text-xs text-slate-500 mt-1">
@@ -999,18 +1128,18 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
 
       <ClipPackageCard deviceId={deviceId} />
 
-      <div className={cardCls}>
+      <div className={cardL}>
         <div className="flex items-center justify-between mb-2">
           <div className="font-semibold text-sm">
             Automations — last {data.cap_window_hours}h
           </div>
-          <div className="text-sm text-slate-300">
+          <div className="text-sm text-slate-700">
             {data.cap_used}/{data.cap_max}
           </div>
         </div>
-        <div className="h-2 rounded-full bg-line overflow-hidden">
+        <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
           <div
-            className="h-full bg-accent rounded-full"
+            className="h-full bg-emerald-600 rounded-full"
             style={{ width: `${pct}%` }}
           />
         </div>
@@ -1027,7 +1156,7 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
       )}
 
       {data.jobs.map((j) => (
-        <div key={j.id} className={cardCls}>
+        <div key={j.id} className={cardL}>
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div>
               <span className="font-mono text-sm">{j.type}</span>
@@ -1043,7 +1172,7 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
                   onDone={() => reload()}
                 />
               )}
-              <StatusPill status={j.run?.status ?? j.status} />
+              <LightPill status={j.run?.status ?? j.status} />
             </div>
           </div>
           <PhoneProgress
@@ -1056,14 +1185,14 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
                 href={j.run.result.vars.reel_url}
                 target="_blank"
                 rel="noreferrer"
-                className="text-accent underline break-all"
+                className="text-emerald-600 underline break-all"
               >
                 {j.run.result.vars.reel_url}
               </a>
             </div>
           )}
           {j.run?.result?.error && (
-            <p className="mt-2 text-sm text-red-300">{j.run.result.error}</p>
+            <p className="mt-2 text-sm text-red-600">{j.run.result.error}</p>
           )}
           {(j.run?.shot_urls?.length ?? 0) > 0 && (
             <div className="mt-3">
@@ -1077,7 +1206,7 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
                     <img
                       src={u}
                       alt={`proof ${k + 1}`}
-                      className="w-24 h-40 object-cover rounded-lg border border-line hover:border-accent"
+                      className="w-24 h-40 object-cover rounded-lg border border-slate-200 hover:border-emerald-500"
                     />
                   </a>
                 ))}
@@ -1092,14 +1221,76 @@ function JobsPanel({ deviceId }: { deviceId: string }) {
   );
 }
 
+/** Recently deleted — soft-deleted devices, 7 din ke andar restore. */
+function RecentlyDeleted({ onDone }: { onDone: () => void }) {
+  const { data, loading, reload } = useApi<DevicesResp>(
+    "/api/devices?include_deleted=true"
+  );
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const deleted = (data?.devices ?? []).filter((d) => d.deleted_at);
+  if (loading || deleted.length === 0) return null;
+
+  const restore = async (id: string) => {
+    setBusy(id);
+    try {
+      const r = await fetch(`/api/devices/${id}/restore`, { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? r.status);
+      reload();
+      onDone();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Restore failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="mt-8">
+      <h2 className="text-lg font-bold mb-1 text-slate-900">Recently deleted</h2>
+      <p className="text-sm text-slate-600 mb-4">
+        7 din ke andar restore ho sakte hain — uske baad hamesha ke liye delete
+        ho jayenge.
+      </p>
+      <div className="grid gap-3 md:grid-cols-2">
+        {deleted.map((d) => (
+          <div
+            key={d.id}
+            className={`${cardL} flex items-center justify-between gap-3`}
+          >
+            <div>
+              <div className="font-semibold text-slate-900">{d.device_name}</div>
+              <div className="text-xs text-slate-500">
+                Restore ke liye{" "}
+                <span className="font-medium text-slate-700">
+                  {d.restore_days_left ?? "?"} din
+                </span>{" "}
+                baaki
+              </div>
+            </div>
+            <button
+              onClick={() => restore(d.id)}
+              disabled={busy === d.id}
+              className={btnPL}
+            >
+              {busy === d.id ? "…" : "Restore"}
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function DevicesPage() {
   const devices = useApi<DevicesResp>("/api/devices");
   const [selected, setSelected] = useState<string | null>(null);
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-1">Devices</h1>
-      <p className="text-sm text-slate-400 mb-5">
+      <h1 className="text-2xl font-bold mb-1 text-slate-900">Devices</h1>
+      <p className="text-sm text-slate-600 mb-5">
         Har phone khud uska automation server hai — yahan enroll karo, status
         dekho, proof screenshots verify karo.
       </p>
@@ -1107,9 +1298,9 @@ export default function DevicesPage() {
 
       <div className="grid gap-4 md:grid-cols-2 mb-6">
         <EnrollBox onDone={() => devices.reload()} />
-        <div className={cardCls}>
+        <div className={cardL}>
           <h2 className="font-semibold mb-2">Kaise kaam karta hai</h2>
-          <ol className="text-sm text-slate-400 space-y-1.5 list-decimal list-inside">
+          <ol className="text-sm text-slate-600 space-y-1.5 list-decimal list-inside">
             <li>Enroll code banao, phone app me dalo</li>
             <li>App me Whop + Instagram ek baar login karo</li>
             <li>Battery setting me ek tap (guide app me hai)</li>
@@ -1122,8 +1313,8 @@ export default function DevicesPage() {
         </div>
       </div>
 
-      {devices.loading && <p className="text-slate-400 text-sm">Loading…</p>}
-      {devices.error && <Msg msg={devices.error ?? ""} />}
+      {devices.loading && <p className="text-slate-600 text-sm">Loading…</p>}
+      {devices.error && <LightMsg msg={devices.error ?? ""} />}
 
       {(devices.data?.devices?.length ?? 0) > 0 && (
         <div className="grid gap-4 lg:grid-cols-2">
@@ -1134,6 +1325,10 @@ export default function DevicesPage() {
                 d={d}
                 selected={selected === d.id}
                 onSelect={() => setSelected(d.id)}
+                onChanged={() => {
+                  if (selected === d.id) setSelected(null);
+                  devices.reload();
+                }}
               />
             ))}
           </div>
@@ -1148,6 +1343,8 @@ export default function DevicesPage() {
           </div>
         </div>
       )}
+
+      <RecentlyDeleted onDone={() => devices.reload()} />
     </div>
   );
 }
