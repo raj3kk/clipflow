@@ -6,11 +6,18 @@ ClipFlow v2 zero-touch planner — campaign se ready clip package tak, bina user
 
 Pipeline (VM pe chalta hai):
   1. CAP GUARD: pichhle 24h me v1 posts + v2 device_jobs >= 4 → SILENT SKIP.
-  2. JOINED-ONLY (2026-09-19 fix): sirf Whop pe joined campaigns (join_status=
-     'joined' ya joined=true) rank hongi. Non-joined campaign pe clip
-     banake submit karna bekaar hai — Whop "join first" bolega. Whop ke
-     paas campaign-join ka public API nahi hai, isliye auto-join possible
-     nahi; user Campaigns tab me join_status 'joined' set kare.
+     (join_campaign jobs bhi isi cap me gine jate hain.)
+  2. AUTO-JOIN (Round-7, 2026-09-19): Whop ka campaign-join public API nahi
+     deta, lekin phone ka WebView Whop me LOGGED-IN hai (user ne app me Whop
+     login kiya tha). Best-fit campaign agar joined nahi hai to clip pipeline
+     ki jagah pehle `join_campaign` job enqueue hoti hai
+     (POST /api/devices/<id>/join-campaign → outcome `join_requested:<slug>`).
+     Phone campaign page kholke Join dabata hai; result pe server
+     campaigns.joined / join_status update karta hai. Join safal hone ke baad
+     agle tick me normal clip pipeline chalta hai.
+     - needs_user (Whop login expire / extra verification) → dobara join job
+       NAHI banti (cap bachao); user Campaigns tab me 'needs_user' dekhega.
+     - live join job already hai → dobara nahi banti (dedup).
   3. JOINED campaigns lao (campaigns table), rank karo:
      payout_per_1k_usd × budget_remaining_usd × requirement-fit.
   3. Top campaign ka brief padho (min/max sec, requirements, caption_template,
@@ -466,15 +473,14 @@ def upload_clip(local_mp4: str, cid: str, start: int, end: int) -> str:
 
 
 # --------------------------------------------------------------------------
-# 11. enqueue (plan-job) — IG post / Whop submit PHONE karega
+# 11. enqueue — worker-authed POSTs (plan-job: IG post / Whop submit PHONE
+#     karega; join-campaign: phone Whop pe campaign join karega)
 # --------------------------------------------------------------------------
-def enqueue(video_url: str, caption: str, whop_submit_url: str,
-            campaign_slug: str | None = None) -> dict:
-    url = (config.CLIPFLOW_URL.rstrip("/") +
-           f"/api/devices/{DEVICE_ID}/plan-job")
-    body = json.dumps({"video_url": video_url, "caption": caption,
-                       "whop_submit_url": whop_submit_url,
-                       "campaign_slug": campaign_slug}).encode()
+def _post_worker(path: str, payload: dict) -> dict:
+    """Worker-secret POST with retry. Returns parsed JSON, ya
+    {"ok": False, "capped": True} / {"ok": False, "conflict": True}."""
+    url = config.CLIPFLOW_URL.rstrip("/") + path
+    body = json.dumps(payload).encode()
     last: Exception | None = None
     for i in range(4):
         req = urllib.request.Request(url, data=body, method="POST")
@@ -486,25 +492,71 @@ def enqueue(video_url: str, caption: str, whop_submit_url: str,
                 return json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
             detail = e.read().decode(errors="replace")[:300]
+            tag = f"{path} →"
             if e.code == 429:
-                log("plan-job → 429 cap reached (server-side guard) — skip")
+                log(f"{tag} 429 cap reached (server-side guard) — skip")
                 return {"ok": False, "capped": True}
             if e.code == 409:
-                log(f"plan-job → 409: {detail} — skip")
+                log(f"{tag} 409: {detail} — skip")
                 return {"ok": False, "conflict": True}
             if 500 <= e.code < 600 and i < 3:
                 wait = min(2 ** i, 15) + random.uniform(0, 1.5)
-                log(f"plan-job → {e.code} (retry {i + 1}/4, {wait:.1f}s)")
+                log(f"{tag} {e.code} (retry {i + 1}/4, {wait:.1f}s)")
                 time.sleep(wait)
                 last = e
                 continue
-            raise RuntimeError(f"plan-job → {e.code}: {detail}") from e
+            raise RuntimeError(f"{tag} {e.code}: {detail}") from e
         except Exception as e:  # noqa: BLE001
             last = e
             wait = 3 * (i + 1) + random.uniform(0, 1.5)
-            log(f"plan-job retry {i + 1}/4: {type(e).__name__} ({wait:.1f}s)")
+            log(f"{tag} retry {i + 1}/4: {type(e).__name__} ({wait:.1f}s)")
             time.sleep(wait)
-    raise RuntimeError(f"plan-job network failed: {last}")
+    raise RuntimeError(f"{path} network failed: {last}")
+
+
+def enqueue(video_url: str, caption: str, whop_submit_url: str,
+            campaign_slug: str | None = None) -> dict:
+    return _post_worker(
+        f"/api/devices/{DEVICE_ID}/plan-job",
+        {"video_url": video_url, "caption": caption,
+         "whop_submit_url": whop_submit_url,
+         "campaign_slug": campaign_slug})
+
+
+# --------------------------------------------------------------------------
+# 11b. auto-join enqueue (Round-7)
+# --------------------------------------------------------------------------
+def live_join_job(uid: str, cid: str) -> dict | None:
+    """Is campaign ka join_campaign job abhi live hai?
+    (dobara join job na bane — dedup)."""
+    rows = sb_retry("GET", "/rest/v1/device_jobs", query={
+        "user_id": f"eq.{uid}",
+        "type": "eq.join_campaign",
+        "status": "in.(queued,claimed,dispatched,running)",
+        "payload->>campaign_slug": f"eq.{cid}",
+        "select": "id,status",
+        "order": "created_at.asc",
+        "limit": "1",
+    })
+    return rows[0] if rows else None
+
+
+def enqueue_join(uid: str, campaign: dict) -> dict:
+    """POST /api/devices/<id>/join-campaign. Returns parsed JSON
+    ({"ok":..., "deduped":..., "capped":..., "conflict":...})."""
+    cid = campaign["id"]
+    url = (campaign.get("campaign_url") or "").strip()
+    if not url:
+        raise RuntimeError("campaign_url nahi hai — join page ka pata nahi")
+    res = _post_worker(
+        f"/api/devices/{DEVICE_ID}/join-campaign",
+        {"campaign_slug": cid, "campaign_url": url})
+    if res.get("ok") and not res.get("deduped"):
+        log(f"JOIN ENQUEUED: job {res.get('job_id')} "
+            f"— phone Whop pe '{campaign.get('name')}' join karega")
+        activity(uid, "join_requested",
+                        f"{cid} job={res.get('job_id')}")
+    return res
 
 
 # --------------------------------------------------------------------------
@@ -608,24 +660,15 @@ def plan_once(dry_run: bool) -> str:
         log(f"dry-run: cap full hota ({n_used}/{CAP_MAX}) lekin dry-run "
             f"enqueue nahi karta — aage badho")
 
-    # 2. campaigns + rank — JOINED-ONLY (2026-09-19 fix): Whop pe join
-    # kiye bina submit bekaar hai, aur Whop ka campaign-join public API
-    # nahi hai (server-side auto-join possible nahi). Non-joined campaigns
-    # rank hi nahi hongi.
+    # 2. campaigns + rank — joined-only filter HATA diya (Round-7):
+    # best-fit campaign agar joined nahi hai to pehle phone se auto-join
+    # (join_campaign job), phir agle tick me clip pipeline. Non-joined pe
+    # seedha clip banana bekaar hai — Whop "join first" bolega.
     campaigns = get_campaigns(uid)
     if not campaigns:
         log("SKIP: campaigns table khaali hai — Campaigns tab me campaign jodo")
         return "skipped:no_campaigns"
-    joined_only = [c for c in campaigns if is_joined(c)]
-    n_skip = len(campaigns) - len(joined_only)
-    if n_skip:
-        log(f"joined-only: {n_skip} non-joined campaign(s) skip "
-            f"(Whop pe join karo, phir Campaigns tab me status 'joined')")
-    if not joined_only:
-        log("SKIP: koi joined campaign nahi — pehle whop.com/content-rewards "
-            "pe campaign join karo, phir Campaigns tab me Join status 'joined' set karo")
-        return "skipped:no_joined_campaigns"
-    ranked = rank_campaigns(joined_only)
+    ranked = rank_campaigns(campaigns)
     if not ranked:
         log("SKIP: koi campaign positive payout pe nahi")
         return "skipped:no_scored"
@@ -633,20 +676,63 @@ def plan_once(dry_run: bool) -> str:
     # har ranked campaign try karo jab tak ek safal na ho
     last_skip = "skipped:no_scored"
     for score, campaign in ranked:
-        try:
-            outcome = attempt_campaign(uid, campaign, score, dry_run)
-        except Exception as e:  # noqa: BLE001
-            # CalledProcessError ka str() sirf command dikhata hai —
-            # asli wajah (stderr) download_section pehle hi log kar chuka hai.
-            # Yahan cause chain bhi dikhao taaki root cause turant mile.
-            cause = f" | cause: {e.__cause__}" if e.__cause__ else ""
-            log(f"campaign {campaign.get('id')} error: "
-                f"{type(e).__name__}: {str(e)[:500]}{cause} — agla try")
-            last_skip = "skipped:error"
+        if is_joined(campaign):
+            try:
+                outcome = attempt_campaign(uid, campaign, score, dry_run)
+            except Exception as e:  # noqa: BLE001
+                # CalledProcessError ka str() sirf command dikhata hai —
+                # asli wajah (stderr) download_section pehle hi log kar chuka hai.
+                # Yahan cause chain bhi dikhao taaki root cause turant mile.
+                cause = f" | cause: {e.__cause__}" if e.__cause__ else ""
+                log(f"campaign {campaign.get('id')} error: "
+                    f"{type(e).__name__}: {str(e)[:500]}{cause} — agla try")
+                last_skip = "skipped:error"
+                continue
+            if outcome in ("enqueued", "dryrun"):
+                return outcome
+            last_skip = outcome
             continue
-        if outcome in ("enqueued", "dryrun"):
-            return outcome
-        last_skip = outcome
+
+        # --- non-joined → auto-join flow (Round-7) ---
+        cid = campaign["id"]
+        js = campaign.get("join_status") or ""
+        if js == "needs_user":
+            # Pichhle join ko user ka action chahiye (Whop login expire /
+            # extra verification). Dobara job bhejna cap jalayega — user
+            # Campaigns tab me 'needs_user' dekhke action lega.
+            log(f"SKIP join: '{campaign.get('name')}' needs_user — "
+                f"user action pending, agla campaign")
+            last_skip = "skipped:join_needs_user"
+            continue
+        if dry_run:
+            log(f"DRY-RUN: join_campaign job skip (campaign {cid})")
+            return "dryrun"
+        log(f"campaign '{campaign.get('name')}' ({cid}) joined nahi — "
+            f"auto-join try (score={score:.1f})")
+        live = live_join_job(uid, cid)
+        if live:
+            log(f"join already in flight: job {live['id'][:8]}… "
+                f"({live['status']}) — agla campaign")
+            last_skip = "skipped:join_pending"
+            continue
+        try:
+            res = enqueue_join(uid, campaign)
+        except Exception as e:  # noqa: BLE001
+            log(f"join enqueue error ({cid}): {type(e).__name__}: "
+                f"{str(e)[:200]} — agla campaign")
+            last_skip = "skipped:join_error"
+            continue
+        if res.get("ok") and not res.get("deduped"):
+            return f"join_requested:{cid}"
+        if res.get("deduped"):
+            log("join deduped (live job already) — agla campaign")
+            last_skip = "skipped:join_pending"
+            continue
+        if res.get("capped"):
+            return "skipped:server_guard"
+        # 409 conflict (pehle hi submit ho chuka / device issue)
+        log(f"join conflict ({cid}) — agla campaign")
+        last_skip = "skipped:join_conflict"
     return last_skip
 
 

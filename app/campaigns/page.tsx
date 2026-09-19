@@ -13,7 +13,7 @@ interface Resp {
   error?: string;
 }
 
-const JOIN_OPTIONS = ["not_joined", "waitlist", "joined"];
+const JOIN_OPTIONS = ["not_joined", "waitlist", "needs_user", "joined"];
 
 function CampaignCard({
   c,
@@ -77,17 +77,22 @@ function CampaignCard({
         {!c.active && <StatusPill status="inactive" />}
       </div>
 
-      {/* JOIN CTA (2026-09-19): autopilot sirf joined campaigns pe chalta
-          hai — Whop ka campaign-join public API nahi hai, user ko khud
-          Whop pe join karna padta hai. */}
+      {/* JOIN CTA (Round-7, 2026-09-19): phone ka WebView Whop me logged-in
+          hai, isliye planner non-joined campaign pe pehle auto-join job
+          bhejta hai. join_status='needs_user' = auto-join ko user ka action
+          chahiye (Whop login expire / extra verification). */}
       {joinStatus !== "joined" && (
         <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
           <p className="font-semibold">
-            ⚠️ Abhi joined nahi — autopilot is campaign pe clip NAHI banayega.
+            {joinStatus === "needs_user"
+              ? "⚠️ Auto-join ko TUMHARI zaroorat hai — neeche detail dekho."
+              : "⚠️ Abhi joined nahi — phone auto-join try karega, ya khud join karo."}
           </p>
           <ol className="mt-1 list-decimal ml-5 text-xs space-y-1">
             <li>
-              Whop pe jaake <b>“Join campaign”</b> dabao{" "}
+              <b>Auto (phone):</b> planner har tick pe non-joined campaign ke
+              liye phone ko join job bhejta hai — app khud Whop pe Join dabata
+              hai. Ya manual: Whop pe jaake <b>“Join campaign”</b> dabao{" "}
               {c.campaign_url ? (
                 <a
                   href={c.campaign_url}
@@ -103,8 +108,9 @@ function CampaignCard({
               .
             </li>
             <li>
-              Phir yahan neeche <b>Join status = joined</b> set karo — uske
-              baad hi planner is campaign ko pick karega.
+              Join ho jaye to yahan neeche <b>Join status = joined</b> set karo
+              (auto-join safal hua to ye khud set ho jayega) — uske baad hi
+              planner is campaign pe clip banayega.
             </li>
           </ol>
         </div>

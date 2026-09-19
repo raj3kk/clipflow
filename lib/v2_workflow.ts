@@ -181,6 +181,29 @@ export function buildClipSteps(pkg: ClipPackage): Step[] {
   return steps;
 }
 
+/**
+ * join_campaign job payload (Round-7, 2026-09-19).
+ *
+ * Phone app ka JobEngine is type ke liye DEDICATED handler chalata hai
+ * (engine.runJoinCampaign) — generic steps array nahi chahiye. Phone apne
+ * logged-in Whop WebView me campaign_url kholta hai, Join button dabata hai,
+ * confirmation ka wait karta hai, aur result.vars me join_status bhejta hai:
+ *   joined | already_joined | needs_user | failed
+ * Result route (jobs/[id]/result) usi ke hisab se campaigns.joined /
+ * campaigns.join_status update karta hai.
+ */
+export function buildJoinCampaignPayload(
+  campaignSlug: string,
+  campaignUrl: string
+): Record<string, unknown> {
+  return {
+    workflow: "v2-join-campaign",
+    workflow_version: 1,
+    campaign_slug: campaignSlug,
+    campaign_url: campaignUrl,
+  };
+}
+
 /** Job payload: phone JobEngine seedha chala leta hai. */
 export function buildAutomationPayload(
   pkg: ClipPackage,

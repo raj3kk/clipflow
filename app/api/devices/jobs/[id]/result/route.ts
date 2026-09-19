@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDeviceIdentity, touchDevice } from "@/lib/device_auth";
 import { getSupabase, isConfigured } from "@/lib/supabase";
+import { logActivity } from "@/lib/device_jobs";
 
 /**
  * Job ka result: multipart form
@@ -32,7 +33,7 @@ export async function POST(
 
   const { data: job } = await sb
     .from("device_jobs")
-    .select("id, status, payload, user_id")
+    .select("id, status, type, payload, user_id")
     .eq("id", params.id)
     .eq("device_id", ident.deviceId)
     .single();
@@ -122,9 +123,63 @@ export async function POST(
       ? ((job.payload as Record<string, unknown>).campaign_slug as string)
       : null;
 
+  const jobType = (job as { type?: string }).type ?? "";
+  const isJoinJob = jobType === "join_campaign";
+  // Phone ka dedicated join handler vars me join_status bhejta hai:
+  // joined | already_joined | needs_user | failed
+  const joinStatus =
+    typeof meta.vars?.join_status === "string" ? meta.vars.join_status : null;
+  const joinDetail =
+    (typeof meta.vars?.join_detail === "string" && meta.vars.join_detail) ||
+    meta.error ||
+    "";
+
+  // JOIN RESULT (Round-7, 2026-09-19): campaigns.joined / join_status update.
+  // v2_submissions wala submit-flow join job pe NAHI chalta (join = submit nahi).
+  if (isJoinJob && campaignSlug) {
+    if (joinStatus === "joined" || joinStatus === "already_joined") {
+      await sb
+        .from("campaigns")
+        .update({ joined: true, join_status: "joined" })
+        .eq("id", campaignSlug)
+        .eq("user_id", ident.userId);
+      await logActivity(
+        sb,
+        ident.userId,
+        "campaign_joined",
+        `✅ '${campaignSlug}' Whop pe join ho gaya (phone auto-join` +
+          (joinStatus === "already_joined" ? " — pehle se joined tha" : "") +
+          `). Ab planner is campaign pe clip banayega.`
+      );
+    } else if (joinStatus === "needs_user") {
+      // VISIBLE FLAG: Campaigns tab me join_status='needs_user' dikhega +
+      // Activity me entry — user ko pata chalega uska action chahiye.
+      await sb
+        .from("campaigns")
+        .update({ join_status: "needs_user" })
+        .eq("id", campaignSlug)
+        .eq("user_id", ident.userId);
+      await logActivity(
+        sb,
+        ident.userId,
+        "join_needs_user",
+        `⚠️ '${campaignSlug}' auto-join ko TUMHARI zaroorat hai: ${joinDetail} ` +
+          `Campaigns tab me dekho.`
+      );
+    } else {
+      await logActivity(
+        sb,
+        ident.userId,
+        "join_failed",
+        `❌ '${campaignSlug}' auto-join fail: ${joinDetail} (30 min me retry hoga)`
+      );
+    }
+  }
+
   // SUCCEEDED → v2_submissions me record (campaign dedup ka source of truth).
   // Phir isi campaign ke baaki live jobs cancel — dobara submit nahi hoga.
-  if (status === "succeeded" && campaignSlug) {
+  // (join job pe nahi — join ka apna handling upar hai.)
+  if (!isJoinJob && status === "succeeded" && campaignSlug) {
     await sb.from("v2_submissions").upsert(
       {
         user_id: ident.userId,
@@ -175,7 +230,10 @@ export async function POST(
   // failed (retry bacha hai) → 30 min baad wapas queue.
   // RE-REPORT GUARD: phone ne yehi 'failed' pehle bhi report kiya tha to
   // dobara queue mat karo (nahi to failed↔queued loop chalta rehta hai).
-  if (status === "failed") {
+  // needs_user = user ka action chahiye, auto-retry bekaar hai → terminal
+  // 'failed' rehne do (Campaigns tab me 'needs_user' flag dikhega).
+  const joinNeedsUser = isJoinJob && joinStatus === "needs_user";
+  if (status === "failed" && !joinNeedsUser) {
     // Abhi insert kiya hua 'failed' run sabse naya hai; usse pehle wala
     // run dekho — agar wo bhi 'failed' tha to ye re-report hai.
     const { data: runs } = await sb
