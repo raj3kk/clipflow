@@ -25,7 +25,12 @@ Pipeline (VM pe chalta hai):
   4. Moment chuno: campaign notes me curated moment ho to wahi, nahi to
      brain.pick_moment (v1 autopilot jaisa).
   5. Compliance: duration bounds + brand keyword moment text me hona chahiye.
-  6. Dedup: clips table me >40% overlap → skip.
+  6. Dedup (per-account, Round-7):
+     - clips table me har enqueue ke baad row likhi jati hai (pehle write
+       missing thi → moment_fresh dead tha); >40% overlap → skip.
+     - same video_url dobara kabhi enqueue nahi (video hard dedup).
+     - same campaign is account se 7 din me dobara nahi (success cooldown).
+     - 24h me 3+ fail/timeout wali campaign 48h blacklist.
   7. Source section download (yt-dlp / curl — official footage only,
      campaign rules todna mana hai).
   8. clip_factory v2 (face-tracked) se 1080x1920 render + QA.
@@ -195,6 +200,78 @@ def is_joined(campaign: dict) -> bool:
         campaign.get("joined"))
 
 
+# --------------------------------------------------------------------------
+# 2b. verification-first (Round-7b): server ke paas Whop login NAHI hai,
+# isliye campaign ka FINAL chunav phone karta hai (verify_campaigns job).
+# Sirf fresh-verified (7d) campaigns pe clip banta hai — blind pick nahi.
+# --------------------------------------------------------------------------
+VERIFY_FRESH_DAYS = 7
+
+
+def _notes_json(campaign: dict) -> dict:
+    try:
+        nj = json.loads(campaign.get("notes") or "")
+        return nj if isinstance(nj, dict) else {}
+    except Exception:
+        return {}
+
+
+def is_fresh_verified(campaign: dict) -> bool:
+    """Phone ne Whop pe is campaign ko haal me verify kiya (7d)?"""
+    va = _notes_json(campaign).get("verified_at")
+    if not va or not isinstance(va, str):
+        return False
+    try:
+        dt = datetime.fromisoformat(va.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - dt < timedelta(days=VERIFY_FRESH_DAYS)
+
+
+def verified_video_url(campaign: dict) -> str:
+    """Phone ne Whop page se nikala official video/footage link (verify ke
+    waqt). Download isi se hota hai — server blind brief_url pe nahi."""
+    links = _notes_json(campaign).get("verified_video_links") or []
+    for l in links:
+        if isinstance(l, str) and l.strip().startswith("http"):
+            return l.strip()
+    return ""
+
+
+def verified_requirements(campaign: dict) -> str:
+    req = _notes_json(campaign).get("verified_requirements")
+    return req if isinstance(req, str) else ""
+
+
+def enqueue_verify(uid: str,
+                   ranked: list[tuple[float, dict]]) -> dict:
+    """POST /api/devices/<id>/propose-campaigns — phone Whop pe candidates
+    check karke best-fit choose karega (+ join agar zaroori). CAP-EXEMPT."""
+    cands = []
+    for score, c in ranked[:3]:
+        url = (c.get("campaign_url") or "").strip()
+        if not url:
+            continue
+        cands.append({
+            "campaign_id": c["id"],
+            "name": (c.get("name") or c["id"])[:120],
+            "campaign_url": url,
+            "payout_per_1k_usd": c.get("payout_per_1k_usd"),
+        })
+    if not cands:
+        return {"ok": False, "error": "no candidates with campaign_url"}
+    res = _post_worker(f"/api/devices/{DEVICE_ID}/propose-campaigns",
+                       {"candidates": cands})
+    if res.get("ok") and not res.get("deduped"):
+        log(f"VERIFY ENQUEUED: job {res.get('job_id')} — phone Whop pe "
+            f"{len(cands)} candidates check karke best-fit choose karega")
+        activity(uid, "verify_requested",
+                        f"{len(cands)} candidates job={res.get('job_id')}")
+    return res
+
+
 def rank_campaigns(campaigns: list[dict]) -> list[tuple[float, dict]]:
     scored: list[tuple[float, dict]] = []
     for c in campaigns:
@@ -318,6 +395,77 @@ def moment_fresh(uid: str, cid: str, source_url: str,
                 f"({cs:.0f}-{ce:.0f}s) — skip")
             return False
     return True
+
+
+# --------------------------------------------------------------------------
+# 6b. per-account campaign dedup + fail-blacklist (Round-7, user rule:
+#     "same campaign ek account me repeat na ho").
+# --------------------------------------------------------------------------
+CAMPAIGN_COOLDOWN_DAYS = 7      # successful post ke baad itne din skip
+FAIL_BLACKLIST_H = 48           # 24h me 3+ fail → itne ghante blacklist
+FAIL_THRESHOLD = 3
+
+
+def campaign_usable(uid: str, cid: str) -> tuple[bool, str]:
+    """Is device pe ye campaign abhi try kar sakte hain?
+    Returns (usable, reason)."""
+    now = datetime.now(timezone.utc)
+    # (a) success cooldown — is account se ye campaign haal me post ho chuki
+    since_ok = (now - timedelta(days=CAMPAIGN_COOLDOWN_DAYS)).isoformat()
+    ok_rows = sb_retry("GET", "/rest/v1/device_jobs", query={
+        "user_id": f"eq.{uid}", "device_id": f"eq.{DEVICE_ID}",
+        "status": "eq.succeeded", "payload->>campaign_slug": f"eq.{cid}",
+        "created_at": f"gte.{since_ok}",
+        "select": "id,created_at", "limit": "1",
+    })
+    if ok_rows:
+        return (False, f"campaign_cooldown: is account se {cid} pichhle "
+                       f"{CAMPAIGN_COOLDOWN_DAYS} din me post ho chuki")
+    # (b) fail blacklist — 24h me 3+ fail/timeout → 48h ke liye block
+    since_fail = (now - timedelta(hours=24)).isoformat()
+    fail_rows = sb_retry("GET", "/rest/v1/device_jobs", query={
+        "user_id": f"eq.{uid}", "device_id": f"eq.{DEVICE_ID}",
+        "status": "in.(failed,timeout)",
+        "payload->>campaign_slug": f"eq.{cid}",
+        "created_at": f"gte.{since_fail}",
+        "select": "id,created_at", "limit": "10",
+    })
+    fails = fail_rows if isinstance(fail_rows, list) else []
+    if len(fails) >= FAIL_THRESHOLD:
+        return (False, f"fail_blacklist: {cid} 24h me {len(fails)} baar "
+                       f"fail — {FAIL_BLACKLIST_H}h ke liye block")
+    return (True, "")
+
+
+def video_already_sent(video_url: str) -> dict | None:
+    """Ye exact video (video_url) is device pe pehle bheji ja chuki?
+    (cancelled jobs ko ignore karo.)"""
+    rows = sb_retry("GET", "/rest/v1/device_jobs", query={
+        "device_id": f"eq.{DEVICE_ID}",
+        "payload->>video_url": f"eq.{video_url}",
+        "select": "id,status,created_at", "limit": "10",
+    })
+    rows = rows if isinstance(rows, list) else []
+    live = [r for r in rows if (r.get("status") or "") != "cancelled"]
+    return live[0] if live else None
+
+
+def record_clip(uid: str, cid: str, source_url: str, start: int, end: int,
+                hook_text: str, caption: str, video_url: str) -> None:
+    """Enqueue safal hone ke baad clips row likho — taaki moment_fresh
+    (overlap dedup) agle ticks me ASLI me kaam kare. Pehle ye write missing
+    thi, isliye wahi moment baar-baar re-render ho jata tha."""
+    try:
+        sb_retry("POST", "/rest/v1/clips", body={
+            "user_id": uid, "campaign_id": cid, "source_url": source_url,
+            "start_sec": start, "end_sec": end,
+            "hook_text": (hook_text or "")[:300],
+            "caption": (caption or "")[:500],
+            "status": "enqueued", "video_url": video_url,
+        }, query={})
+        log("clips row recorded (dedup ke liye)")
+    except Exception as e:  # noqa: BLE001
+        log(f"clips record warn: {type(e).__name__}: {str(e)[:120]}")
 
 
 # --------------------------------------------------------------------------
@@ -585,37 +733,73 @@ def attempt_campaign(uid: str, campaign: dict, score: float,
         f"payout=${campaign.get('payout_per_1k_usd')}/1k "
         f"join_status={campaign.get('join_status')}/joined={campaign.get('joined')}")
 
-    brief_url = (campaign.get("brief_url") or "").strip()
+    # Download source: phone-verified video link pehle (Whop campaign page se
+    # nikla hua official footage link — app ne server ko diya), warna brief_url.
+    verified_src = verified_video_url(campaign)
+    brief_url = verified_src or (campaign.get("brief_url") or "").strip()
+    if verified_src:
+        log(f"source: phone-verified video link ({verified_src[:70]}…)")
+    vreq = verified_requirements(campaign)
+    if vreq:
+        log(f"verified requirements ({len(vreq)} chars) — isi ke hisaab se clip")
     if not brief_url:
         log("SKIP: campaign me brief_url nahi")
         return "skipped:no_brief"
 
-    # moment
-    moment = curated_moment(campaign)
-    if moment:
-        log(f"curated moment: {moment['start_sec']}-{moment['end_sec']}s "
-            f"(scout-verified)")
-    else:
-        lo = float(campaign.get("min_seconds") or 15)
-        hi = float(campaign.get("max_seconds") or 60)
-        log(f"brain.pick_moment ({lo:.0f}-{hi:.0f}s) …")
-        moment = brain.pick_moment(brief_url, lo, hi,
-                                   extract_keywords(campaign))
-    if not moment:
+    # moment candidates: curated pehle (agar uski video pehle nahi bheji),
+    # phir brain ke top-3 DISTINCT moments. Pehla candidate jo compliance +
+    # dedup + video-dup teeno pass kare, wahi use hota hai.
+    candidates: list[dict] = []
+    cm = curated_moment(campaign)
+    if cm:
+        cs, ce = int(cm["start_sec"]), int(cm["end_sec"])
+        _exp = (f"{config.SUPABASE_URL}/storage/v1/object/public/clips/"
+                f"planner_v2/{cid}/{cs}-{ce}.mp4")
+        if video_already_sent(_exp):
+            log(f"curated moment {cs}-{ce}s ki video pehle bhej chuke — "
+                f"brain se naya moment")
+        else:
+            log(f"curated moment: {cs}-{ce}s (scout-verified)")
+            candidates.append(cm)
+    lo = float(campaign.get("min_seconds") or 15)
+    hi = float(campaign.get("max_seconds") or 60)
+    log(f"brain.pick_moments ({lo:.0f}-{hi:.0f}s, top-3) …")
+    for bm in brain.pick_moments(brief_url, lo, hi,
+                                 extract_keywords(campaign), top_n=3):
+        if not any(bm["start_sec"] == c.get("start_sec")
+                   and bm["end_sec"] == c.get("end_sec") for c in candidates):
+            candidates.append(bm)
+    if not candidates:
         log("SKIP: koi usable moment nahi mila")
         return "skipped:no_moment"
+
+    moment = None
+    last_skip = "skipped:no_moment"
+    for cand in candidates:
+        start, end = int(cand["start_sec"]), int(cand["end_sec"])
+        ok, why = moment_compliant(cand, campaign)
+        if not ok:
+            log(f"candidate {start}-{end}s: compliance fail — {why}")
+            last_skip = "skipped:compliance"
+            continue
+        if not moment_fresh(uid, cid, brief_url, start, end):
+            last_skip = "skipped:dedup"
+            continue
+        _exp = (f"{config.SUPABASE_URL}/storage/v1/object/public/clips/"
+                f"planner_v2/{cid}/{start}-{end}.mp4")
+        dup = video_already_sent(_exp)
+        if dup:
+            log(f"candidate {start}-{end}s: video pehle bhej chuke "
+                f"(job {dup['id'][:8]}…) — agla candidate")
+            last_skip = "skipped:dedup_video"
+            continue
+        moment = cand
+        break
+    if not moment:
+        log(f"SKIP: koi candidate pass nahi hua ({last_skip})")
+        return last_skip
     start, end = int(moment["start_sec"]), int(moment["end_sec"])
     log(f"moment: {start}-{end}s hook='{moment.get('hook_text','')[:60]}'")
-
-    # compliance
-    ok, why = moment_compliant(moment, campaign)
-    if not ok:
-        log(f"SKIP: compliance fail — {why}")
-        return "skipped:compliance"
-
-    # dedup
-    if not moment_fresh(uid, cid, brief_url, start, end):
-        return "skipped:dedup"
 
     # download → render → caption → upload
     tmp = tempfile.mkdtemp(prefix="planner_v2_")
@@ -649,6 +833,10 @@ def attempt_campaign(uid: str, campaign: dict, score: float,
             f"(deduped={res.get('deduped')}) — phone poll pe uthayega")
         activity(uid, "planner_v2_enqueued",
                         f"{cid} {start}-{end}s job={res.get('job_id')}")
+        # clips row likho taaki moment_fresh (overlap dedup) agle ticks
+        # me ASLI me kaam kare — pehle ye write missing thi.
+        record_clip(uid, cid, brief_url, start, end,
+                    moment.get("hook_text") or "", caption, video_url)
         set_stage("ho_gaya")
         return "enqueued"
     if res.get("capped") or res.get("conflict"):
@@ -679,6 +867,10 @@ def plan_once(dry_run: bool) -> str:
     # best-fit campaign agar joined nahi hai to pehle phone se auto-join
     # (join_campaign job), phir agle tick me clip pipeline. Non-joined pe
     # seedha clip banana bekaar hai — Whop "join first" bolega.
+    #
+    # 2b. VERIFICATION-FIRST (Round-7b): server ke paas Whop login nahi hai,
+    # isliye FINAL chunav phone karta hai. Sirf fresh-verified (7d) campaigns
+    # eligible hain; warna phone se verification mangwao, blind clip nahi.
     campaigns = get_campaigns(uid)
     if not campaigns:
         log("SKIP: campaigns table khaali hai — Campaigns tab me campaign jodo")
@@ -687,11 +879,39 @@ def plan_once(dry_run: bool) -> str:
     if not ranked:
         log("SKIP: koi campaign positive payout pe nahi")
         return "skipped:no_scored"
+    verified = [(s, c) for s, c in ranked if is_fresh_verified(c)]
+    if verified:
+        log(f"fresh-verified campaigns: {len(verified)} — inhi me se choose "
+            f"(server blind pick nahi karega)")
+        ranked = verified
+    else:
+        log("koi fresh-verified campaign nahi — phone se Whop verification")
+        if dry_run:
+            log("DRY-RUN: propose-campaigns skip")
+            return "dryrun"
+        res = enqueue_verify(uid, ranked)
+        if res.get("ok") and not res.get("deduped"):
+            set_stage("ho_gaya")
+            return f"verify_requested:{str(res.get('job_id'))[:8]}"
+        if res.get("deduped"):
+            log("verify already in flight — agle tick me dekhenge")
+            return "skipped:verify_pending"
+        log(f"verify enqueue fail: {res.get('error') or res} — purana "
+            f"flow try karte hain")
+        # fallback: purana join-then-clip flow (neeche loop)
 
     # har ranked campaign try karo jab tak ek safal na ho
     last_skip = "skipped:no_scored"
     for score, campaign in ranked:
         if is_joined(campaign):
+            # Round-7 per-account campaign dedup (user rule): ye campaign
+            # is account se haal me post ho chuki (7d cooldown) ya 24h me
+            # 3+ baar fail hui (48h blacklist) → skip, agla campaign.
+            usable, why = campaign_usable(uid, campaign["id"])
+            if not usable:
+                log(f"SKIP: {why}")
+                last_skip = "skipped:" + why.split(":")[0]
+                continue
             try:
                 outcome = attempt_campaign(uid, campaign, score, dry_run)
             except Exception as e:  # noqa: BLE001
