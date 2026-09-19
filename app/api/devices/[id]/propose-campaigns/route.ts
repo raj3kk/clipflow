@@ -65,11 +65,32 @@ export async function POST(
   // device ka owner (user_id) nikaalo
   const { data: device } = await sb
     .from("devices")
-    .select("id, user_id, status")
+    .select("id, user_id, status, app_version")
     .eq("id", params.id)
     .single();
   if (!device) {
     return NextResponse.json({ error: "Unknown device." }, { status: 404 });
+  }
+
+  // VERSION GUARD (Round-7b): verify_campaigns handler sirf p23+ me hai.
+  // Purane app pe ye job generic run() me girega aur fail hoga — isliye
+  // pehle app update karwao (force_update=true already published hai).
+  const av = String(
+    (device as { app_version?: string | null }).app_version ?? ""
+  );
+  const m = av.match(/p(\d+)/i);
+  const pNum = m ? parseInt(m[1], 10) : 0;
+  if (pNum < 23) {
+    return NextResponse.json(
+      {
+        error:
+          `Phone pe AutoClip ${av || "purana version"} hai — campaign ` +
+          `verification ke liye p23 chahiye. App kholo, update install karo, ` +
+          `phir dobara try hoga.`,
+        needs_app_update: true,
+      },
+      { status: 409 }
+    );
   }
 
   // candidates validate + normalize (max 5 — phone har page kholta hai)
