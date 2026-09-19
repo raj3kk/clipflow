@@ -58,7 +58,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -676,8 +675,8 @@ def _post_worker(path: str, payload: dict) -> dict:
     url = config.CLIPFLOW_URL.rstrip("/") + path
     body = json.dumps(payload).encode()
     last: Exception | None = None
+    tag = f"{path} →"
     for i in range(4):
-        tag = f"{path} →"
         req = urllib.request.Request(url, data=body, method="POST")
         req.add_header("Content-Type", "application/json")
         if config.WORKER_SECRET:
@@ -1044,7 +1043,6 @@ def main() -> None:
         outcome = plan_once(dry_run=args.dry_run)
     except Exception as e:  # noqa: BLE001
         log(f"FATAL: {type(e).__name__}: {e}")
-        log("TRACEBACK:\n" + "".join(traceback.format_exception(e)))
         try:
             activity(None, "planner_v2_error", str(e)[:300])
         except Exception:
