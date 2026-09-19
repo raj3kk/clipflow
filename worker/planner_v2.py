@@ -130,23 +130,38 @@ def set_stage(name: str) -> None:
 
 
 # --------------------------------------------------------------------------
-# 1. cap guard — v1 posts + v2 jobs, rolling 24h
+# 1. cap guard — v1 posts + v2 jobs (terminal-failure excluded), rolling 24h
 # --------------------------------------------------------------------------
+def _terminal_failure(j: dict) -> bool:
+    """Terminal failure job — cap me count NAHI hoti.
+
+    Rule (user-set 2026-09-19): jo automation 3+ attempts me sahi se
+    complete NA hui (terminal failed, max attempts exhausted, bina proper
+    completion ke fail) wo rolling 24h cap me count NAHI hoti. TS twin:
+    lib/device_jobs.ts :: isTerminalFailure.
+    """
+    # 'failed' phone ki report pe hi terminal hota hai (attempts bache hon
+    # to wapas 'queued'); 'timeout' sirf attempts>=max_attempts pe lagta hai.
+    # Dono terminal failure = cap me count NAHI. Abhi-dispatched/running
+    # (attempts exhaust bhi ho to) GENUINE attempt hai — fail hote hi cap
+    # se bahar. TS twin: lib/device_jobs.ts :: isTerminalFailure.
+    return (j.get("status") or "") in ("failed", "timeout")
+
+
 def cap_count(uid: str) -> int:
     since = (datetime.now(timezone.utc)
              - timedelta(hours=CAP_WINDOW_H)).isoformat()
     posts = sb_retry("GET", "/rest/v1/posts", query={
         "user_id": f"eq.{uid}", "posted_at": f"gte.{since}",
         "select": "id", "limit": "50"})
-    # Standing rule: failed run bhi ek run hai — 'failed' + 'timeout'
-    # count hote hain (server lib/device_jobs.ts ke cap jaisa).
     jobs = sb_retry("GET", "/rest/v1/device_jobs", query={
         "user_id": f"eq.{uid}", "created_at": f"gte.{since}",
         "status": "in.(queued,dispatched,running,succeeded,failed,timeout)",
-        "select": "id", "limit": "50"})
+        "select": "id,status,attempts,max_attempts", "limit": "50"})
     n_posts = len(posts) if isinstance(posts, list) else 0
-    n_jobs = len(jobs) if isinstance(jobs, list) else 0
-    log(f"cap: v1 posts(24h)={n_posts} + v2 jobs(24h)={n_jobs}")
+    jobs = jobs if isinstance(jobs, list) else []
+    n_jobs = sum(1 for j in jobs if not _terminal_failure(j))
+    log(f"cap: v1 posts(24h)={n_posts} + v2 jobs(24h)={n_jobs} (terminal-failed excluded)")
     return n_posts + n_jobs
 
 

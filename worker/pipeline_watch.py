@@ -7,8 +7,9 @@ Is script ka kaam:
   1. `pending` requests oldest-first uthao (service_role).
   2. Request ko `running` mark karo (started_at).
   3. Shared cap check: v1 posts.posted_at + v2 device_jobs.created_at,
-     rolling 24h, statuses include 'failed' (standing rule: failed run bhi
-     ek run hai) — >=4 → request `failed`, note='cap_full_24h'.
+     rolling 24h — terminal-failed jobs (3+ attempts me complete na hui)
+     cap me count NAHI hoti (user-set rule 2026-09-19) — >=4 → request
+     `failed`, note='cap_full_24h'.
   4. Varna subprocess me `planner_v2.py --once` chalao (non-dry-run,
      env PLANNER_DEVICE_ID=<device_id>, timeout ~50 min).
   5. Planner ke outcome se `done`/`failed` + note set karo.
@@ -196,8 +197,25 @@ def _looks_transient_text(s: str) -> bool:
     return any(m in low for m in _TRANSIENT_MARKERS)
 
 
+def _terminal_failure(j: dict) -> bool:
+    """Ye job terminal failure hai — cap me count NAHI hogi.
+
+    Rule (user-set 2026-09-19): jo automation 3+ attempts me sahi se
+    complete NA hui (terminal failed, max attempts exhausted, bina proper
+    completion ke fail) wo rolling 24h cap me count NAHI hoti. Sirf genuine
+    attempts (queued/dispatched/running) aur successful completions gine
+    jate hain. TS twin: lib/device_jobs.ts :: isTerminalFailure.
+    """
+    # 'failed' phone ki report pe hi terminal hota hai (attempts bache hon
+    # to wapas 'queued'); 'timeout' sirf attempts>=max_attempts pe lagta hai.
+    # Dono terminal failure = cap me count NAHI. Abhi-dispatched/running
+    # (attempts exhaust bhi ho to) GENUINE attempt hai — fail hote hi cap
+    # se bahar. TS twin: lib/device_jobs.ts :: isTerminalFailure.
+    return (j.get("status") or "") in ("failed", "timeout")
+
+
 def cap_count(uid: str) -> int:
-    """v1 posts + v2 jobs, rolling 24h. 'failed' count hota hai."""
+    """v1 posts + v2 jobs (terminal-failure excluded), rolling 24h."""
     since = (datetime.now(timezone.utc)
              - timedelta(hours=CAP_WINDOW_H)).isoformat()
     posts = config.sb_request("GET", "/rest/v1/posts", query={
@@ -206,9 +224,10 @@ def cap_count(uid: str) -> int:
     jobs = config.sb_request("GET", "/rest/v1/device_jobs", query={
         "user_id": f"eq.{uid}", "created_at": f"gte.{since}",
         "status": "in.(queued,dispatched,running,succeeded,failed,timeout)",
-        "select": "id", "limit": "50"})
+        "select": "id,status,attempts,max_attempts", "limit": "50"})
     n_posts = len(posts) if isinstance(posts, list) else 0
-    n_jobs = len(jobs) if isinstance(jobs, list) else 0
+    jobs = jobs if isinstance(jobs, list) else []
+    n_jobs = sum(1 for j in jobs if not _terminal_failure(j))
     return n_posts + n_jobs
 
 

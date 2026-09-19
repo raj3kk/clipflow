@@ -1,17 +1,29 @@
 /**
- * Automation job creation ka shared helper (cap enforcement ke saath).
- *
  * CAP (user-set 2026-09-18): MAX 4 automations per rolling 24 hours (per user).
  * Cap cross hone pe { capped: true } — phone ko kabhi 5th job milega hi nahi.
+ *
+ * 2026-09-19 rule change (user): jo automation 3+ attempts me sahi se
+ * complete NA hui (terminal failed, max attempts exhausted, bina proper
+ * completion ke fail) wo rolling 24h cap me count NAHI hoti. Sirf genuine
+ * attempts (queued/dispatched/running) aur successful completions gine jate
+ * hain. Failed run user ki galti nahi hai (app marr gaya / phone online nahi
+ * aaya), isliye uska cap slot wapas milta hai.
+ *
+ * Single source of truth: countCapUsage() + checkCap() — Schedule-tick
+ * (app/api/devices/schedule-tick) aur Run Now (plan-job / pipeline_requests
+ * → planner_v2 → plan-job) DONO yahi central check use karte hain.
  */
 
 export const CAP_COUNT = 4;
 export const CAP_WINDOW_HOURS = 24;
 
 /**
- * Jin statuses ke jobs cap me gine jate hain (rolling 24h).
- * 'timeout' = phone ne job uthayi phir marr gaya = failed run, isliye count.
- * 'expired' = phone ne kabhi uthayi hi nahi (48h purani queued) = count NAHI.
+ * Jin statuses ke jobs cap window me dekhe jate hain (rolling 24h).
+ * Inme se terminal-failure wale (neeche isTerminalFailure()) cap me
+ * count NAHI hote — baaki sab (queued/dispatched/running/succeeded) count.
+ * 'timeout' = attempts khatam hone ke baad reconcile ne mara = terminal
+ * failure → count NAHI. 'expired' = phone ne kabhi uthayi hi nahi (48h
+ * purani queued) = count NAHI.
  */
 export const CAP_JOB_STATUSES = [
   "queued",
@@ -21,6 +33,126 @@ export const CAP_JOB_STATUSES = [
   "failed",
   "timeout",
 ];
+
+/** Ye job terminal failure hai — cap me count NAHI hogi. */
+export function isTerminalFailure(j: {
+  status?: string | null;
+  attempts?: number | null;
+  max_attempts?: number | null;
+}): boolean {
+  // 'failed' phone ki report pe hi aata hai (attempts bache hon to result
+  // route wapas 'queued' kar deta hai); 'timeout' reconcile sirf
+  // attempts>=max_attempts pe karta hai. Dono terminal failure = cap me
+  // count NAHI. attempts exhaust hone ke baad bhi jo job abhi
+  // dispatched/running hai aur phone uspe kaam kar raha hai, wo GENUINE
+  // attempt hai — terminal fail hote hi (failed/timeout) cap se bahar.
+  return status === "failed" || status === "timeout";
+}
+
+export type CapUsage = {
+  /** Cap me counted automations (rolling 24h, terminal-failure excluded). */
+  used: number;
+  limit: number;
+  window_hours: number;
+  remaining: number;
+  /**
+   * Sabse purani counted automation ka created_at + 24h (ISO). Jab cap full
+   * ho to yehi wo waqt hai jab agla slot khulega. null = koi counted run nahi.
+   */
+  resets_at: string | null;
+};
+
+/**
+ * Rolling 24h cap usage — user ke device_jobs gino, terminal failures MINUS.
+ */
+export async function countCapUsage(
+  sb: any,
+  userId: string
+): Promise<CapUsage> {
+  const since = new Date(
+    Date.now() - CAP_WINDOW_HOURS * 3600 * 1000
+  ).toISOString();
+  const { data, error } = await sb
+    .from("device_jobs")
+    .select("id, status, attempts, max_attempts, created_at")
+    .eq("user_id", userId)
+    .gte("created_at", since)
+    .in("status", CAP_JOB_STATUSES);
+  if (error) {
+    throw new Error(error.message);
+  }
+  const counted = ((data ?? []) as Array<{
+    id: string;
+    status: string | null;
+    attempts: number | null;
+    max_attempts: number | null;
+    created_at: string | null;
+  }>).filter((j) => !isTerminalFailure(j));
+  counted.sort(
+    (a, b) =>
+      new Date(a.created_at ?? 0).getTime() -
+      new Date(b.created_at ?? 0).getTime()
+  );
+  const used = counted.length;
+  const resets_at =
+    counted.length > 0 && counted[0].created_at
+      ? new Date(
+          new Date(counted[0].created_at).getTime() +
+            CAP_WINDOW_HOURS * 3600 * 1000
+        ).toISOString()
+      : null;
+  return {
+    used,
+    limit: CAP_COUNT,
+    window_hours: CAP_WINDOW_HOURS,
+    remaining: Math.max(0, CAP_COUNT - used),
+    resets_at,
+  };
+}
+
+/** Hinglish me "agla slot kab khulega" — cap reject message ke liye. */
+function formatResetIST(resets_at: string | null): string {
+  if (!resets_at) return "";
+  try {
+    const s = new Date(resets_at).toLocaleString("en-IN", {
+      timeZone: "Asia/Calcutta",
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+    return ` Agla slot ${s} (IST) pe khulega.`;
+  } catch {
+    return "";
+  }
+}
+
+export type CapCheck =
+  | ({ ok: true } & CapUsage)
+  | ({ ok: false; code: 429; error: string } & CapUsage);
+
+/**
+ * Central cap gate — createAutomationJob (Schedule + Run Now dono) isi se
+ * hota hai. Fail ho chuki (3 attempts) automation isme nahi gini jaati.
+ */
+export async function checkCap(sb: any, userId: string): Promise<CapCheck> {
+  const usage = await countCapUsage(sb, userId);
+  if (usage.used < usage.limit) {
+    return { ok: true, ...usage };
+  }
+  return {
+    ok: false,
+    code: 429,
+    ...usage,
+    error:
+      `Automation cap full ho gaya hai — pichhle 24 ghante me ${usage.used} ` +
+      `automation runs ho chuki hain (limit ${usage.limit}).` +
+      formatResetIST(usage.resets_at) +
+      ` Fail ho chuki automation (3 attempts me complete nahi hui) isme ` +
+      `nahi gini jaati — sirf genuine runs ka hisaab hai.`,
+  };
+}
 
 /**
  * Jin statuses me job "zinda" mana jata hai — sirf inhi pe idempotency
@@ -38,7 +170,7 @@ export const LIVE_JOB_STATUSES = new Set([
 
 export type JobCreateResult =
   | { ok: true; job_id: string; status: string; deduped?: boolean }
-  | { ok: false; code: 404 | 409 | 429 | 500; error: string; cap?: number; window_hours?: number; duplicateCampaign?: boolean };
+  | { ok: false; code: 404 | 409 | 429 | 500; error: string; cap?: number; window_hours?: number; used?: number; resets_at?: string | null; duplicateCampaign?: boolean };
 
 export async function createAutomationJob(
   sb: any,
@@ -136,26 +268,27 @@ export async function createAutomationJob(
     }
   }
 
-  // Cap: last 24h me live jobs gino
-  const since = new Date(
-    Date.now() - CAP_WINDOW_HOURS * 3600 * 1000
-  ).toISOString();
-  const { count, error: countErr } = await sb
-    .from("device_jobs")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId)
-    .gte("created_at", since)
-    .in("status", CAP_JOB_STATUSES);
-  if (countErr) {
-    return { ok: false, code: 500, error: countErr.message };
+  // Cap: rolling 24h — Schedule-tick, Run Now, sab yahi central checkCap()
+  // se hote hain. Terminal-failure (3+ attempts) wali jobs count NAHI hoti.
+  let cap: CapCheck;
+  try {
+    cap = await checkCap(sb, userId);
+  } catch (e) {
+    return {
+      ok: false,
+      code: 500,
+      error: e instanceof Error ? e.message : "Cap check failed.",
+    };
   }
-  if ((count ?? 0) >= CAP_COUNT) {
+  if (!cap.ok) {
     return {
       ok: false,
       code: 429,
-      error: `Automation cap reached: max ${CAP_COUNT} per ${CAP_WINDOW_HOURS}h.`,
-      cap: CAP_COUNT,
-      window_hours: CAP_WINDOW_HOURS,
+      error: cap.error,
+      cap: cap.limit,
+      window_hours: cap.window_hours,
+      used: cap.used,
+      resets_at: cap.resets_at,
     };
   }
 
