@@ -254,12 +254,16 @@ export async function reconcileStaleJobs(
     max_attempts: number | null;
   }> = [];
   try {
+    // NULL last_heartbeat (column se pehle claim hui purani rows) bhi pakdo —
+    // unke liye created_at se age dekho.
     const { data } = await sb
       .from("device_jobs")
-      .select("id, attempts, max_attempts")
+      .select("id, attempts, max_attempts, last_heartbeat, created_at")
       .eq("device_id", deviceId)
       .in("status", ["dispatched", "running"])
-      .lt("last_heartbeat", staleCutoff);
+      .or(
+        `last_heartbeat.lt.${staleCutoff},and(last_heartbeat.is.null,created_at.lt.${staleCutoff})`
+      );
     stale = (data ?? []) as typeof stale;
   } catch {
     /* fetch fail → is device ka reconcile skip, agla tick retry */

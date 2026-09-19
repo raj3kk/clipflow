@@ -21,10 +21,16 @@ tick() {
   fi
   local ws
   ws=$(grep -o "WORKER_SECRET=.*" "$env_file" | cut -d= -f2)
-  local out
-  out=$(curl -s -m 90 -X POST https://clipflow-webbuilder1.vercel.app/api/devices/schedule-tick \
-    -H "x-worker-secret: $ws" 2>&1)
+  # Secret KABHI command-line pe nahi — curl -K config file (600) use karo,
+  # warna ps/journal me plaintext dikhega.
+  local cfg
+  cfg=$(mktemp)
+  chmod 600 "$cfg"
+  printf 'header = "x-worker-secret: %s"\n' "$ws" >"$cfg"
   ws=""
+  local out
+  out=$(curl -s -m 90 -K "$cfg" -X POST https://clipflow-webbuilder1.vercel.app/api/devices/schedule-tick 2>&1)
+  rm -f "$cfg"
   local ts
   ts=$(date -u +%FT%TZ)
   local summary
