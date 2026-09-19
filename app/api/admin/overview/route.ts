@@ -46,7 +46,11 @@ export async function GET() {
     return m;
   };
 
-  const emailOf = (uid: string) => users.find((u) => u.id === uid)?.email ?? uid.slice(0, 8);
+  // NULL user_id (system rows) pe crash hota tha -> 500 -> 'Overview load nahi hua'.
+  const emailOf = (uid: string | null | undefined): string => {
+    if (!uid) return "system";
+    return users.find((u) => u.id === uid)?.email ?? uid.slice(0, 8);
+  };
 
   return NextResponse.json({
     date: today,
