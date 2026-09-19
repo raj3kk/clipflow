@@ -241,6 +241,33 @@ export function buildVerifyCampaignsPayload(
   };
 }
 
+/**
+ * discover_campaigns job payload (Round-7b, 2026-09-19).
+ *
+ * Server ke paas Whop login NAHI hai — naye campaigns bhi PHONE dhoondta hai.
+ * Phone apne logged-in Whop session me discover_url kholta hai (default:
+ * https://whop.com/hub/ — Content Rewards section), campaign cards nikalta hai
+ * (name, campaign_url, payout text) aur result bhejta hai. Result route unhe
+ * campaigns table me upsert karta hai (active=true) — phir verify protocol
+ * unpe chalta hai.
+ *
+ * Phone ka dedicated handler: JobEngine.runDiscoverCampaigns (p24+).
+ * Result vars: discover_status = discovered | needs_user | failed,
+ *   discover_results (JSON array), discover_detail.
+ */
+export function buildDiscoverCampaignsPayload(
+  discoverUrl: string
+): Record<string, unknown> {
+  return {
+    workflow: "v2-discover-campaigns",
+    workflow_version: 1,
+    discover_url: discoverUrl,
+  };
+}
+
+/** Whop Content Rewards discovery — logged-in hub (campaign cards yahin). */
+export const WHOP_DISCOVER_URL = "https://whop.com/hub/";
+
 /** Job payload: phone JobEngine seedha chala leta hai. */
 export function buildAutomationPayload(
   pkg: ClipPackage,
