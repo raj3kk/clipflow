@@ -257,6 +257,105 @@ export async function POST(
     );
   }
 
+  // DISCOVER RESULT (Round-7b, 2026-09-19): phone ne Whop pe naye Content
+  // Rewards campaigns dhoondhe — campaigns table me upsert (active=true).
+  // Uske baad verify protocol (propose-campaigns) inpe chalega.
+  const isDiscoverJob = jobType === "discover_campaigns";
+  if (isDiscoverJob) {
+    const discoverStatus =
+      typeof meta.vars?.discover_status === "string"
+        ? (meta.vars.discover_status as string)
+        : status === "succeeded"
+          ? "discovered"
+          : "failed";
+    const discoverDetail =
+      (typeof meta.vars?.discover_detail === "string" &&
+        (meta.vars.discover_detail as string)) ||
+      meta.error ||
+      "";
+    let found: Array<Record<string, unknown>> = [];
+    try {
+      const raw = meta.vars?.discover_results;
+      found = Array.isArray(raw)
+        ? (raw as Array<Record<string, unknown>>)
+        : JSON.parse(typeof raw === "string" ? raw : "[]");
+    } catch {
+      found = [];
+    }
+    let added = 0;
+    for (const f of found) {
+      const url =
+        typeof f.campaign_url === "string"
+          ? (f.campaign_url as string).trim()
+          : "";
+      if (!/^https:\/\/whop\.com\/.+/.test(url)) continue;
+      const name =
+        (typeof f.name === "string" && (f.name as string).trim().slice(0, 120)) ||
+        "Whop campaign";
+      // id: URL slug se (stable), warna name slug
+      let cid = "";
+      try {
+        const parts = new URL(url).pathname.split("/").filter(Boolean);
+        cid = (parts[parts.length - 1] || "")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 80);
+      } catch {
+        cid = "";
+      }
+      if (!cid) {
+        cid = name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 80);
+      }
+      if (!cid) continue;
+      // payout: "$1.50 per 1,000 views" jaisa text se number
+      let payout: number | null = null;
+      const pt =
+        typeof f.payout_text === "string" ? (f.payout_text as string) : "";
+      const pm = pt.match(/\$(\d+(?:\.\d+)?)/);
+      if (pm) payout = parseFloat(pm[1]);
+      const { data: existing } = await sb
+        .from("campaigns")
+        .select("id")
+        .eq("user_id", ident.userId)
+        .eq("id", cid)
+        .limit(1)
+        .single();
+      if (existing) {
+        await sb
+          .from("campaigns")
+          .update({ campaign_url: url, active: true })
+          .eq("user_id", ident.userId)
+          .eq("id", cid);
+      } else {
+        await sb.from("campaigns").insert({
+          id: cid,
+          user_id: ident.userId,
+          name,
+          campaign_url: url,
+          payout_per_1k_usd: payout,
+          active: true,
+          joined: false,
+          join_status: "not_joined",
+          notes: JSON.stringify({ discovered_at: now, via: "phone" }),
+        });
+        added++;
+      }
+    }
+    await logActivity(
+      sb,
+      ident.userId,
+      discoverStatus === "discovered" ? "campaigns_discovered" : "discover_failed",
+      discoverStatus === "discovered"
+        ? `🔎 Phone ne Whop pe ${found.length} campaigns dekhe, ${added} naye campaigns table me jude. Ab verify hoga.`
+        : `⚠️ Campaign discovery ${discoverStatus}: ${discoverDetail.slice(0, 200)}`
+    );
+  }
+
   // SUCCEEDED → v2_submissions me record (campaign dedup ka source of truth).
   // Phir isi campaign ke baaki live jobs cancel — dobara submit nahi hoga.
   // (join job pe nahi — join ka apna handling upar hai.)
@@ -318,7 +417,11 @@ export async function POST(
     isVerifyJob &&
     typeof meta.vars?.verify_status === "string" &&
     (meta.vars.verify_status as string) === "needs_user";
-  if (status === "failed" && !joinNeedsUser && !verifyNeedsUser) {
+  const discoverNeedsUser =
+    isDiscoverJob &&
+    typeof meta.vars?.discover_status === "string" &&
+    (meta.vars.discover_status as string) === "needs_user";
+  if (status === "failed" && !joinNeedsUser && !verifyNeedsUser && !discoverNeedsUser) {
     // Abhi insert kiya hua 'failed' run sabse naya hai; usse pehle wala
     // run dekho — agar wo bhi 'failed' tha to ye re-report hai.
     const { data: runs } = await sb
