@@ -26,10 +26,13 @@ export async function GET(req: Request) {
 
   await touchDevice(ident.deviceId, req.headers.get("x-app-version"));
 
-  // 1) Heartbeat-timeout reconciliation: 15 min se zyada purane
-  //    dispatched/running jobs wapas queue (attempts bache hon to),
-  //    warna terminal "timeout" (dashboard me human review ke liye).
-  const STALE_MS = 15 * 60 * 1000;
+  // 1) Heartbeat-timeout reconciliation.
+  //    2026-09-19 fix: 15 min → 45 min. Phone app abhi heartbeat NAHI bhejta
+  //    (sirf 15-min poll), aur ek automation 10-20 min leti hai — 15 min ka
+  //    timeout har lambi job ko beech me hi wapas queue kar deta tha
+  //    ("task complete phir bhi retry" complaint ka root cause).
+  //    45 min me dead phone bhi pakda jayega, zinda phone pareshan nahi hoga.
+  const STALE_MS = 45 * 60 * 1000;
   const staleCutoff = new Date(Date.now() - STALE_MS).toISOString();
   const { data: stale } = await sb
     .from("device_jobs")

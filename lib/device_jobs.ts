@@ -24,7 +24,7 @@ export const LIVE_JOB_STATUSES = new Set([
 
 export type JobCreateResult =
   | { ok: true; job_id: string; status: string; deduped?: boolean }
-  | { ok: false; code: 404 | 409 | 429 | 500; error: string; cap?: number; window_hours?: number };
+  | { ok: false; code: 404 | 409 | 429 | 500; error: string; cap?: number; window_hours?: number; duplicateCampaign?: boolean };
 
 export async function createAutomationJob(
   sb: any,
@@ -49,6 +49,31 @@ export async function createAutomationJob(
       code: 409,
       error: `Device not active (status: ${device.status}).`,
     };
+  }
+
+  // Campaign dedup (user demand 2026-09-19): ek Whop account pe same
+  // campaign dobara submit NAHI hoga — chahe kitne devices hon.
+  // v2_submissions me successful submit ka record hai to naya job mat banao.
+  const campaignSlug =
+    typeof payload.campaign_slug === "string" && payload.campaign_slug
+      ? payload.campaign_slug
+      : null;
+  if (campaignSlug) {
+    const { data: already } = await sb
+      .from("v2_submissions")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("campaign_slug", campaignSlug)
+      .limit(1);
+    if (already && already.length > 0) {
+      return {
+        ok: false,
+        code: 409,
+        error:
+          "Ye campaign pehle hi submit ho chuka hai — dobara submit nahi hoga.",
+        duplicateCampaign: true,
+      };
+    }
   }
 
   // Cap: last 24h me live jobs gino

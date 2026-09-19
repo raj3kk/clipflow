@@ -92,6 +92,7 @@ export function buildClipSteps(pkg: ClipPackage): Step[] {
       message:
         "Instagram action blocked lag raha hai ('Try again later') — 24-48h ruko",
     },
+    { phase: "ig-create-wait", action: "wait_text", text: "Create", timeout: 60000 },
     { phase: "ig-create", action: "click", by: "text", value: "Create" },
     // file chooser phone khud handle karta hai (reel.mp4)
     {
@@ -181,13 +182,18 @@ export function buildClipSteps(pkg: ClipPackage): Step[] {
 }
 
 /** Job payload: phone JobEngine seedha chala leta hai. */
-export function buildAutomationPayload(pkg: ClipPackage): Record<string, unknown> {
+export function buildAutomationPayload(
+  pkg: ClipPackage,
+  opts?: { campaign_slug?: string }
+): Record<string, unknown> {
   return {
     workflow: "v2-clip-post",
-    workflow_version: 1,
+    workflow_version: 2,
     video_url: pkg.video_url,
     caption: pkg.caption,
     whop_submit_url: pkg.whop_submit_url,
+    // campaign dedup ke liye (v2_submissions.unique(user_id, campaign_slug))
+    campaign_slug: opts?.campaign_slug ?? null,
     steps: buildClipSteps(pkg),
   };
 }

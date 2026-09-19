@@ -57,6 +57,10 @@ export async function POST(
     );
   }
   const pkg = clipCheck.pkg;
+  const campaignSlug =
+    typeof (body as Record<string, unknown>).campaign_slug === "string"
+      ? ((body as Record<string, unknown>).campaign_slug as string).trim() || null
+      : null;
 
   // device ka owner (user_id) nikaalo — createAutomationJob khud status/cap check karta hai
   const { data: device } = await sb
@@ -72,7 +76,10 @@ export async function POST(
     .update(pkg.video_url)
     .digest("hex")
     .slice(0, 16);
-  const payload = { ...buildAutomationPayload(pkg), trigger: "planner" };
+  const payload = {
+    ...buildAutomationPayload(pkg, { campaign_slug: campaignSlug ?? undefined }),
+    trigger: "planner",
+  };
   const res = await createAutomationJob(sb, device.user_id, device.id, "automation", payload, {
     idempotency_key: `plan:${device.id}:${hash}`,
   });

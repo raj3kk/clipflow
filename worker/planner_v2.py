@@ -50,6 +50,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config  # noqa: E402
 import brain  # noqa: E402
+from ytgrab import grab_section  # noqa: E402
 
 DEVICE_ID = os.environ.get(
     "PLANNER_DEVICE_ID", "0771e32a-ab9f-4f25-85b0-3899535c54cf")
@@ -326,53 +327,18 @@ def download_section(url: str, start: int, end: int, tmp: str) -> str:
     """Moment ke aas-paas ka section download karo. Returns video path.
 
     HARDENED (2026-09-19): YouTube datacenter IP ko throttle karta hai —
-    isliye (1) poora stderr log hota hai, (2) file validate hoti hai
-    (khaali 262-byte file silent pass nahi hogi), (3) player_client
-    fallback (android→ios→web), (4) exponential backoff.
+    --download-sections poora video pehle utarta hai (ghanto ka podcast =
+    429/bot-block guaranteed). Isliye fast path: yt-dlp -g se direct
+    googlevideo URL nikalo (player_client android→ios→web fallback),
+    phir ffmpeg -ss/-t se sirf section HTTP range-seek karo. ffmpeg ko
+    -tls_verify 0 chahiye (egress proxy MITM karta hai).
+    Note: SABR experiment ke chalte android client se kabhi sirf 360p
+    (itag 18) milta hai — soft quality, lekin fail hone se behtar.
     """
     out = os.path.join(tmp, "src.mp4")
     if _is_youtube(url):
         s, e = max(0, start - 10), end + 10
-        last: Exception | None = None
-        clients = ["android", "ios", "web"]
-        for i in range(3):
-            if os.path.exists(out):
-                os.remove(out)
-            client = clients[i % len(clients)]
-            cmd = [config.YTDLP, "--no-check-certificate",
-                   "--js-runtimes", "node",
-                   "--extractor-args", f"youtube:player_client={client}",
-                   "--download-sections", f"*{s}-{e}",
-                   "--force-keyframes-at-cuts",
-                   "-f", "bv*[height<=1080]+ba/b[height<=1080]/b",
-                   "--merge-output-format", "mp4",
-                   "-o", out, url]
-            log(f"yt-dlp section {s}-{e}s (try {i + 1}/3, client={client}) …")
-            try:
-                proc = subprocess.run(cmd, check=True, capture_output=True,
-                                      timeout=900)
-                ok, why = _valid_video(out)
-                size_note = f"downloaded: {why}"
-                if ok:
-                    log(size_note)
-                    last = None
-                    break
-                # exit 0 lekin file khaali/tooti — ye silent fail hai
-                err_tail = (proc.stderr or b"").decode(
-                    errors="replace")[-1500:]
-                log(f"yt-dlp try {i + 1}: file invalid ({why}); "
-                    f"stderr: {err_tail.strip()[-800:]}")
-                last = RuntimeError(f"invalid download: {why}")
-            except subprocess.CalledProcessError as ex:
-                full_err = (ex.stderr or b"").decode(errors="replace")
-                # poora stderr log karo (truncate nahi) — root cause dikhe
-                log(f"yt-dlp try {i + 1} CalledProcessError "
-                    f"(exit {ex.returncode}): {full_err.strip()[-2000:]}")
-                last = ex
-            time.sleep(10 * (2 ** i))  # 10s, 20s, 40s backoff
-        if last is not None:
-            raise RuntimeError(
-                f"yt-dlp section download 3 tries me fail: {last}")
+        grab_section(url, s, e, out, config.YTDLP, use_node=True, log=log)
     elif _is_direct_media(url):
         log("direct media download …")
         subprocess.run(["curl", "-L", "--fail", "--max-time", "570",
@@ -490,11 +456,13 @@ def upload_clip(local_mp4: str, cid: str, start: int, end: int) -> str:
 # --------------------------------------------------------------------------
 # 11. enqueue (plan-job) — IG post / Whop submit PHONE karega
 # --------------------------------------------------------------------------
-def enqueue(video_url: str, caption: str, whop_submit_url: str) -> dict:
+def enqueue(video_url: str, caption: str, whop_submit_url: str,
+            campaign_slug: str | None = None) -> dict:
     url = (config.CLIPFLOW_URL.rstrip("/") +
            f"/api/devices/{DEVICE_ID}/plan-job")
     body = json.dumps({"video_url": video_url, "caption": caption,
-                       "whop_submit_url": whop_submit_url}).encode()
+                       "whop_submit_url": whop_submit_url,
+                       "campaign_slug": campaign_slug}).encode()
     last: Exception | None = None
     for i in range(4):
         req = urllib.request.Request(url, data=body, method="POST")
@@ -596,7 +564,7 @@ def attempt_campaign(uid: str, campaign: dict, score: float,
         return "dryrun"
 
     set_stage("phone_ko_bhej_rahe")
-    res = enqueue(video_url, caption, whop_submit_url)
+    res = enqueue(video_url, caption, whop_submit_url, campaign_slug=cid)
     if res.get("ok"):
         log(f"ENQUEUED job {res.get('job_id')} "
             f"(deduped={res.get('deduped')}) — phone poll pe uthayega")
