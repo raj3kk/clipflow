@@ -231,7 +231,164 @@ export default function AdminPage() {
 
       <Msg msg={msg} />
 
+      <AppUpdateCard />
       <WhopOAuthCard />
+    </div>
+  );
+}
+
+// ---------- App Update (AutoClip in-app auto-update) ----------
+interface AppRelease {
+  version_code: number;
+  version_name: string;
+  apk_url: string;
+  changelog: string;
+  force_update: boolean;
+  published_at: string;
+}
+
+function AppUpdateCard() {
+  const [releases, setReleases] = useState<AppRelease[]>([]);
+  const [versionCode, setVersionCode] = useState("");
+  const [versionName, setVersionName] = useState("");
+  const [apkUrl, setApkUrl] = useState("");
+  const [changelog, setChangelog] = useState("");
+  const [force, setForce] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg3, setMsg3] = useState("");
+
+  async function refresh() {
+    const r = await fetch("/api/admin/app-releases");
+    if (r.ok) {
+      const j = await r.json();
+      const list: AppRelease[] = j.releases ?? [];
+      setReleases(list);
+      // version_code auto-suggest: max + 1 (form khali ho to hi)
+      setVersionCode((prev) => {
+        if (prev) return prev;
+        const max = list.reduce((m, x) => Math.max(m, x.version_code), 0);
+        return String(max + 1);
+      });
+    }
+  }
+  useEffect(() => { refresh(); }, []);
+
+  async function publish(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setMsg3("");
+    const r = await fetch("/api/admin/app-releases", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        version_code: Number(versionCode),
+        version_name: versionName.trim(),
+        apk_url: apkUrl.trim(),
+        changelog: changelog.trim(),
+        force_update: force,
+      }),
+    });
+    const j = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (!r.ok) {
+      setMsg3(j.error || "Publish nahi hua.");
+      return;
+    }
+    setVersionName("");
+    setApkUrl("");
+    setChangelog("");
+    setForce(false);
+    setVersionCode("");
+    setMsg3(`v${j.version_code} publish ho gaya — app me update dikhne lagega.`);
+    await refresh();
+  }
+
+  return (
+    <div className={cardCls}>
+      <h2 className="font-semibold mb-1">App Update (AutoClip)</h2>
+      <p className="text-sm text-slate-600 mb-3">
+        Naya release publish karo — phone app khud update download karke install prompt dikhayega.
+        Flow: <code className="text-xs bg-slate-100 px-1 rounded">tools/publish-apk.sh</code> chalao →
+        URL yahan paste karo → Publish.
+      </p>
+      <form onSubmit={publish} className="grid gap-2 max-w-xl">
+        <div className="grid grid-cols-2 gap-2">
+          <label className="text-sm text-slate-600">
+            Version code
+            <input
+              className={inputCls}
+              type="number"
+              min={1}
+              value={versionCode}
+              onChange={(e) => setVersionCode(e.target.value)}
+              placeholder="20"
+            />
+          </label>
+          <label className="text-sm text-slate-600">
+            Version name
+            <input
+              className={inputCls}
+              value={versionName}
+              onChange={(e) => setVersionName(e.target.value)}
+              placeholder="0.1.0-p19"
+            />
+          </label>
+        </div>
+        <label className="text-sm text-slate-600">
+          APK URL (https)
+          <input
+            className={inputCls}
+            value={apkUrl}
+            onChange={(e) => setApkUrl(e.target.value)}
+            placeholder="https://clipflow-webbuilder1.vercel.app/app/autoclip-0.1.0-p19.apk"
+            autoComplete="off"
+          />
+        </label>
+        <label className="text-sm text-slate-600">
+          Changelog (app me dikhega)
+          <textarea
+            className={inputCls}
+            rows={3}
+            value={changelog}
+            onChange={(e) => setChangelog(e.target.value)}
+            placeholder={"• Naya feature\n• Bug fix"}
+          />
+        </label>
+        <label className="text-sm text-slate-700 flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={force}
+            onChange={(e) => setForce(e.target.checked)}
+            className="h-4 w-4"
+          />
+          Force update — bina update kiye app aage nahi badhegi
+        </label>
+        <div>
+          <button className={btnPrimary} disabled={busy || !versionCode || !versionName.trim() || !apkUrl.trim()}>
+            {busy ? "Publishing…" : "Publish release"}
+          </button>
+        </div>
+      </form>
+      <Msg msg={msg3} />
+
+      <h3 className="font-semibold mt-4 mb-2 text-sm">Purane releases</h3>
+      {releases.length === 0 ? (
+        <p className="text-sm text-slate-600">Abhi koi release publish nahi hui hai.</p>
+      ) : (
+        <ul className="text-sm grid gap-2">
+          {releases.map((x) => (
+            <li key={x.version_code} className="border-b border-line pb-2">
+              <span className="font-medium">v{x.version_name} (code {x.version_code})</span>
+              {x.force_update && (
+                <span className="ml-2 text-xs font-semibold text-red-700 bg-red-50 px-2 py-0.5 rounded">FORCE</span>
+              )}
+              <span className="text-slate-600"> · {age(x.published_at)}</span>
+              <div className="text-xs text-slate-500 break-all">{x.apk_url}</div>
+              {x.changelog ? <div className="text-xs text-slate-600 whitespace-pre-line mt-1">{x.changelog}</div> : null}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
