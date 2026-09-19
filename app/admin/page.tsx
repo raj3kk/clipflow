@@ -231,6 +231,7 @@ export default function AdminPage() {
 
       <Msg msg={msg} />
 
+      <OpsAgentCard />
       <AppUpdateCard />
       <WhopOAuthCard />
     </div>
@@ -491,6 +492,98 @@ function WhopOAuthCard() {
       <p className="text-xs text-slate-500 mt-2">
         Secret encrypted save hota hai — kabhi screen ya API se wapas nahi dikhega.
       </p>
+    </div>
+  );
+}
+
+// ---------- Ops Agent (admin ops chat) ----------
+interface OpsMsg {
+  from: "you" | "bot";
+  text: string;
+  actions: string[];
+}
+
+function OpsAgentCard() {
+  const [msgs, setMsgs] = useState<OpsMsg[]>([
+    {
+      from: "bot",
+      text: "Namaste! Main Ops Agent hun. Stuck jobs, cap, devices — sab yahin se dekho. Try karo: 'jobs', 'cap', 'checklist', 'devices'.",
+      actions: [],
+    },
+  ]);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function send(e: React.FormEvent) {
+    e.preventDefault();
+    const m = text.trim();
+    if (!m || busy) return;
+    setMsgs((p) => [...p, { from: "you", text: m, actions: [] }]);
+    setText("");
+    setBusy(true);
+    const r = await fetch("/api/admin/ops-agent/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: m }),
+    });
+    const j = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (!r.ok) {
+      setMsgs((p) => [...p, { from: "bot", text: j.error || "Error — dobara try karo.", actions: [] }]);
+      return;
+    }
+    setMsgs((p) => [...p, { from: "bot", text: String(j.reply ?? ""), actions: j.actions_taken ?? [] }]);
+  }
+
+  return (
+    <div className={cardCls}>
+      <h2 className="font-semibold mb-1">Ops Agent</h2>
+      <p className="text-sm text-slate-600 mb-3">
+        Rule-based ops helper (₹0, koi AI call nahi). Stuck jobs requeue, device pause/unpause — destructive kaam se pehle 'pakka' confirm mangta hai.
+      </p>
+      <div className="border border-line rounded-lg p-3 mb-3 max-h-80 overflow-y-auto bg-slate-50 grid gap-2">
+        {msgs.map((m, i) => (
+          <div key={i} className={`text-sm ${m.from === "you" ? "text-right" : ""}`}>
+            <div
+              className={`inline-block px-3 py-1.5 rounded-xl whitespace-pre-line text-left ${
+                m.from === "you" ? "bg-emerald-600 text-white" : "bg-white border border-line text-slate-800"
+              }`}
+            >
+              {m.text}
+            </div>
+            {m.actions.length > 0 && (
+              <div className="text-xs text-emerald-700 mt-1">
+                ✓ {m.actions.join(" · ")}
+              </div>
+            )}
+          </div>
+        ))}
+        {busy && <p className="text-xs text-slate-500">Soch raha hun…</p>}
+      </div>
+      <form onSubmit={send} className="flex gap-2">
+        <input
+          className={inputCls}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Likho: jobs, cap, checklist, devices, pause <device>…"
+          autoComplete="off"
+        />
+        <button type="submit" disabled={busy || !text.trim()} className={btnPrimary}>
+          Bhejo
+        </button>
+      </form>
+      <div className="flex flex-wrap gap-2 mt-2">
+        {["jobs", "cap", "checklist", "devices", "help"].map((q) => (
+          <button
+            key={q}
+            type="button"
+            className={btnGhost}
+            onClick={() => { setText(q); }}
+          >
+            {q}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
