@@ -68,7 +68,7 @@ export async function POST(
   // campaign row — naam + campaign_url ke liye
   const { data: campaign } = await sb
     .from("campaigns")
-    .select("id, name, campaign_url")
+    .select("id, name, campaign_url, joined, join_status")
     .eq("id", campaignSlug)
     .eq("user_id", device.user_id)
     .single();
@@ -76,6 +76,17 @@ export async function POST(
     return NextResponse.json(
       { error: `Campaign '${campaignSlug}' nahi mili.` },
       { status: 404 }
+    );
+  }
+
+  // Already joined → join job bekaar hai (phone "already_joined" bolega).
+  if (
+    campaign.joined === true ||
+    (campaign.join_status as string | null) === "joined"
+  ) {
+    return NextResponse.json(
+      { error: "Campaign pehle se joined hai — join job ki zaroorat nahi." },
+      { status: 409 }
     );
   }
 
@@ -120,7 +131,12 @@ export async function POST(
     device.id,
     "join_campaign",
     buildJoinCampaignPayload(campaignSlug, campaignUrl),
-    { idempotency_key: `join:${device.id}:${campaignSlug}` }
+    {
+      idempotency_key: `join:${device.id}:${campaignSlug}`,
+      // join ka campaign-dedup sirf join_campaign jobs me — live clip
+      // "automation" job join ko rokegi nahi.
+      campaignDedupTypes: ["join_campaign"],
+    }
   );
 
   if (!res.ok) {
