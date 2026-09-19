@@ -445,12 +445,14 @@ def reconcile_device_jobs() -> None:
         max_att = j.get("max_attempts") or 3
         try:
             if att < max_att:
+                # NOTE (2026-09-19 fix): device_jobs me `note` column NAHI
+                # hai — use PATCH me bhejne se PostgREST 400 (PGRST204) aata
+                # hai aur poora watchdog action fail ho jata tha. Wajah
+                # job_runs.result me record hoti hai (neeche).
                 config.sb_patch("device_jobs", jid, {
                     "status": "queued",
                     "run_after": (datetime.now(timezone.utc)
-                                  + timedelta(minutes=1)).isoformat(),
-                    "note": ("watchdog: heartbeat stale "
-                             "— auto requeued")[:500]})
+                                  + timedelta(minutes=1)).isoformat()})
                 config.sb_request("POST", "/rest/v1/job_runs", payload=[{
                     "user_id": uid, "device_id": did, "job_id": jid,
                     "status": "timeout_requeued",
@@ -459,23 +461,24 @@ def reconcile_device_jobs() -> None:
                 requeued += 1
                 log(f"{jid}: heartbeat stale → requeued ({att}/{max_att})")
             else:
+                # (note column nahi hai — wajah job_runs.result me hai)
                 config.sb_patch("device_jobs", jid, {
-                    "status": "timeout",
-                    "note": ("watchdog: heartbeat stale — attempts "
-                             "exhausted")[:500]})
+                    "status": "timeout"})
                 config.sb_request("POST", "/rest/v1/job_runs", payload=[{
                     "user_id": uid, "device_id": did, "job_id": jid,
                     "status": "timeout",
                     "finished_at": now_iso(),
                     "result": {"reason": "watchdog: heartbeat stale — "
                                          "attempts exhausted"}}])
+                # activity_log ka asli schema: user_id, actor, event,
+                # detail(jsonb), ts — kind/title/ref_type wale purane
+                # column kabhi the hi nahi (2026-09-19 fix).
                 config.sb_request("POST", "/rest/v1/activity_log", payload=[{
-                    "user_id": uid, "kind": "job_timeout",
-                    "title": "Job timeout",
-                    "detail": ("Phone se heartbeat band (watchdog) — "
-                               "attempts khatm, timeout mark kiya."),
-                    "ref_type": "device_job", "ref_id": jid,
-                    "created_at": now_iso()}])
+                    "user_id": uid, "actor": "worker",
+                    "event": "job_timeout",
+                    "detail": {"text": ("Phone se heartbeat band (watchdog) — "
+                                        "attempts khatm, timeout mark kiya."
+                                        )[:500]}}])
                 timed_out += 1
                 log(f"{jid}: heartbeat stale → TIMEOUT ({att}/{max_att})")
         except Exception as e:  # noqa: BLE001

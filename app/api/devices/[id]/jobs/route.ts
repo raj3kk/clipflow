@@ -72,12 +72,15 @@ export async function GET(
   const since = new Date(
     Date.now() - CAP_WINDOW_HOURS * 3600 * 1000
   ).toISOString();
+  // Cap meter — enforcement (lib/device_jobs.ts CAP_JOB_STATUSES) ke barabar:
+  // 'timeout' bhi ginta hai (phone ne uthaya phir marr gaya = ek run).
+  // 2026-09-19 fix: pehle 'timeout' chhoota hua tha → meter kam dikhata tha.
   const { count: capUsed } = await sb
     .from("device_jobs")
     .select("id", { count: "exact", head: true })
     .eq("user_id", user.id)
     .gte("created_at", since)
-    .in("status", ["queued", "dispatched", "running", "succeeded", "failed"]);
+    .in("status", ["queued", "dispatched", "running", "succeeded", "failed", "timeout"]);
 
   return NextResponse.json({
     device,
