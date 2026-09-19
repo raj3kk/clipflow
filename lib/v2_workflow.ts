@@ -257,3 +257,5 @@ export function buildAutomationPayload(
     steps: buildClipSteps(pkg),
   };
 }
+
+// deploy-trigger: round-7b verify protocol live
