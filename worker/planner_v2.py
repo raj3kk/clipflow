@@ -131,11 +131,11 @@ def cap_count(uid: str) -> int:
     posts = sb_retry("GET", "/rest/v1/posts", query={
         "user_id": f"eq.{uid}", "posted_at": f"gte.{since}",
         "select": "id", "limit": "50"})
-    # Standing rule: failed run bhi ek run hai — 'failed' count hota hai
-    # (server lib/device_jobs.ts ke cap jaisa).
+    # Standing rule: failed run bhi ek run hai — 'failed' + 'timeout'
+    # count hote hain (server lib/device_jobs.ts ke cap jaisa).
     jobs = sb_retry("GET", "/rest/v1/device_jobs", query={
         "user_id": f"eq.{uid}", "created_at": f"gte.{since}",
-        "status": "in.(queued,dispatched,running,succeeded,failed)",
+        "status": "in.(queued,dispatched,running,succeeded,failed,timeout)",
         "select": "id", "limit": "50"})
     n_posts = len(posts) if isinstance(posts, list) else 0
     n_jobs = len(jobs) if isinstance(jobs, list) else 0

@@ -3,9 +3,10 @@ import { getDeviceIdentity, touchDevice } from "@/lib/device_auth";
 import { getSupabase, isConfigured } from "@/lib/supabase";
 
 /**
- * Phone har ~1 min me heartbeat bhejta hai jab job chal raha ho.
- * 10 min tak heartbeat na aaye to job wapas queue me dal di jati hai
- * (reconciler/worker dekhta hai — heartbeat timeout).
+ * Phone har ~5-10 min me heartbeat bhejta hai jab job chal rahi ho
+ * (AutomationWorker me heartbeat loop). 45 min tak heartbeat na aaye to
+ * job wapas queue me dal di jati hai (reconcileStaleJobs, lib/device_jobs.ts —
+ * schedule-tick har 15 min + jobs/next har poll pe chalata hai).
  *
  * POST /api/devices/jobs/:id/heartbeat  →  { ok: true }
  */

@@ -205,7 +205,7 @@ def cap_count(uid: str) -> int:
         "select": "id", "limit": "50"})
     jobs = config.sb_request("GET", "/rest/v1/device_jobs", query={
         "user_id": f"eq.{uid}", "created_at": f"gte.{since}",
-        "status": "in.(queued,dispatched,running,succeeded,failed)",
+        "status": "in.(queued,dispatched,running,succeeded,failed,timeout)",
         "select": "id", "limit": "50"})
     n_posts = len(posts) if isinstance(posts, list) else 0
     n_jobs = len(jobs) if isinstance(jobs, list) else 0

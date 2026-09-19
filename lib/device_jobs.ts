@@ -9,6 +9,20 @@ export const CAP_COUNT = 4;
 export const CAP_WINDOW_HOURS = 24;
 
 /**
+ * Jin statuses ke jobs cap me gine jate hain (rolling 24h).
+ * 'timeout' = phone ne job uthayi phir marr gaya = failed run, isliye count.
+ * 'expired' = phone ne kabhi uthayi hi nahi (48h purani queued) = count NAHI.
+ */
+export const CAP_JOB_STATUSES = [
+  "queued",
+  "dispatched",
+  "running",
+  "succeeded",
+  "failed",
+  "timeout",
+];
+
+/**
  * Jin statuses me job "zinda" mana jata hai — sirf inhi pe idempotency
  * dedup hota hai. cancelled/failed purana/mara hua job hai: uspe dedup
  * NAHI hota, balki uska key retire karke NAYA job banta hai.
@@ -115,7 +129,7 @@ export async function createAutomationJob(
     .select("id", { count: "exact", head: true })
     .eq("user_id", userId)
     .gte("created_at", since)
-    .in("status", ["queued", "dispatched", "running", "succeeded", "failed"]);
+    .in("status", CAP_JOB_STATUSES);
   if (countErr) {
     return { ok: false, code: 500, error: countErr.message };
   }
@@ -179,6 +193,169 @@ export async function createAutomationJob(
     return { ok: false, code: 500, error: msg };
   }
   return { ok: false, code: 500, error: "Job create failed." };
+}
+
+/**
+ * Best-effort activity_log row (website pe Activity tab me dikhta hai).
+ * Kabhi throw nahi karta.
+ */
+export async function logActivity(
+  sb: any,
+  userId: string | null,
+  event: string,
+  text: string
+): Promise<void> {
+  try {
+    await sb.from("activity_log").insert({
+      user_id: userId,
+      actor: "worker",
+      event,
+      detail: { text: text.slice(0, 500) },
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
+/**
+ * Stuck-job reconciliation — server-side, phone-poll se independent.
+ *
+ * 2026-09-19 se pehle ye logic sirf jobs/next (phone poll) me thi: phone
+ * marr jaye to 'running' job hamesha atki rehti thi. Ab schedule-tick
+ * (har 15 min) bhi ise chalata hai.
+ *
+ * 1. dispatched/running + last_heartbeat 45+ min purana → attempts bache hon
+ *    to wapas 'queued' (run_after = +60s, turant retry nahi), nahi to terminal
+ *    'timeout' (+ activity_log).
+ * 2. queued + 48h se zyada purana (phone kabhi online nahi aaya, clip stale)
+ *    → 'expired' (+ activity_log). 'expired' cap me NAHI ginta.
+ *
+ * Returns { requeued, timedOut, expired }.
+ */
+export const HEARTBEAT_TIMEOUT_MIN = 45;
+export const QUEUED_EXPIRY_HOURS = 48;
+
+export async function reconcileStaleJobs(
+  sb: any,
+  deviceId: string,
+  userId: string
+): Promise<{ requeued: number; timedOut: number; expired: number }> {
+  const out = { requeued: 0, timedOut: 0, expired: 0 };
+  const now = new Date();
+  const nowIso = now.toISOString();
+
+  // --- 1) heartbeat-timeout: dispatched/running, 45+ min se koi heartbeat nahi
+  const staleCutoff = new Date(
+    now.getTime() - HEARTBEAT_TIMEOUT_MIN * 60 * 1000
+  ).toISOString();
+  let stale: Array<{
+    id: string;
+    attempts: number | null;
+    max_attempts: number | null;
+  }> = [];
+  try {
+    const { data } = await sb
+      .from("device_jobs")
+      .select("id, attempts, max_attempts")
+      .eq("device_id", deviceId)
+      .in("status", ["dispatched", "running"])
+      .lt("last_heartbeat", staleCutoff);
+    stale = (data ?? []) as typeof stale;
+  } catch {
+    /* fetch fail → is device ka reconcile skip, agla tick retry */
+    return out;
+  }
+
+  for (const s of stale) {
+    try {
+      if ((s.attempts ?? 0) < (s.max_attempts ?? 3)) {
+        await sb
+          .from("device_jobs")
+          .update({
+            status: "queued",
+            run_after: new Date(now.getTime() + 60 * 1000).toISOString(),
+          })
+          .eq("id", s.id);
+        await sb.from("job_runs").insert({
+          job_id: s.id,
+          device_id: deviceId,
+          user_id: userId,
+          status: "timeout_requeued",
+          result: {
+            error: `heartbeat timeout (${HEARTBEAT_TIMEOUT_MIN} min) — wapas queue`,
+          },
+          finished_at: nowIso,
+        });
+        out.requeued++;
+      } else {
+        await sb.from("device_jobs").update({ status: "timeout" }).eq("id", s.id);
+        await sb.from("job_runs").insert({
+          job_id: s.id,
+          device_id: deviceId,
+          user_id: userId,
+          status: "timeout",
+          result: {
+            error: "heartbeat timeout — attempts khatam, human review",
+          },
+          finished_at: nowIso,
+        });
+        await logActivity(
+          sb,
+          userId,
+          "job_timeout",
+          `Job ${s.id.slice(0, 8)}… heartbeat timeout — attempts khatam. ` +
+            `Live tab me dekhein; zaroorat ho to Run Now se dobara chalayein.`
+        );
+        out.timedOut++;
+      }
+    } catch {
+      /* ek job fail → baaki continue */
+    }
+  }
+
+  // --- 2) queued expiry: 48h se zyada purani queued job (clip stale ho chuka)
+  const expiryCutoff = new Date(
+    now.getTime() - QUEUED_EXPIRY_HOURS * 3600 * 1000
+  ).toISOString();
+  let old: Array<{ id: string }> = [];
+  try {
+    const { data } = await sb
+      .from("device_jobs")
+      .select("id")
+      .eq("device_id", deviceId)
+      .eq("status", "queued")
+      .lt("created_at", expiryCutoff);
+    old = (data ?? []) as typeof old;
+  } catch {
+    return out;
+  }
+  for (const o of old) {
+    try {
+      await sb.from("device_jobs").update({ status: "expired" }).eq("id", o.id);
+      await sb.from("job_runs").insert({
+        job_id: o.id,
+        device_id: deviceId,
+        user_id: userId,
+        status: "expired",
+        result: {
+          error: `queued ${QUEUED_EXPIRY_HOURS}h+ purani — phone online nahi aaya, clip stale`,
+        },
+        finished_at: nowIso,
+      });
+      await logActivity(
+        sb,
+        userId,
+        "job_expired",
+        `Job ${o.id.slice(0, 8)}… ${QUEUED_EXPIRY_HOURS} ghante queued rahi, ` +
+          `phone online nahi aaya — expire kar di (cap me nahi gini).`
+      );
+      out.expired++;
+    } catch {
+      /* continue */
+    }
+  }
+
+  return out;
 }
 
 /**

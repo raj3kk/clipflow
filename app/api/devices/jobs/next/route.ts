@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDeviceIdentity, touchDevice } from "@/lib/device_auth";
 import { getSupabase, isConfigured } from "@/lib/supabase";
+import { reconcileStaleJobs } from "@/lib/device_jobs";
 
 /**
  * Phone ka long-poll: "mere liye koi kaam hai?"
@@ -10,7 +11,11 @@ import { getSupabase, isConfigured } from "@/lib/supabase";
  *
  * Job milte hi atomic claim hota hai (UPDATE ... WHERE status='queued'):
  * concurrent poll me sirf ek claimer jeet-ta hai.
- * Har poll pe heartbeat-timeout reconciliation bhi chalti hai (15 min).
+ * Har poll pe heartbeat-timeout reconciliation bhi chalti hai (45 min) —
+ * shared reconcileStaleJobs (lib/device_jobs.ts). Phone app khud heartbeat
+ * NAHI bhejta (sirf claim-time); isliye cutoff 45 min hai taaki 10-20 min ki
+ * lambi automation beech me wapas queue na ho jaye. Schedule-tick (har 15 min)
+ * bhi yahi reconcile chalata hai — phone marr jaye to bhi recovery hoti hai.
  */
 export async function GET(req: Request) {
   const ident = await getDeviceIdentity(req);
@@ -26,47 +31,8 @@ export async function GET(req: Request) {
 
   await touchDevice(ident.deviceId, req.headers.get("x-app-version"));
 
-  // 1) Heartbeat-timeout reconciliation.
-  //    2026-09-19 fix: 15 min → 45 min. Phone app abhi heartbeat NAHI bhejta
-  //    (sirf 15-min poll), aur ek automation 10-20 min leti hai — 15 min ka
-  //    timeout har lambi job ko beech me hi wapas queue kar deta tha
-  //    ("task complete phir bhi retry" complaint ka root cause).
-  //    45 min me dead phone bhi pakda jayega, zinda phone pareshan nahi hoga.
-  const STALE_MS = 45 * 60 * 1000;
-  const staleCutoff = new Date(Date.now() - STALE_MS).toISOString();
-  const { data: stale } = await sb
-    .from("device_jobs")
-    .select("id, attempts, max_attempts")
-    .eq("device_id", ident.deviceId)
-    .in("status", ["dispatched", "running"])
-    .lt("last_heartbeat", staleCutoff);
-  for (const s of stale ?? []) {
-    const now2 = new Date().toISOString();
-    if ((s.attempts ?? 0) < (s.max_attempts ?? 3)) {
-      await sb
-        .from("device_jobs")
-        .update({ status: "queued", run_after: new Date(Date.now() + 60 * 1000).toISOString() })
-        .eq("id", s.id);
-      await sb.from("job_runs").insert({
-        job_id: s.id,
-        device_id: ident.deviceId,
-        user_id: ident.userId,
-        status: "timeout_requeued",
-        result: { error: "heartbeat timeout — wapas queue" },
-        finished_at: now2,
-      });
-    } else {
-      await sb.from("device_jobs").update({ status: "timeout" }).eq("id", s.id);
-      await sb.from("job_runs").insert({
-        job_id: s.id,
-        device_id: ident.deviceId,
-        user_id: ident.userId,
-        status: "timeout",
-        result: { error: "heartbeat timeout — attempts khatam, human review" },
-        finished_at: now2,
-      });
-    }
-  }
+  // 1) Heartbeat-timeout reconciliation (shared — schedule-tick bhi chalata hai).
+  await reconcileStaleJobs(sb, ident.deviceId, ident.userId);
 
   const { data: job } = await sb
     .from("device_jobs")
