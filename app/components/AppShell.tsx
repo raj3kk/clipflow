@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Nav, { NAV, PROFILE_ITEM, isActiveTab, useAllTabs } from "./Nav";
 import { IconMore, IconUser, IconX, IconLogout } from "./icons";
+import AgentWidget from "./AgentWidget";
 import { getBrowserSupabase } from "@/lib/supabase-browser";
 
 /* ---------- logo ---------- */
@@ -12,7 +13,7 @@ function Logo({ compact }: { compact?: boolean }) {
   return (
     <Link href="/devices" className="group flex items-center gap-2.5">
       <img
-        src="/logo.png"
+        src="/brand-cf.webp"
         alt="ClipFlow"
         className="h-9 w-9 rounded-xl bg-white object-contain shadow-sm transition-transform duration-300 group-hover:scale-105"
       />
@@ -20,7 +21,7 @@ function Logo({ compact }: { compact?: boolean }) {
         <span className="leading-tight">
           <span className="text-lg font-bold tracking-tight text-slate-900">ClipFlow</span>
           <span className="block text-[10px] uppercase tracking-widest text-slate-500">
-            clipping autopilot
+            phone automation
           </span>
         </span>
       )}
@@ -215,7 +216,9 @@ function PageTransition({ children }: { children: React.ReactNode }) {
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
-  const bare = path === "/login" || path === "/signup";
+  const bare =
+    path === "/login" || path === "/signup" || path === "/" || path === "/guide" ||
+    path === "/terms" || path === "/privacy";
   if (bare) {
     return (
       <main className="min-h-screen p-4 sm:p-8">
@@ -241,6 +244,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </main>
       </div>
       <MobileTabs />
+      <AgentWidget />
     </>
   );
 }
