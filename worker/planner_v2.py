@@ -245,6 +245,29 @@ def verified_requirements(campaign: dict) -> str:
     return req if isinstance(req, str) else ""
 
 
+# --------------------------------------------------------------------------
+# 2c. discover-first (Round-7b): koi active campaign nahi to phone Whop pe
+# naye Content Rewards campaigns dhoondta hai (discover_campaigns job).
+# --------------------------------------------------------------------------
+def enqueue_discover(uid: str) -> dict:
+    """POST /api/devices/<id>/discover-campaigns — phone Whop (logged-in)
+    pe campaign cards nikalta hai; result route campaigns table me upsert
+    karta hai. CAP-EXEMPT (discovery, post nahi)."""
+    res = _post_worker(f"/api/devices/{DEVICE_ID}/discover-campaigns", {})
+    if res.get("needs_app_update"):
+        log(f"APP UPDATE PENDING: {res.get('error')}")
+        activity(uid, "discover_blocked_app_update",
+                        str(res.get("error"))[:160])
+        return {"ok": False, "needs_app_update": True,
+                "error": res.get("error")}
+    if res.get("ok") and not res.get("deduped"):
+        log(f"DISCOVER ENQUEUED: job {res.get('job_id')} — phone Whop pe "
+            f"naye campaigns dhoondhega")
+        activity(uid, "discover_requested",
+                        f"job={res.get('job_id')}")
+    return res
+
+
 def enqueue_verify(uid: str,
                    ranked: list[tuple[float, dict]]) -> dict:
     """POST /api/devices/<id>/propose-campaigns — phone Whop pe candidates
@@ -880,8 +903,24 @@ def plan_once(dry_run: bool) -> str:
     # eligible hain; warna phone se verification mangwao, blind clip nahi.
     campaigns = get_campaigns(uid)
     if not campaigns:
-        log("SKIP: campaigns table khaali hai — Campaigns tab me campaign jodo")
-        return "skipped:no_campaigns"
+        # DISCOVER-FIRST (Round-7b): koi active campaign nahi — phone Whop pe
+        # naye Content Rewards campaigns dhoondhega, phir verify hoga.
+        log("koi active campaign nahi — phone se Whop pe discovery")
+        if dry_run:
+            log("DRY-RUN: discover-campaigns skip")
+            return "dryrun"
+        res = enqueue_discover(uid)
+        if res.get("needs_app_update"):
+            set_stage("ho_gaya")
+            return "skipped:need_p24"
+        if res.get("ok") and not res.get("deduped"):
+            set_stage("ho_gaya")
+            return f"discover_requested:{str(res.get('job_id'))[:8]}"
+        if res.get("deduped"):
+            log("discover already in flight — agle tick me dekhenge")
+            return "skipped:discover_pending"
+        log(f"discover enqueue fail: {res.get('error') or res}")
+        return "skipped:discover_error"
     ranked = rank_campaigns(campaigns)
     if not ranked:
         log("SKIP: koi campaign positive payout pe nahi")
