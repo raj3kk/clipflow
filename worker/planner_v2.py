@@ -264,6 +264,13 @@ def enqueue_verify(uid: str,
         return {"ok": False, "error": "no candidates with campaign_url"}
     res = _post_worker(f"/api/devices/{DEVICE_ID}/propose-campaigns",
                        {"candidates": cands})
+    if res.get("needs_app_update"):
+        log(f"APP UPDATE PENDING: {res.get('error')} — user ko p23 install "
+            f"karna hoga, tab tak verify nahi hoga")
+        activity(uid, "verify_blocked_app_update",
+                        str(res.get("error"))[:160])
+        return {"ok": False, "needs_app_update": True,
+                "error": res.get("error")}
     if res.get("ok") and not res.get("deduped"):
         log(f"VERIFY ENQUEUED: job {res.get('job_id')} — phone Whop pe "
             f"{len(cands)} candidates check karke best-fit choose karega")
@@ -890,6 +897,9 @@ def plan_once(dry_run: bool) -> str:
             log("DRY-RUN: propose-campaigns skip")
             return "dryrun"
         res = enqueue_verify(uid, ranked)
+        if res.get("needs_app_update"):
+            set_stage("ho_gaya")
+            return "skipped:need_p23"
         if res.get("ok") and not res.get("deduped"):
             set_stage("ho_gaya")
             return f"verify_requested:{str(res.get('job_id'))[:8]}"
