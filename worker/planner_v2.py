@@ -6,7 +6,12 @@ ClipFlow v2 zero-touch planner — campaign se ready clip package tak, bina user
 
 Pipeline (VM pe chalta hai):
   1. CAP GUARD: pichhle 24h me v1 posts + v2 device_jobs >= 4 → SILENT SKIP.
-  2. Campaigns lao (campaigns table), rank karo:
+  2. JOINED-ONLY (2026-09-19 fix): sirf Whop pe joined campaigns (join_status=
+     'joined' ya joined=true) rank hongi. Non-joined campaign pe clip
+     banake submit karna bekaar hai — Whop "join first" bolega. Whop ke
+     paas campaign-join ka public API nahi hai, isliye auto-join possible
+     nahi; user Campaigns tab me join_status 'joined' set kare.
+  3. JOINED campaigns lao (campaigns table), rank karo:
      payout_per_1k_usd × budget_remaining_usd × requirement-fit.
   3. Top campaign ka brief padho (min/max sec, requirements, caption_template,
      hashtags, brief_url, campaign_url).
@@ -157,8 +162,15 @@ def get_campaigns(uid: str) -> list[dict]:
         "campaigns", {"user_id": uid, "active": True},
         select=("id,name,sponsor,payout_per_1k_usd,budget_remaining_usd,"
                 "min_seconds,max_seconds,requirements,caption_template,"
-                "hashtags,brief_url,campaign_url,joined,notes"),
+                "hashtags,brief_url,campaign_url,joined,join_status,notes"),
         limit=30, extra={"order": "payout_per_1k_usd.desc"})
+
+
+def is_joined(campaign: dict) -> bool:
+    """Whop pe campaign join ho rakha hai? join_status ('joined') naya
+    field hai jo Campaigns UI se set hota hai; joined legacy boolean."""
+    return (campaign.get("join_status") == "joined") or bool(
+        campaign.get("joined"))
 
 
 def rank_campaigns(campaigns: list[dict]) -> list[tuple[float, dict]]:
@@ -504,7 +516,7 @@ def attempt_campaign(uid: str, campaign: dict, score: float,
     cid = campaign["id"]
     log(f"campaign: '{campaign.get('name')}' ({cid}) score={score:.1f} "
         f"payout=${campaign.get('payout_per_1k_usd')}/1k "
-        f"joined={campaign.get('joined')}")
+        f"join_status={campaign.get('join_status')}/joined={campaign.get('joined')}")
 
     brief_url = (campaign.get("brief_url") or "").strip()
     if not brief_url:
@@ -596,12 +608,24 @@ def plan_once(dry_run: bool) -> str:
         log(f"dry-run: cap full hota ({n_used}/{CAP_MAX}) lekin dry-run "
             f"enqueue nahi karta — aage badho")
 
-    # 2. campaigns + rank
+    # 2. campaigns + rank — JOINED-ONLY (2026-09-19 fix): Whop pe join
+    # kiye bina submit bekaar hai, aur Whop ka campaign-join public API
+    # nahi hai (server-side auto-join possible nahi). Non-joined campaigns
+    # rank hi nahi hongi.
     campaigns = get_campaigns(uid)
     if not campaigns:
         log("SKIP: campaigns table khaali hai — Campaigns tab me campaign jodo")
         return "skipped:no_campaigns"
-    ranked = rank_campaigns(campaigns)
+    joined_only = [c for c in campaigns if is_joined(c)]
+    n_skip = len(campaigns) - len(joined_only)
+    if n_skip:
+        log(f"joined-only: {n_skip} non-joined campaign(s) skip "
+            f"(Whop pe join karo, phir Campaigns tab me status 'joined')")
+    if not joined_only:
+        log("SKIP: koi joined campaign nahi — pehle whop.com/content-rewards "
+            "pe campaign join karo, phir Campaigns tab me Join status 'joined' set karo")
+        return "skipped:no_joined_campaigns"
+    ranked = rank_campaigns(joined_only)
     if not ranked:
         log("SKIP: koi campaign positive payout pe nahi")
         return "skipped:no_scored"

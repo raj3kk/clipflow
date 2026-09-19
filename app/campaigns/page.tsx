@@ -77,6 +77,39 @@ function CampaignCard({
         {!c.active && <StatusPill status="inactive" />}
       </div>
 
+      {/* JOIN CTA (2026-09-19): autopilot sirf joined campaigns pe chalta
+          hai — Whop ka campaign-join public API nahi hai, user ko khud
+          Whop pe join karna padta hai. */}
+      {joinStatus !== "joined" && (
+        <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <p className="font-semibold">
+            ⚠️ Abhi joined nahi — autopilot is campaign pe clip NAHI banayega.
+          </p>
+          <ol className="mt-1 list-decimal ml-5 text-xs space-y-1">
+            <li>
+              Whop pe jaake <b>“Join campaign”</b> dabao{" "}
+              {c.campaign_url ? (
+                <a
+                  href={c.campaign_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-accent underline font-semibold"
+                >
+                  — campaign page kholo ↗
+                </a>
+              ) : (
+                <>— <span className="font-semibold">whop.com/content-rewards</span> pe campaign dhoondo</>
+              )}
+              .
+            </li>
+            <li>
+              Phir yahan neeche <b>Join status = joined</b> set karo — uske
+              baad hi planner is campaign ko pick karega.
+            </li>
+          </ol>
+        </div>
+      )}
+
       <details className="mt-3 text-sm">
         <summary className="cursor-pointer text-slate-700 hover:text-slate-900">
           Brief requirements
@@ -251,7 +284,8 @@ export default function CampaignsPage() {
         </button>
       </div>
       <p className="text-slate-600 text-sm mb-6">
-        {campaigns.length} campaigns · sorted by payout
+        {campaigns.length} campaigns · sorted by payout · autopilot sirf{" "}
+        <b>joined</b> campaigns pe chalta hai
       </p>
 
       {data && !data.configured && <SetupBanner />}

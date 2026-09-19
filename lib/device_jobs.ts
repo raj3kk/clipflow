@@ -81,6 +81,29 @@ export async function createAutomationJob(
         duplicateCampaign: true,
       };
     }
+
+    // LIVE-JOB DEDUP (2026-09-19 fix): same campaign ka job already
+    // queued/claimed/dispatched/running ho to naya job mat banao.
+    // Bina iske: planner pass-2 (v2_submissions row abhi bani nahi) same
+    // campaign ka doosra moment leke doosra job bana deta tha → phone
+    // dono post karke Whop pe DOUBLE submit karta tha. Ek live job hi
+    // kaafi hai — naya request usi pe dedup hota hai.
+    const { data: liveDupe } = await sb
+      .from("device_jobs")
+      .select("id, status")
+      .eq("user_id", userId)
+      .in("status", ["queued", "claimed", "dispatched", "running"])
+      .eq("payload->>campaign_slug", campaignSlug)
+      .order("created_at", { ascending: true })
+      .limit(1);
+    if (liveDupe && liveDupe.length > 0) {
+      return {
+        ok: true,
+        job_id: (liveDupe[0] as { id: string }).id,
+        status: (liveDupe[0] as { status: string }).status,
+        deduped: true,
+      };
+    }
   }
 
   // Cap: last 24h me live jobs gino
