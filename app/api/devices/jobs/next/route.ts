@@ -12,10 +12,17 @@ import { reconcileStaleJobs } from "@/lib/device_jobs";
  * Job milte hi atomic claim hota hai (UPDATE ... WHERE status='queued'):
  * concurrent poll me sirf ek claimer jeet-ta hai.
  * Har poll pe heartbeat-timeout reconciliation bhi chalti hai (45 min) —
- * shared reconcileStaleJobs (lib/device_jobs.ts). Phone app khud heartbeat
- * NAHI bhejta (sirf claim-time); isliye cutoff 45 min hai taaki 10-20 min ki
- * lambi automation beech me wapas queue na ho jaye. Schedule-tick (har 15 min)
+ * shared reconcileStaleJobs (lib/device_jobs.ts). Schedule-tick (har 15 min)
  * bhi yahi reconcile chalata hai — phone marr jaye to bhi recovery hoti hai.
+ *
+ * HELD-JOB RETURN (P0 fix 2026-09-19): phone job claim karke (dispatched)
+ * use chalane se PEHLE jobs/next dobara poll karta hai (AutomationWorker).
+ * Pehle ye route sirf 'queued' jobs deta tha — isliye worker ko 204 milta
+ * tha, wo silent success leke nikal jata tha, aur app "queue me hai, shuru
+ * hone wala hai" pe hamesha atki rehti thi (heartbeat_count=0,
+ * current_step=null) — automation KABHI complete nahi hoti thi. Ab device
+ * ki wo dispatched/running job jiska terminal report nahi aaya, use hold
+ * karke wapas diya jata hai taaki worker use utha ke chala sake.
  */
 export async function GET(req: Request) {
   const ident = await getDeviceIdentity(req);
@@ -33,6 +40,51 @@ export async function GET(req: Request) {
 
   // 1) Heartbeat-timeout reconciliation (shared — schedule-tick bhi chalata hai).
   await reconcileStaleJobs(sb, ident.deviceId, ident.userId);
+
+  // 1b) HELD-JOB RETURN (P0 fix 2026-09-19) — kyun:
+  //     JobPickup.pollAndStart → nextJob() → claim (dispatched) → phir
+  //     AutomationWorker dobara nextJob() poll karta hai. Agar yahan sirf
+  //     'queued' jobs milen to worker ko 204 milta hai aur wo BINA active-job
+  //     saaf kiye silent success leke nikal jata hai — app "queue me hai" pe
+  //     atki rehti hai, automation kabhi chalti hi nahi.
+  //     Isliye: device ki dispatched/running job (jiska terminal report nahi
+  //     aaya — result route terminal pe device_jobs.status badal deta hai)
+  //     use hold karke wapas do.
+  //     - attempts dobara NAHI badhate (ye wahi logical attempt hai).
+  //     - job_runs me nayi row NAHI (claim wali 'dispatched' row pehle se hai).
+  //     - last_heartbeat ko HAATH NAHI lagate — reconcile ka stale-backstop
+  //       (10/45 min) bana rehna chahiye; poison job infinite nahi ghumegi.
+  //     - Fresh heartbeat (3 min, hb>0) = koi worker ZINDA hai → 204, taaki
+  //       do worker ek hi job na chalaye (duplicate IG post ka khatra).
+  const HOLD_FRESH_MS = 3 * 60 * 1000;
+  const { data: held } = await sb
+    .from("device_jobs")
+    .select("id, type, payload, heartbeat_count, last_heartbeat, created_at")
+    .eq("device_id", ident.deviceId)
+    .in("status", ["dispatched", "running"])
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (held) {
+    const hbCount = held.heartbeat_count ?? 0;
+    const baseIso = held.last_heartbeat ?? held.created_at;
+    const baseMs = baseIso ? new Date(baseIso).getTime() : NaN;
+    const workerAlive =
+      hbCount > 0 &&
+      Number.isFinite(baseMs) &&
+      Date.now() - baseMs < HOLD_FRESH_MS;
+    if (workerAlive) {
+      return new NextResponse(null, { status: 204 });
+    }
+    return NextResponse.json({
+      has_job: true,
+      job_id: held.id,
+      type: held.type,
+      payload: (held as { payload?: Record<string, unknown> }).payload ?? {},
+      held: true,
+    });
+  }
 
   const { data: job } = await sb
     .from("device_jobs")
