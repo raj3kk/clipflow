@@ -8,7 +8,14 @@ import { getSupabase, isConfigured } from "@/lib/supabase";
  *   - last_heartbeat = now
  *   - heartbeat_count + 1   (0 = purana app / kabhi heartbeat nahi aaya)
  *   - current_step = body.step (optional, e.g. "uploading") — Live page pe dikhta hai
- *   - status → "running" (confirm)
+ *   - status → "running" (confirm) — SIRF jab job dispatched/running ho.
+ *
+ * Round-7 (Worker A) guards:
+ *   - terminal job (succeeded/failed/timeout/cancelled) pe heartbeat use
+ *     wapas "running" NAHI karta (resurrection bug fix) — sirf heartbeat
+ *     fields refresh, status chhoda jata hai.
+ *   - 'queued' job pe heartbeat status queued hi rakhta hai taaki phone
+ *     use dobara claim kar sake (requeue-race deadlock fix).
  *
  * Purane app versions heartbeat NAHI bhejte — unke liye last_heartbeat sirf
  * claim-time pe set hota hai. reconcileStaleJobs (lib/device_jobs.ts) is
@@ -55,11 +62,38 @@ export async function POST(
   }
 
   const now = new Date().toISOString();
+  // Round-7 (Worker A) fix: terminal job (succeeded/failed/timeout/cancelled)
+  // pe late heartbeat aaye (duplicate worker / race) to use wapas "running"
+  // mat karo — resurrection se Live page flicker hota hai aur reconcile
+  // confuse hota hai. Sirf heartbeat fields refresh karo, status chhodo.
+  if (["succeeded", "cancelled", "failed", "timeout"].includes(job.status)) {
+    await sb
+      .from("device_jobs")
+      .update({
+        last_heartbeat: now,
+        heartbeat_count: (job.heartbeat_count ?? 0) + 1,
+      })
+      .eq("id", job.id);
+    await touchDevice(ident.deviceId);
+    return NextResponse.json({
+      ok: true,
+      job_id: job.id,
+      status: job.status,
+      terminal: true,
+    });
+  }
   const update: Record<string, unknown> = {
     last_heartbeat: now,
-    status: "running",
     heartbeat_count: (job.heartbeat_count ?? 0) + 1,
   };
+  // "running" sirf tab jab job dispatched/running hai. 'queued' job pe
+  // heartbeat ka matlab phone abhi bhi purana attempt pakde hai (requeue ke
+  // baad) — status queued hi rehne do taaki phone use dobara claim kar sake.
+  // (Pehle har heartbeat status="running" kar deta tha → phone re-claim nahi
+  // kar pata tha aur job atki rehti thi.)
+  if (["dispatched", "running"].includes(job.status)) {
+    update.status = "running";
+  }
   if (step) update.current_step = step;
   await sb.from("device_jobs").update(update).eq("id", job.id);
   await touchDevice(ident.deviceId);
@@ -67,7 +101,7 @@ export async function POST(
   return NextResponse.json({
     ok: true,
     job_id: job.id,
-    status: "running",
+    status: update.status ?? job.status,
     heartbeat_count: update.heartbeat_count,
     current_step: step,
   });
