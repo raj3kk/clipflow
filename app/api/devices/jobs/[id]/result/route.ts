@@ -176,6 +176,87 @@ export async function POST(
     }
   }
 
+  // VERIFY RESULT (Round-7b, 2026-09-19): phone ne Whop pe candidates check
+  // kiye — joined? requirements? video links? pehle submit? Result se
+  // campaigns.notes me verified_* data + join_status update hota hai taaki
+  // planner agli tick me VERIFIED campaign pe hi clip banaye (blind pick nahi).
+  const isVerifyJob = jobType === "verify_campaigns";
+  if (isVerifyJob) {
+    const verifyStatus =
+      typeof meta.vars?.verify_status === "string"
+        ? (meta.vars.verify_status as string)
+        : status === "succeeded"
+          ? "verified"
+          : "failed";
+    const verifyDetail =
+      (typeof meta.vars?.verify_detail === "string" &&
+        (meta.vars.verify_detail as string)) ||
+      meta.error ||
+      "";
+    let results: Array<Record<string, unknown>> = [];
+    try {
+      const raw = meta.vars?.verify_results;
+      results = Array.isArray(raw)
+        ? (raw as Array<Record<string, unknown>>)
+        : JSON.parse(typeof raw === "string" ? raw : "[]");
+    } catch {
+      results = [];
+    }
+    for (const r of results) {
+      const cid =
+        typeof r.campaign_id === "string" ? r.campaign_id : "";
+      if (!cid) continue;
+      const { data: camp } = await sb
+        .from("campaigns")
+        .select("id, notes")
+        .eq("id", cid)
+        .eq("user_id", ident.userId)
+        .single();
+      if (!camp) continue;
+      let notes: Record<string, unknown> = {};
+      try {
+        notes = JSON.parse((camp as { notes: string }).notes || "{}");
+        if (typeof notes !== "object" || notes === null) notes = {};
+      } catch {
+        notes = {};
+      }
+      notes.verified_at = now;
+      notes.verified_joined = r.joined === true;
+      notes.verified_requirements =
+        typeof r.requirements_text === "string"
+          ? (r.requirements_text as string).slice(0, 2000)
+          : "";
+      notes.verified_video_links = Array.isArray(r.video_links)
+        ? (r.video_links as unknown[]).slice(0, 10)
+        : [];
+      notes.whop_submitted = r.submitted === true;
+      const patch: Record<string, unknown> = {
+        notes: JSON.stringify(notes),
+      };
+      const js = r.join_status;
+      if (js === "joined" || js === "already_joined" || r.joined === true) {
+        patch.joined = true;
+        patch.join_status = "joined";
+      } else if (verifyStatus === "needs_user") {
+        patch.join_status = "needs_user";
+      }
+      await sb.from("campaigns").update(patch).eq("id", cid);
+    }
+    const chosen =
+      typeof meta.vars?.chosen_campaign_id === "string"
+        ? (meta.vars.chosen_campaign_id as string)
+        : "";
+    await logActivity(
+      sb,
+      ident.userId,
+      verifyStatus === "verified" ? "campaign_verified" : "verify_failed",
+      verifyStatus === "verified"
+        ? `✅ Whop verification poori: best-fit campaign '${chosen}' ` +
+            `(joined, requirements + video links mile). Planner ab isi pe clip banayega.`
+        : `⚠️ Campaign verification ${verifyStatus}: ${verifyDetail.slice(0, 200)}`
+    );
+  }
+
   // SUCCEEDED → v2_submissions me record (campaign dedup ka source of truth).
   // Phir isi campaign ke baaki live jobs cancel — dobara submit nahi hoga.
   // (join job pe nahi — join ka apna handling upar hai.)
@@ -233,7 +314,11 @@ export async function POST(
   // needs_user = user ka action chahiye, auto-retry bekaar hai → terminal
   // 'failed' rehne do (Campaigns tab me 'needs_user' flag dikhega).
   const joinNeedsUser = isJoinJob && joinStatus === "needs_user";
-  if (status === "failed" && !joinNeedsUser) {
+  const verifyNeedsUser =
+    isVerifyJob &&
+    typeof meta.vars?.verify_status === "string" &&
+    (meta.vars.verify_status as string) === "needs_user";
+  if (status === "failed" && !joinNeedsUser && !verifyNeedsUser) {
     // Abhi insert kiya hua 'failed' run sabse naya hai; usse pehle wala
     // run dekho — agar wo bhi 'failed' tha to ye re-report hai.
     const { data: runs } = await sb
