@@ -204,6 +204,43 @@ export function buildJoinCampaignPayload(
   };
 }
 
+/**
+ * verify_campaigns job payload (Round-7b, 2026-09-19).
+ *
+ * Server ke paas Whop login NAHI hai — isliye campaign ka FINAL chunav phone
+ * karta hai. Server sirf top candidates bhejta hai (paisa-ranked); phone apne
+ * logged-in Whop WebView me har candidate kholta hai aur check karta hai:
+ * joined? requirements kya hain? official video links kaunsi? pehle submit
+ * hua? Phir best-fit choose karke (zaroorat ho to join karke) result bhejta hai.
+ *
+ * Phone ka dedicated handler: JobEngine.runVerifyCampaigns.
+ * Result vars: verify_status = verified | needs_user | failed,
+ *   chosen_campaign_id, verify_results (per-candidate JSON), verify_detail.
+ * Result route usi ke hisab se campaigns.notes me verified_* data + join_status
+ * update karta hai — planner agli tick me verified campaign pe clip banata hai.
+ */
+export interface VerifyCandidate {
+  campaign_id: string;
+  name: string;
+  campaign_url: string;
+  payout_per_1k_usd: number | null;
+}
+
+export function buildVerifyCampaignsPayload(
+  candidates: VerifyCandidate[]
+): Record<string, unknown> {
+  return {
+    workflow: "v2-verify-campaigns",
+    workflow_version: 1,
+    candidates: candidates.map((c) => ({
+      campaign_id: c.campaign_id,
+      name: c.name,
+      campaign_url: c.campaign_url,
+      payout_per_1k_usd: c.payout_per_1k_usd ?? null,
+    })),
+  };
+}
+
 /** Job payload: phone JobEngine seedha chala leta hai. */
 export function buildAutomationPayload(
   pkg: ClipPackage,
