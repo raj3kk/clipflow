@@ -46,7 +46,17 @@ export async function createAutomationJob(
   deviceId: string,
   type: string,
   payload: Record<string, unknown>,
-  opts?: { idempotency_key?: string; run_after?: string }
+  opts?: {
+    idempotency_key?: string;
+    run_after?: string;
+    /**
+     * Campaign live-dedup kin job types tak seemit rahe. Default (undefined)
+     * = sab types (clip flow ka purana behavior — zero change).
+     * join_campaign isko ["join_campaign"] deta hai: live CLIP job hone se
+     * join job dabna nahi chahiye (warna join kabhi enqueue hi nahi hota).
+     */
+    campaignDedupTypes?: string[];
+  }
 ): Promise<JobCreateResult> {
   const { data: device } = await sb
     .from("devices")
@@ -102,7 +112,9 @@ export async function createAutomationJob(
     // campaign ka doosra moment leke doosra job bana deta tha → phone
     // dono post karke Whop pe DOUBLE submit karta tha. Ek live job hi
     // kaafi hai — naya request usi pe dedup hota hai.
-    const { data: liveDupe } = await sb
+    // opts.campaignDedupTypes (Round-7): join_campaign sirf apne type me
+    // dedup karta hai — live clip job join ko rokegi nahi.
+    let liveDupeQuery = sb
       .from("device_jobs")
       .select("id, status")
       .eq("user_id", userId)
@@ -110,6 +122,10 @@ export async function createAutomationJob(
       .eq("payload->>campaign_slug", campaignSlug)
       .order("created_at", { ascending: true })
       .limit(1);
+    if (opts?.campaignDedupTypes && opts.campaignDedupTypes.length > 0) {
+      liveDupeQuery = liveDupeQuery.in("type", opts.campaignDedupTypes);
+    }
+    const { data: liveDupe } = await liveDupeQuery;
     if (liveDupe && liveDupe.length > 0) {
       return {
         ok: true,
