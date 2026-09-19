@@ -9,6 +9,14 @@ export const metadata = {
     description:
       "Aapke Instagram/Whop passwords hum chhoote bhi nahi. Data kabhi becha ya teesre ko diya nahi jata. Delete par 7 din me saaf.",
     url: "https://clipflow-webbuilder1.vercel.app/privacy",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "ClipFlow — CF ribbon logo",
+      },
+    ],
   },
 };
 

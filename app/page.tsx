@@ -10,6 +10,14 @@ export const metadata = {
     description:
       "App install karo, campaign chuno, phone khud post karega. Online time par coins kamao.",
     url: "https://clipflow-webbuilder1.vercel.app/",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "ClipFlow — CF ribbon logo",
+      },
+    ],
   },
 };
 

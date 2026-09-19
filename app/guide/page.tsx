@@ -10,6 +10,14 @@ export const metadata = {
     description:
       "7 simple steps: APK install karo, account banao, device code link karo, Instagram + Whop login karo, schedule lagao ya Run Now dabao, coins kamao.",
     url: "https://clipflow-webbuilder1.vercel.app/guide",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "ClipFlow — CF ribbon logo",
+      },
+    ],
   },
 };
 

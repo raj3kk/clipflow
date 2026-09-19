@@ -9,6 +9,14 @@ export const metadata = {
     description:
       "Service aapke phone se clipping automate karti hai. Coins sirf reward points — koi cash value nahi. Refund ka sawal nahi, kyunki koi payment hai hi nahi.",
     url: "https://clipflow-webbuilder1.vercel.app/terms",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "ClipFlow — CF ribbon logo",
+      },
+    ],
   },
 };
 
