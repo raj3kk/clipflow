@@ -7,7 +7,8 @@ import { getSupabase, isConfigured } from "@/lib/supabase";
  *
  * GET /api/devices/live  →  {
  *   devices: [...{ id, device_name, platform, app_version, status, paused_until, last_seen, presence }],
- *   active:  [...{ id, device_id, device_name, type, status, attempts, created_at, last_heartbeat }],
+ *   active:  [...{ id, device_id, device_name, type, status, attempts, created_at,
+ *                   last_heartbeat, heartbeat_count, current_step }],
  *   recent:  [...{ id, device_id, device_name, status, finished_at, note }]
  * }
  *
@@ -55,7 +56,9 @@ export async function GET() {
 
   const { data: activeJobs } = await sb
     .from("device_jobs")
-    .select("id, device_id, type, status, attempts, created_at, last_heartbeat")
+    .select(
+      "id, device_id, type, status, attempts, created_at, last_heartbeat, heartbeat_count, current_step"
+    )
     .eq("user_id", user.id)
     .in("status", ["queued", "claimed", "running"])
     .order("created_at", { ascending: false })

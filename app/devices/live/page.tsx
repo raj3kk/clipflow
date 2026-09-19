@@ -24,6 +24,8 @@ interface ActiveJob {
   attempts: number;
   created_at: string;
   last_heartbeat: string | null;
+  heartbeat_count: number | null;
+  current_step: string | null;
 }
 
 interface RecentRun {
@@ -60,6 +62,16 @@ function elapsed(iso: string): string {
   if (m < 60) return `${m}m ${s % 60}s`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
+
+/** heartbeat kitne min purana hai (null = kabhi khabar nahi aayi) */
+function hbAgeMin(iso: string | null): number | null {
+  if (!iso) return null;
+  return Math.max(0, (Date.now() - new Date(iso).getTime()) / 60000);
+}
+
+// 10+ min se heartbeat band = phone se jawab nahi (sirf heartbeat-capable
+// app pe — heartbeat_count>0 matlab app heartbeat bhejta hai). Server ka
+// watchdog (pipeline_watch, har 1 min) aise job ko khud wapas queue karta hai.
 
 // Light theme status pills (white premium, emerald accent).
 const STATUS_STYLE: Record<string, string> = {
@@ -156,7 +168,12 @@ export default function LivePage() {
               </div>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
-                {data.active.map((j) => (
+                {data.active.map((j) => {
+                  const hbMin = hbAgeMin(j.last_heartbeat);
+                  const hbCapable = (j.heartbeat_count ?? 0) > 0;
+                  const hbDead =
+                    hbCapable && hbMin !== null && hbMin >= 10;
+                  return (
                   <div key={j.id} className={cardCls}>
                     <div className="flex items-center justify-between gap-2">
                       <div className="font-semibold text-sm text-slate-900">{j.device_name}</div>
@@ -173,13 +190,31 @@ export default function LivePage() {
                         </span>{" "}
                         pehle
                       </div>
-                      {j.last_heartbeat && (
+                      {j.current_step && (
                         <div>
-                          Phone ka signal:{" "}
-                          <span className="text-slate-900">
-                            {timeAgo(j.last_heartbeat)}
-                          </span>
+                          Step: <span className="text-slate-900">{j.current_step}</span>
                         </div>
+                      )}
+                      <div>
+                        Phone ki aakhri khabar:{" "}
+                        <span className="text-slate-900">
+                          {j.last_heartbeat
+                            ? timeAgo(j.last_heartbeat)
+                            : "abhi tak koi khabar nahi"}
+                        </span>
+                      </div>
+                      {hbDead ? (
+                        <div className="mt-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-amber-800">
+                          📵 Phone se 10+ min se koi jawab nahi — lagta hai atak
+                          gaya hai. Ghabrao mat: thodi der me server khud is
+                          kaam ko dobara queue karega.
+                        </div>
+                      ) : (
+                        j.last_heartbeat && (
+                          <div className="text-emerald-700">
+                            ✓ Phone ka signal aa raha hai
+                          </div>
+                        )
                       )}
                       {j.attempts > 0 && (
                         <div>
@@ -188,7 +223,8 @@ export default function LivePage() {
                       )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </section>

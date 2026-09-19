@@ -395,6 +395,95 @@ def reclaim_orphans() -> None:
             log(f"{rid}: orphan requeue fail ({type(e).__name__})")
 
 
+# ---------------------------------------------------------------------------
+# KAM 4: phone-job heartbeat watchdog (P0, 2026-09-19).
+# phone-poll se INDEPENDENT — pipeline_watch har 1 min chalta hai, isliye
+# phone marr jaye (poll na aaye) tab bhi recovery hoti hai.
+# TS twin: lib/device_jobs.ts :: reconcileStaleJobs (schedule-tick + jobs/next).
+# Per-job cutoff: heartbeat_count>0 (heartbeat-capable app) → 10 min bina
+# heartbeat = dead; purana app (0) → claim-time (last_heartbeat/created_at)
+# se 45 min legacy cutoff — zinda lambi run beech me wapas queue na ho.
+HEARTBEAT_TIMEOUT_MIN = 10
+LEGACY_HEARTBEAT_TIMEOUT_MIN = 45
+
+
+def _hb_stale(job: dict) -> bool:
+    hb_count = job.get("heartbeat_count") or 0
+    cutoff_min = (HEARTBEAT_TIMEOUT_MIN if hb_count > 0
+                  else LEGACY_HEARTBEAT_TIMEOUT_MIN)
+    base = job.get("last_heartbeat") or job.get("created_at")
+    if not base:
+        return False
+    try:
+        base_dt = datetime.fromisoformat(str(base).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if base_dt.tzinfo is None:
+        base_dt = base_dt.replace(tzinfo=timezone.utc)
+    age_min = (datetime.now(timezone.utc) - base_dt).total_seconds() / 60
+    return age_min > cutoff_min
+
+
+def reconcile_device_jobs() -> None:
+    """KAM 4: dispatched/running jobs ka heartbeat stale → requeue/timeout."""
+    try:
+        jobs = config.sb_request(
+            "GET", "/rest/v1/device_jobs",
+            query={"status": "in.(dispatched,running)",
+                   "select": ("id,user_id,device_id,attempts,max_attempts,"
+                              "heartbeat_count,last_heartbeat,created_at"),
+                   "limit": "50"})
+    except Exception as e:  # noqa: BLE001
+        log(f"device-job watchdog fetch failed ({type(e).__name__}) — skip")
+        return
+    requeued = timed_out = 0
+    for j in jobs or []:
+        if not _hb_stale(j):
+            continue
+        uid, did, jid = j.get("user_id"), j.get("device_id"), j["id"]
+        att = j.get("attempts") or 0
+        max_att = j.get("max_attempts") or 3
+        try:
+            if att < max_att:
+                config.sb_patch("device_jobs", jid, {
+                    "status": "queued",
+                    "run_after": (datetime.now(timezone.utc)
+                                  + timedelta(minutes=1)).isoformat(),
+                    "note": ("watchdog: heartbeat stale "
+                             "— auto requeued")[:500]})
+                config.sb_request("POST", "/rest/v1/job_runs", payload=[{
+                    "user_id": uid, "device_id": did, "job_id": jid,
+                    "status": "timeout_requeued",
+                    "finished_at": now_iso(),
+                    "result": {"reason": "watchdog: heartbeat stale"}}])
+                requeued += 1
+                log(f"{jid}: heartbeat stale → requeued ({att}/{max_att})")
+            else:
+                config.sb_patch("device_jobs", jid, {
+                    "status": "timeout",
+                    "note": ("watchdog: heartbeat stale — attempts "
+                             "exhausted")[:500]})
+                config.sb_request("POST", "/rest/v1/job_runs", payload=[{
+                    "user_id": uid, "device_id": did, "job_id": jid,
+                    "status": "timeout",
+                    "finished_at": now_iso(),
+                    "result": {"reason": "watchdog: heartbeat stale — "
+                                         "attempts exhausted"}}])
+                config.sb_request("POST", "/rest/v1/activity_log", payload=[{
+                    "user_id": uid, "kind": "job_timeout",
+                    "title": "Job timeout",
+                    "detail": ("Phone se heartbeat band (watchdog) — "
+                               "attempts khatm, timeout mark kiya."),
+                    "ref_type": "device_job", "ref_id": jid,
+                    "created_at": now_iso()}])
+                timed_out += 1
+                log(f"{jid}: heartbeat stale → TIMEOUT ({att}/{max_att})")
+        except Exception as e:  # noqa: BLE001
+            log(f"{jid}: watchdog update fail ({type(e).__name__})")
+    if requeued or timed_out:
+        log(f"watchdog: requeued={requeued} timed_out={timed_out}")
+
+
 def promote_retries() -> None:
     """KAM 3: `failed` + next_retry_at aa gaya → wapas `pending` (auto-retry).
 
@@ -445,6 +534,7 @@ def main() -> int:
         return 1
     reclaim_orphans()
     promote_retries()
+    reconcile_device_jobs()  # P0 watchdog — phone-poll independent
     if not pending:
         log("no pending requests")
         return 0

@@ -220,20 +220,45 @@ export async function logActivity(
 /**
  * Stuck-job reconciliation — server-side, phone-poll se independent.
  *
- * 2026-09-19 se pehle ye logic sirf jobs/next (phone poll) me thi: phone
- * marr jaye to 'running' job hamesha atki rehti thi. Ab schedule-tick
- * (har 15 min) bhi ise chalata hai.
+ * P0 (2026-09-19): phone app execution ke dauraan heartbeat bhejta hai
+ * (Worker D, har ~5 min) — 10 min bina heartbeat = dead.
+ * Purane app versions heartbeat NAHI bhejte (sirf claim-time): unke liye
+ * 45-min legacy cutoff taaki zinda lambi run beech me wapas queue na ho.
+ * Guard: heartbeat_count > 0 = heartbeat-capable app (is job pe kam se kam
+ * ek heartbeat aaya); 0 = legacy → last_heartbeat (= claim time) se 45 min.
  *
- * 1. dispatched/running + last_heartbeat 45+ min purana → attempts bache hon
- *    to wapas 'queued' (run_after = +60s, turant retry nahi), nahi to terminal
+ * 1. dispatched/running + stale heartbeat → attempts bache hon to wapas
+ *    'queued' (run_after = +60s, turant retry nahi), nahi to terminal
  *    'timeout' (+ activity_log).
  * 2. queued + 48h se zyada purana (phone kabhi online nahi aaya, clip stale)
  *    → 'expired' (+ activity_log). 'expired' cap me NAHI ginta.
  *
+ * Watchdog: pipeline_watch.py (har 1 min) bhi yehi logic chalata hai —
+ * phone marr jaye (poll na aaye) to bhi recovery hoti hai. Yahan wala
+ * schedule-tick (15 min) + jobs/next (har poll) se chalta hai.
+ *
  * Returns { requeued, timedOut, expired }.
  */
-export const HEARTBEAT_TIMEOUT_MIN = 45;
+export const HEARTBEAT_TIMEOUT_MIN = 10;
+export const LEGACY_HEARTBEAT_TIMEOUT_MIN = 45;
 export const QUEUED_EXPIRY_HOURS = 48;
+
+/** Is job ka heartbeat stale hai? (per-job cutoff: heartbeat-capable vs legacy) */
+export function isHeartbeatStale(job: {
+  heartbeat_count?: number | null;
+  last_heartbeat?: string | null;
+  created_at?: string | null;
+}): boolean {
+  const now = Date.now();
+  const hbCount = job.heartbeat_count ?? 0;
+  const cutoffMin =
+    hbCount > 0 ? HEARTBEAT_TIMEOUT_MIN : LEGACY_HEARTBEAT_TIMEOUT_MIN;
+  const baseIso = job.last_heartbeat ?? job.created_at;
+  if (!baseIso) return false;
+  const base = new Date(baseIso).getTime();
+  if (!Number.isFinite(base)) return false;
+  return now - base > cutoffMin * 60 * 1000;
+}
 
 export async function reconcileStaleJobs(
   sb: any,
@@ -244,27 +269,25 @@ export async function reconcileStaleJobs(
   const now = new Date();
   const nowIso = now.toISOString();
 
-  // --- 1) heartbeat-timeout: dispatched/running, 45+ min se koi heartbeat nahi
-  const staleCutoff = new Date(
-    now.getTime() - HEARTBEAT_TIMEOUT_MIN * 60 * 1000
-  ).toISOString();
+  // --- 1) heartbeat-timeout: dispatched/running, per-job cutoff
+  //    (heartbeat_count>0 → 10 min; purana app (0) → claim-time se 45 min)
   let stale: Array<{
     id: string;
     attempts: number | null;
     max_attempts: number | null;
+    heartbeat_count: number | null;
+    last_heartbeat: string | null;
+    created_at: string | null;
   }> = [];
   try {
-    // NULL last_heartbeat (column se pehle claim hui purani rows) bhi pakdo —
-    // unke liye created_at se age dekho.
     const { data } = await sb
       .from("device_jobs")
-      .select("id, attempts, max_attempts, last_heartbeat, created_at")
+      .select(
+        "id, attempts, max_attempts, heartbeat_count, last_heartbeat, created_at"
+      )
       .eq("device_id", deviceId)
-      .in("status", ["dispatched", "running"])
-      .or(
-        `last_heartbeat.lt.${staleCutoff},and(last_heartbeat.is.null,created_at.lt.${staleCutoff})`
-      );
-    stale = (data ?? []) as typeof stale;
+      .in("status", ["dispatched", "running"]);
+    stale = ((data ?? []) as typeof stale).filter(isHeartbeatStale);
   } catch {
     /* fetch fail → is device ka reconcile skip, agla tick retry */
     return out;
