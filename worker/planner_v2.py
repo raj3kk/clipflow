@@ -58,6 +58,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -676,6 +677,7 @@ def _post_worker(path: str, payload: dict) -> dict:
     body = json.dumps(payload).encode()
     last: Exception | None = None
     for i in range(4):
+        tag = f"{path} →"
         req = urllib.request.Request(url, data=body, method="POST")
         req.add_header("Content-Type", "application/json")
         if config.WORKER_SECRET:
@@ -685,13 +687,18 @@ def _post_worker(path: str, payload: dict) -> dict:
                 return json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
             detail = e.read().decode(errors="replace")[:300]
-            tag = f"{path} →"
             if e.code == 429:
                 log(f"{tag} 429 cap reached (server-side guard) — skip")
                 return {"ok": False, "capped": True}
             if e.code == 409:
                 log(f"{tag} 409: {detail} — skip")
-                return {"ok": False, "conflict": True}
+                try:
+                    dj = json.loads(detail)
+                except Exception:
+                    dj = {}
+                return {"ok": False, "conflict": True,
+                        "needs_app_update": dj.get("needs_app_update", False),
+                        "error": dj.get("error", detail)}
             if 500 <= e.code < 600 and i < 3:
                 wait = min(2 ** i, 15) + random.uniform(0, 1.5)
                 log(f"{tag} {e.code} (retry {i + 1}/4, {wait:.1f}s)")
@@ -1037,6 +1044,7 @@ def main() -> None:
         outcome = plan_once(dry_run=args.dry_run)
     except Exception as e:  # noqa: BLE001
         log(f"FATAL: {type(e).__name__}: {e}")
+        log("TRACEBACK:\n" + "".join(traceback.format_exception(e)))
         try:
             activity(None, "planner_v2_error", str(e)[:300])
         except Exception:
