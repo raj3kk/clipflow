@@ -3,25 +3,19 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import Nav, {
-  NAV_V1,
-  NAV_V2,
-  PROFILE_ITEM,
-  isActiveTab,
-  useAllTabs,
-} from "./Nav";
-import ModeToggle from "./ModeToggle";
-import { IconMore, IconClips, IconUser, IconX, IconLogout } from "./icons";
-import { AppMode, MODE_EVENT, getMode } from "./mode";
+import Nav, { NAV, PROFILE_ITEM, isActiveTab, useAllTabs } from "./Nav";
+import { IconMore, IconUser, IconX, IconLogout } from "./icons";
 import { getBrowserSupabase } from "@/lib/supabase-browser";
 
 /* ---------- logo ---------- */
 function Logo({ compact }: { compact?: boolean }) {
   return (
-    <Link href="/" className="group flex items-center gap-2.5">
-      <span className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-600 text-white shadow-sm transition-transform duration-300 group-hover:scale-105">
-        <IconClips className="h-5 w-5" />
-      </span>
+    <Link href="/devices" className="group flex items-center gap-2.5">
+      <img
+        src="/logo.png"
+        alt="ClipFlow"
+        className="h-9 w-9 rounded-xl bg-white object-contain shadow-sm transition-transform duration-300 group-hover:scale-105"
+      />
       {!compact && (
         <span className="leading-tight">
           <span className="text-lg font-bold tracking-tight text-slate-900">ClipFlow</span>
@@ -66,20 +60,10 @@ function ProfileIcon() {
 function MobileTabs() {
   const path = usePathname();
   const router = useRouter();
-  const [mode, setModeState] = useState<AppMode>("v1");
   const { tabs } = useAllTabs();
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  useEffect(() => {
-    setModeState(getMode());
-    const h = (e: Event) =>
-      setModeState((e as CustomEvent<AppMode>).detail ?? getMode());
-    window.addEventListener(MODE_EVENT, h);
-    return () => window.removeEventListener(MODE_EVENT, h);
-  }, []);
-
-  const base = mode === "v2" ? NAV_V2 : NAV_V1;
-  const primary = base.slice(0, 4);
+  const primary = NAV.slice(0, 4);
   const overflow = tabs.filter((t) => !primary.some((p) => p.href === t.href));
   // sabse lamba match jeetta hai — /devices/live pe sirf Live highlight ho
   const activeHref = [...primary, ...overflow].reduce<string | null>(
@@ -200,7 +184,6 @@ function Sidebar() {
   return (
     <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col gap-5 overflow-y-auto border-r border-slate-200 bg-white p-5 md:flex">
       <Logo />
-      <ModeToggle />
       <Nav />
       <div className="mt-auto grid gap-3 border-t border-slate-200 pt-4">
         <Link href={PROFILE_ITEM.href} className="tab-item">
@@ -246,7 +229,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <header className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur md:hidden">
         <Logo />
         <div className="flex items-center gap-3">
-          <ModeToggle compact />
           <ProfileIcon />
         </div>
       </header>

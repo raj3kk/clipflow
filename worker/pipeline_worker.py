@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-ClipFlow pipeline worker — full SOP pipeline per approved clip.
+ClipFlow pipeline worker — legacy V1 worker, post/verify/submit REMOVED
+(2026-09-19). Server-side IG posting fundamentally broken tha (no IG API
+connection, no H.264 decode in server Chromium, datacenter bot-detection).
 
-State machine (activity_log entry at every step via POST /api/activity):
-  render      (opt-in --render only; default renderer is render_worker.py)
+Ab ye file sirf shared helpers rakhti hai:
+  render      (opt-in --render only)
       download source section (yt-dlp) -> clip_factory -> QA
       (1080x1920, duration in campaign min/max, frames non-blank)
       -> upload mp4 + preview frames -> PATCH job {status:'preview',...}
@@ -14,17 +16,12 @@ State machine (activity_log entry at every step via POST /api/activity):
   brief_check read campaign requirements/caption_template/hashtags;
               caption contains required tags, duration in min/max,
               hook present -> write brief_check to job; fail -> 'failed'.
-  post        Poster backends: api_poster (instagram-cli) or web_poster
-              (CDP). DRY-RUN default: everything except the final publish
-              click. Action-block text detected -> STOP EVERYTHING,
-              notify, exit(0). Never auto-retry.
-  verify      MANDATORY before submit (SOP #5): open LIVE reel URL via CDP,
-              seek to 1s/33%/66%/90%, screenshot, check playing + no error
-              text, PIL-compare vs local preview frames; diff too big ->
-              verify_status 'needs_review' + owner choice intervention.
-  submit      Whop via CDP (google_oauth cookies): paste instagram_url,
-              submit; "Clip submitted" -> POST /api/submissions.
-              Warn if >20 min after posted_at (SOP: submit within 30 min).
+
+REMOVED: Poster / ApiPoster / WebPoster / choose_poster / post_step.
+process_approved ab sirf schedule + brief_check karta hai.
+Posting + Whop submit V2 me phone app karta hai:
+  pipeline_watch.py -> planner_v2.py -> brain.py -> clip_factory
+  -> Supabase clips bucket -> POST /api/devices/<id>/plan-job.
 
 Modes:
   --once      single pass (for cron), then exit
@@ -32,8 +29,7 @@ Modes:
   --render    also render 'queued' jobs (step 1); default off because
               render_worker.py already owns queued -> preview.
 
-Env: see config.py / README.md. CLIPFLOW_LIVE=1 enables real publish/
-submit clicks. Default is DRY-RUN: zero real IG/Whop writes.
+Env: see config.py / README.md.
 """
 
 from __future__ import annotations
@@ -53,6 +49,7 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config  # noqa: E402
+from ytgrab import grab_section  # noqa: E402
 import cdp as cdp_mod  # noqa: E402
 import gmail as gmail_mod  # noqa: E402
 import interventions as iv_mod  # noqa: E402
@@ -151,12 +148,8 @@ def render_step(job: dict) -> None:
         start, end = int(job["start_sec"]), int(job["end_sec"])
         dur = end - start
         src_section = os.path.join(tmp, "src.mp4")
-        dl = [config.YTDLP, "--no-check-certificate", "--js-runtimes", "node",
-              "--extractor-args", "youtube:player_client=android",
-              "--download-sections", f"*{start - 10}-{end + 10}",
-              "--force-keyframes-at-cuts",
-              "-o", src_section, job["source_url"]]
-        subprocess.run(dl, check=True, capture_output=True)
+        grab_section(job["source_url"], start - 10, end + 10,
+                     src_section, config.YTDLP)
         cmd = [sys.executable, config.FACTORY, "--src", src_section,
                "--start", "10", "--end", str(10 + dur), "--out", out_mp4]
         profile = job.get("profile_path")
@@ -334,203 +327,11 @@ def brief_check_step(job: dict) -> dict:
 
 
 # --------------------------------------------------------------------------
-# STEP 4 — post. Poster interface + backends.
+# V1 REMOVED (2026-09-19): server-side IG posting deleted.
+# Poster / ApiPoster / WebPoster / choose_poster / post_step hata diye gaye.
+# Posting ab phone app (v2) se hoti hai via POST /api/devices/<id>/plan-job.
+# _load_whop_connection + action_block_shutdown shared helpers ke roop me rakhe.
 # --------------------------------------------------------------------------
-class Poster:
-    """post(job, video_path, cover_path, caption) -> dict|None.
-
-    Returns {"post_id":..., "permalink":...} on success, or None in DRY-RUN
-    (nothing published). Raises ActionBlocked on rate-limit detection.
-    """
-
-    name = "base"
-
-    def post(self, job: dict, video_path: str, cover_path: str,
-             caption: str) -> dict | None:
-        raise NotImplementedError
-
-
-class ApiPoster(Poster):
-    """instagram-cli backend. Only used if the binary AND an api-style
-    instagram connection (with account_id) are configured."""
-    name = "api_poster"
-
-    def __init__(self, account_id: str):
-        self.account_id = account_id
-        self.cli = shutil.which("instagram-cli")
-
-    @staticmethod
-    def available(conn: dict) -> bool:
-        return bool(shutil.which("instagram-cli")) and \
-            conn.get("kind") == "api" and bool(conn.get("account_id"))
-
-    def post(self, job, video_path, cover_path, caption):
-        jid = job["id"]
-        cmd = ["instagram-cli", "post-feed",
-               "--account-id", str(self.account_id),
-               "--file", video_path, "--cover", cover_path,
-               "--caption", caption]
-        if not config.CLIPFLOW_LIVE:
-            config.activity(
-                "post_dryrun",
-                f"[{self.name}] WOULD RUN: {' '.join(cmd[:8])} ... "
-                f"(caption {len(caption)} chars, video {video_path})", jid)
-            print(f"[dry-run] would run: {' '.join(cmd)}", flush=True)
-            return None
-        config.activity("post_publish", f"[{self.name}] publishing via instagram-cli", jid)
-        try:
-            out = subprocess.run(cmd, capture_output=True, text=True,
-                                 timeout=600)
-        except subprocess.TimeoutExpired as e:
-            raise PipelineError(f"instagram-cli timed out: {e}") from e
-        combined = (out.stdout or "") + (out.stderr or "")
-        if check_block_text(combined):
-            raise ActionBlocked(f"instagram-cli output: {combined[:300]}")
-        if out.returncode != 0:
-            raise PipelineError(f"instagram-cli failed: {combined[:500]}")
-        # best-effort permalink extraction; CLI output format may vary
-        permalink = None
-        for token in combined.split():
-            if "instagram.com/reel/" in token or "instagram.com/p/" in token:
-                permalink = token.strip().strip("',\"")
-                break
-        return {"post_id": permalink or f"cli-{jid}",
-                "permalink": permalink, "raw": combined[:500]}
-
-
-class WebPoster(Poster):
-    """CDP headless-Chrome backend for instagram.com web posting.
-
-    Implemented: session-cookie login (Network.setCookie, works for
-    httponly), username/password form login, 2FA -> InterventionNeeded.
-    The composer flow is best-effort (IG DOM changes often); the FINAL
-    publish click only happens when CLIPFLOW_LIVE=1.
-    """
-    name = "web_poster"
-
-    def __init__(self):
-        self.browser: cdp_mod.CDP | None = None
-
-    def _ensure_browser(self) -> cdp_mod.CDP:
-        if self.browser is None:
-            self.browser = cdp_mod.launch(config.CHROME)
-        return self.browser
-
-    def close(self):
-        if self.browser:
-            self.browser.close()
-            self.browser = None
-
-    def _logged_in(self, tab: cdp_mod.Tab, username: str = "") -> bool:
-        try:
-            if username:
-                return tab.wait_for_text(username, timeout=8)
-            # generic: profile avatar link present when logged in
-            return bool(tab.eval(
-                "!!document.querySelector('a[href^=\"/\"][aria-label*=\"rofile\"]')",
-                timeout=10))
-        except Exception:
-            return False
-
-    def login(self, conn: dict, job_id: str) -> cdp_mod.Tab:
-        """Login via cookies or credentials. Returns an authenticated tab."""
-        kind = conn.get("kind")
-        browser = self._ensure_browser()
-        tab = browser.tab()
-        if kind == "web":
-            cookies = conn.get("cookies") or []
-            tab.navigate("https://www.instagram.com/")
-            n = tab.set_cookies(cookies, default_domain="instagram.com")
-            config.activity("ig_login_cookies", f"set {n} cookies", job_id)
-            tab.navigate("https://www.instagram.com/")
-            if not self._logged_in(tab, conn.get("username", "")):
-                raise PipelineError("cookie login failed (not logged in)")
-            return tab
-        if kind == "credentials":
-            username = conn.get("username", "")
-            tab.navigate("https://www.instagram.com/accounts/login/")
-            tab.wait_for_text("Log in", timeout=20)
-            tab.eval(f"""(() => {{
-              const u = document.querySelector('input[name="username"]');
-              const p = document.querySelector('input[name="password"]');
-              if (!u || !p) return 'no-form';
-              u.focus(); document.execCommand('selectAll', false, null);
-              document.execCommand('insertText', false, {json.dumps(username)});
-              p.focus(); document.execCommand('selectAll', false, null);
-              document.execCommand('insertText', false,
-                {json.dumps(conn.get('password', ''))});
-              return 'filled';
-            }})()""")
-            # NOTE: password value used transiently, never logged.
-            tab.eval("""(() => {
-              const b = document.querySelector('button[type="submit"]');
-              if (b) b.click(); return !!b;
-            })()""")
-            time.sleep(4)
-            text = tab.body_text()
-            if "two-factor" in text.lower() or "6-digit" in text or \
-                    "authentication code" in text.lower():
-                raise iv_mod.InterventionNeeded(
-                    "otp", "Instagram 2FA code required",
-                    "Enter the 6-digit code from the authenticator/SMS for "
-                    f"{username}. The worker will type it and continue.",
-                    short="Instagram 2FA code")
-            tab.navigate("https://www.instagram.com/")
-            if not self._logged_in(tab, username):
-                raise PipelineError("credential login failed")
-            config.activity("ig_login_ok", f"logged in as {username}", job_id)
-            return tab
-        raise PipelineError(f"unsupported instagram connection kind: {kind!r}")
-
-    def post(self, job, video_path, cover_path, caption):
-        jid = job["id"]
-        if not config.CLIPFLOW_LIVE:
-            # DRY-RUN: prove login works, then log exactly what would happen.
-            config.activity(
-                "post_dryrun",
-                f"[{self.name}] DRY-RUN: logged in OK; WOULD: click Create → "
-                f"select {video_path} → aspect 'Original' (confirm highlighted) "
-                f"→ no trim (sliders 0s) → cover {cover_path} → paste caption "
-                f"({len(caption)} chars) → Share. Publish click SKIPPED.",
-                jid)
-            print(f"[dry-run] web_poster would publish {video_path}", flush=True)
-            return None
-        # LIVE (owner-enabled): best-effort composer automation.
-        conn = _load_ig_connection()
-        tab = self.login(conn, jid)
-        try:
-            config.activity("post_publish",
-                            f"[{self.name}] composer automation (best-effort)", jid)
-            # The IG web composer DOM shifts frequently; selectors below are
-            # the current best guess and are verified on first live run.
-            tab.eval("""(() => {
-              const create = [...document.querySelectorAll('a,div[role="button"]')]
-                .find(e => /create/i.test(e.textContent || ''));
-              if (create) create.click(); return !!create;
-            })()""")
-            time.sleep(2)
-            if check_block_text(tab.body_text()):
-                raise ActionBlocked("action-block text after opening composer")
-            config.activity(
-                "post_manual_step",
-                "composer opened; remaining composer steps (file select, "
-                "Original aspect, Share) are manual/DOM-dependent — verify in "
-                "logs before trusting this backend", jid)
-            raise PipelineError(
-                "web_poster LIVE composer is a skeleton: file-picker + Share "
-                "click not yet DOM-verified on this IG build. Use the "
-                "api_poster (instagram-cli) backend or manual post.")
-        finally:
-            self.close()
-
-
-def _load_ig_connection() -> dict:
-    try:
-        conns = config.load_service_connections("instagram")
-    except RuntimeError as e:
-        raise PipelineError(f"no instagram connection: {e}") from e
-    return config.pick_connection(conns)
-
 
 def _load_whop_connection() -> dict:
     try:
@@ -538,18 +339,6 @@ def _load_whop_connection() -> dict:
     except RuntimeError as e:
         raise PipelineError(f"no whop connection: {e}") from e
     return config.pick_connection(conns)
-
-
-def choose_poster() -> Poster:
-    """Prefer api_poster when configured; else web_poster (CDP)."""
-    try:
-        conn = _load_ig_connection()
-    except PipelineError as e:
-        raise PipelineError(f"no instagram connection: {e}") from e
-    if ApiPoster.available(conn):
-        return ApiPoster(str(conn["account_id"]))
-    return WebPoster()
-
 
 def action_block_shutdown(job_id: str, where: str) -> "typing.NoReturn":  # noqa: F821
     """SOP #9: on action block -> STOP, pause schedule, notify, exit(0)."""
@@ -576,70 +365,6 @@ def action_block_shutdown(job_id: str, where: str) -> "typing.NoReturn":  # noqa
             print(f"[worker] block notify email failed: {e}", flush=True)
     print(f"[worker] {msg} exiting quietly.", flush=True)
     sys.exit(0)
-
-
-def post_step(job: dict) -> dict:
-    """Returns post-record dict. In dry-run returns {'dry_run': True}."""
-    jid = job["id"]
-    campaign = get_campaign(job["campaign_id"]) if job.get("campaign_id") else {}
-    caption = build_caption(job, campaign)
-    video_url = job.get("video_url")
-    if not video_url:
-        raise PipelineError("no video_url on approved job (render first)")
-
-    tmp = tempfile.mkdtemp(prefix="clipflow_post_")
-    try:
-        video_path = download_file(video_url, os.path.join(tmp, "clip.mp4"))
-        info = ffprobe_info(video_path)
-        if info["width"] != 1080 or info["height"] != 1920:
-            raise PipelineError(
-                f"video not 1080x1920 ({info['width']}x{info['height']})")
-        # cover = first preview frame (1s)
-        previews = job.get("preview_urls") or []
-        if previews:
-            cover_path = download_file(previews[0], os.path.join(tmp, "cover.jpg"))
-        else:
-            cover_path = os.path.join(tmp, "cover.jpg")
-            subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", "1",
-                            "-i", video_path, "-frames:v", "1", cover_path],
-                           check=True)
-
-        poster = choose_poster()
-        config.activity("post_start",
-                        f"backend={poster.name}, caption {len(caption)} chars",
-                        jid)
-        try:
-            result = poster.post(job, video_path, cover_path, caption)
-        finally:
-            if isinstance(poster, WebPoster):
-                poster.close()
-
-        if result is None:  # dry-run
-            return {"dry_run": True, "poster": poster.name}
-
-        permalink = result.get("permalink")
-        post_rec = config.api("POST", "/api/posts",
-                              {"job_id": jid, "clip_id": jid,
-                               "campaign_id": job.get("campaign_id"),
-                               "caption": caption,
-                               "instagram_url": permalink,
-                               "poster": poster.name,
-                               "status": "posted"})
-        pid = post_rec.get("id") or post_rec.get("post", {}).get("id")
-        config.api("PATCH", f"/api/jobs/{jid}",
-                   {"status": "posted", "post_id": pid,
-                    "instagram_url": permalink})
-        config.activity("post_done",
-                        f"posted via {poster.name}: {permalink}", jid)
-        if permalink and check_block_text(permalink):
-            raise ActionBlocked("block text in post result")
-        return {"post_id": pid, "permalink": permalink,
-                "poster": poster.name}
-    except ActionBlocked:
-        action_block_shutdown(jid, "post_step")
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
 
 # --------------------------------------------------------------------------
 # STEP 5 — verify (MANDATORY before submit, SOP #5)
@@ -884,23 +609,18 @@ def submit_step(job: dict, post: dict) -> dict:
 def process_approved(job: dict) -> None:
     jid = job["id"]
     config.activity("pipeline_start",
-                    f"clip approved; poster+campaign pipeline begins", jid)
+                    "clip approved; schedule+brief pipeline begins", jid)
     try:
         if not schedule_step(job):
             return  # left as approved/scheduled; next run retries
         brief_check_step(job)
-        post = post_step(job)
-        verify = verify_step(job, post)
-        if post.get("dry_run"):
-            config.activity("pipeline_dryrun_done",
-                            "dry-run complete: render/brief/post/verify/submit "
-                            "planned, no real IG/Whop writes", jid)
-            return
-        if verify.get("verify_status") not in ("passed", "passed_manual"):
-            raise PipelineError(
-                f"verify status {verify.get('verify_status')} — not submitting")
-        submit_step(job, post)
-        config.activity("pipeline_done", "clip posted, verified, submitted", jid)
+        # V1 REMOVED (2026-09-19): server-side post/verify/submit chain deleted.
+        # Posting + Whop submit ab phone app (v2) karta hai via
+        # POST /api/devices/<id>/plan-job (planner_v2.py se enqueued).
+        config.activity("pipeline_brief_done",
+                        "schedule + brief check passed; V1 server posting "
+                        "removed — phone (v2) pipeline handles post+submit",
+                        jid)
     except ActionBlocked:
         raise  # handled inside steps (sys.exit)
     except iv_mod.InterventionNeeded as iv:
@@ -929,22 +649,12 @@ def plan_dry_run(job: dict) -> list[dict]:
     steps = [
         {"step": "schedule",
          "would": "check /api/settings (daily_target, spacing_hours), "
-                  "today's /api/posts count, scheduled_for; skip if no slot"},
+                  "today's posts count, scheduled_for; skip if no slot"},
         {"step": "brief_check",
          "would": "read /api/campaigns, verify caption tags + duration "
                   "bounds + hook; fail job on mismatch"},
-        {"step": "post",
-         "would": "download video_url, QA 1080x1920, choose api_poster "
-                  "(instagram-cli) or web_poster (CDP); DRY-RUN skips the "
-                  "final publish click; action-block -> stop everything"},
-        {"step": "verify",
-         "would": "open LIVE reel via CDP, seek 1s/33%/66%/90%, screenshot, "
-                  "check playing + no error text, PIL-compare vs preview "
-                  "frames; needs_review -> owner choice"},
-        {"step": "submit",
-         "would": "Whop via CDP (google_oauth cookies), paste "
-                  "instagram_url, submit; 'Clip submitted' -> POST "
-                  "/api/submissions {keep_live_until=today+30d}"},
+        # V1 REMOVED (2026-09-19): post/verify/submit steps deleted.
+        # Phone (v2) pipeline: planner_v2.py -> POST /api/devices/<id>/plan-job.
     ]
     if not job.get("video_url"):
         steps.insert(0, {"step": "render",

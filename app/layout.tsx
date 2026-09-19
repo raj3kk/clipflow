@@ -16,7 +16,8 @@ const sans = Inter({
 
 export const metadata = {
   title: "ClipFlow — Whop Clipping Automation",
-  description: "Automated clipping pipeline: campaigns → clips → Instagram → Whop",
+  description: "Phone-driven clipping pipeline: campaigns → clips → Instagram → Whop",
+  icons: { icon: "/favicon.png" },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -6,7 +6,6 @@ import { getBrowserSupabase } from "@/lib/supabase-browser";
 import { useApi } from "../components/useApi";
 import { cardCls, btnDanger, fmtDate, fmtDT } from "../components/ui";
 import { IconUser, IconLogout, IconPhone, IconCampaign, IconCheck } from "../components/icons";
-import { getMode } from "../components/mode";
 
 interface Me {
   email: string | null;
@@ -29,7 +28,6 @@ function InfoRow({ label, value, mono }: { label: string; value: string; mono?: 
 export default function ProfilePage() {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
-  const [mode] = useState(getMode());
   const devices = useApi<{ devices: { id: string }[] }>("/api/devices");
   // /api/stats returns DayStats: posted / submitted (DayStats fields) — real counts.
   const stats = useApi<{ stats: { posted?: number; submitted?: number } }>("/api/stats");
@@ -87,8 +85,7 @@ export default function ProfilePage() {
               {me?.email ?? "Loading…"}
             </p>
             <p className="flex items-center gap-1.5 text-xs text-emerald-700">
-              <IconCheck className="h-3.5 w-3.5" /> signed in ·{" "}
-              {mode === "v2" ? "v2 phone mode" : "v1 server mode"}
+              <IconCheck className="h-3.5 w-3.5" /> signed in · phone automation
             </p>
           </div>
         </div>
@@ -114,7 +111,7 @@ export default function ProfilePage() {
         <div className={`${cardCls} glass-hover`}>
           <div className="flex items-center gap-2 text-slate-600">
             <IconCampaign className="h-4 w-4" />
-            <span className="text-xs uppercase tracking-wider">Posts today (v1)</span>
+            <span className="text-xs uppercase tracking-wider">Posts today</span>
           </div>
           <p className="mt-2 font-display text-3xl font-bold magic-text stat-glow">
             {stats.loading ? "…" : (stats.data?.stats?.posted ?? 0)}

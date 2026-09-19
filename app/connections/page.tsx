@@ -23,113 +23,8 @@ function LabelField({ value, onChange, placeholder }: { value: string; onChange:
   );
 }
 
-// ---------- Instagram: session-cookie paste ----------
-const IG_COOKIES = ["sessionid", "csrftoken", "ds_user_id", "datr", "ig_did", "mid"];
-
-function IgCookiesForm({ save }: { save: SaveFn }) {
-  const [label, setLabel] = useState("");
-  const [rows, setRows] = useState(IG_COOKIES.map((name) => ({ name, value: "" })));
-  const [busy, setBusy] = useState(false);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    await save({
-      method: "session-cookie",
-      label,
-      // Worker expects kind:"web" (see WebPoster.login in worker/pipeline_worker.py).
-      secret: { kind: "web", cookies: rows.filter((r) => r.name && r.value).map((r) => ({ name: r.name, value: r.value })) },
-    });
-    setBusy(false);
-  };
-
-  return (
-    <form onSubmit={submit} className="grid gap-2">
-      <LabelField value={label} onChange={setLabel} placeholder="@handle" />
-      {rows.map((r, i) => (
-        <div key={i} className="grid grid-cols-5 gap-2">
-          <input
-            value={r.name}
-            onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
-            placeholder="cookie name"
-            className={`${inputCls} col-span-2 !mt-0`}
-          />
-          <input
-            value={r.value}
-            onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
-            placeholder="cookie value"
-            type="password"
-            className={`${inputCls} col-span-3 !mt-0`}
-          />
-        </div>
-      ))}
-      <button
-        type="button"
-        className={`${btnGhost} justify-self-start`}
-        onClick={() => setRows([...rows, { name: "", value: "" }])}
-      >
-        + Add custom cookie
-      </button>
-      <button type="submit" disabled={busy} className={`${btnPrimary} justify-self-start mt-2`}>
-        {busy ? "Saving…" : "Save session cookies"}
-      </button>
-    </form>
-  );
-}
-
-// ---------- Instagram: Meta Accounts Center / API ----------
-function IgMetaApiForm() {
-  return (
-    <div className="grid gap-3">
-      <p className="text-sm text-slate-600">
-        Meta app authorization is <span className="text-amber-700 font-medium">not available</span>:
-        the Accounts Center flow dead-ends at “already added” and there is no
-        Meta developer app connected to ClipFlow, so there is nothing to
-        authorize against. Use <span className="font-medium">Session cookies</span> or{" "}
-        <span className="font-medium">Username + password</span> instead — both are
-        real, encrypted, and worker-verified.
-      </p>
-    </div>
-  );
-}
-
-// ---------- Instagram: username + password ----------
-function IgUserPassForm({ save }: { save: SaveFn }) {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
-  return (
-    <form
-      className="grid gap-3"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        setBusy(true);
-        await save({
-          method: "username-password",
-          label: username,
-          // Worker expects kind:"credentials" (see WebPoster.login).
-          secret: { kind: "credentials", username, password },
-        });
-        setBusy(false);
-        setPassword("");
-      }}
-    >
-      <label className="text-sm block">Username
-        <input required value={username} onChange={(e) => setUsername(e.target.value)} className={inputCls} />
-      </label>
-      <label className="text-sm block">Password
-        <input required type="password" value={password} onChange={(e) => setPassword(e.target.value)} className={inputCls} />
-      </label>
-      <p className="text-xs text-slate-500">
-        Encrypted server-side with the server key — never stored in the repo.
-        If Instagram asks for 2FA, the code request appears under Interventions.
-      </p>
-      <button type="submit" disabled={busy} className={`${btnPrimary} justify-self-start`}>
-        {busy ? "Saving…" : "Save credentials"}
-      </button>
-    </form>
-  );
-}
+// ---------- V1 removed (2026-09-19): Instagram sections deleted.
+// Phone (v2) app apne IG cookies khud rakhta hai — server-side IG connection khatm.
 
 // ---------- Whop: official OAuth ("Login with Whop") ----------
 function WhopOAuthForm({ onMsg }: { onMsg: (m: string) => void }) {
@@ -478,15 +373,6 @@ export default function ConnectionsPage() {
 
   const services: { title: string; service: ConnectionService; methods: MethodDef[] }[] = [
     {
-      title: "Instagram",
-      service: "instagram",
-      methods: [
-        { key: "session-cookie", title: "Session cookies", desc: "Paste sessionid, csrftoken…", form: (p) => <IgCookiesForm {...p} /> },
-        { key: "meta-api", title: "Meta Accounts Center / API", desc: "Not available — see note", form: () => <IgMetaApiForm /> },
-        { key: "username-password", title: "Username + password", desc: "Encrypted; 2FA via Interventions", form: (p) => <IgUserPassForm {...p} /> },
-      ],
-    },
-    {
       title: "Whop",
       service: "whop",
       methods: [
@@ -514,7 +400,8 @@ export default function ConnectionsPage() {
     <div>
       <h1 className="text-2xl font-bold mb-1">Connections</h1>
       <p className="text-slate-600 text-sm mb-6">
-        Instagram + Whop + Gmail + Content Rewards login health — worker har run me verify karta hai.
+        Whop + Gmail + Content Rewards login health — worker har run me verify karta hai.
+        (Instagram posting ab phone app se hoti hai — uske liye koi server connection nahi chahiye.)
       </p>
 
       {data && !data.configured && <SetupBanner />}

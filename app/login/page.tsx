@@ -38,7 +38,10 @@ function LoginForm() {
     <div className="min-h-[70vh] flex items-center justify-center">
       <form onSubmit={onSubmit} className="w-full max-w-sm grid gap-4 rounded-2xl border border-line bg-panel p-8">
         <div>
-          <div className="text-xl font-bold text-accent">ClipFlow</div>
+          <div className="flex items-center gap-2.5">
+            <img src="/logo.png" alt="ClipFlow" className="h-9 w-9 rounded-xl bg-white object-contain shadow-sm" />
+            <div className="text-xl font-bold text-accent">ClipFlow</div>
+          </div>
           <p className="text-sm text-slate-600 mt-1">Sign in to your clipping workspace.</p>
         </div>
         {msg && <p className="text-sm text-red-700">{msg}</p>}
