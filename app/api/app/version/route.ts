@@ -26,10 +26,29 @@ export async function GET() {
       .limit(1)
       .maybeSingle();
     if (error || !data) {
-      // TEMP-DEBUG (round-6 Worker E): 404 ke peeche ka actual error dekhna
-      // hai — diagnose ke baad wapas 404 {} kar denge.
+      // TEMP-DEBUG-2 (round-6 Worker E): supabase-js se 0 rows aa rahi hain
+      // jabki VM se same creds pe row milti hai. Raw fetch se cross-check —
+      // koi secret log nahi ho raha (sirf host + key prefix).
+      let rawStatus = -1;
+      let rawBody = "";
+      try {
+        const r = await fetch(
+          `${url.replace(/\/$/, "")}/rest/v1/app_releases?select=version_code,version_name,apk_url,changelog,force_update&order=version_code.desc&limit=1`,
+          { headers: { apikey: anon, Authorization: `Bearer ${anon}` }, cache: "no-store" }
+        );
+        rawStatus = r.status;
+        rawBody = (await r.text()).slice(0, 300);
+      } catch (e) {
+        rawBody = "fetch-threw: " + (e instanceof Error ? e.message : "?");
+      }
       return NextResponse.json(
-        { _debug_error: error?.message ?? null, _debug_hint: (error as { hint?: string } | null)?.hint ?? null, _debug_code: (error as { code?: string } | null)?.code ?? null },
+        {
+          _debug_error: error?.message ?? null,
+          _url_host: new URL(url).hostname.split(".")[0],
+          _anon_prefix: anon.slice(0, 12),
+          _raw_status: rawStatus,
+          _raw_body: rawBody,
+        },
         { status: 500 }
       );
     }
