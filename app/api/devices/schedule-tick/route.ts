@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabase, isConfigured } from "@/lib/supabase";
 import { requireWorkerAuth } from "@/lib/worker_auth";
+import { findActiveAutomation } from "@/lib/automation_guard";
 import {
   createAutomationJob,
   reconcileStaleJobs,
@@ -190,6 +191,22 @@ export async function POST(req: Request) {
 
     if (slots.length === 0) {
       skipped.push({ device_id: d.id, reason: "no_due_slot" });
+      continue;
+    }
+
+    // One-run-per-user guard (2026-09-19): is user ki koi automation pehle
+    // se active ho (pipeline pending/running, ya phone job queued/running)
+    // to ye slot SKIP — naya automation tabhi start hoga jab purani
+    // complete/fail ho jaye. Slot grace window (45 min) me ho to agla tick
+    // (15 min) me phir try karega — kuch miss nahi hoga.
+    const active = await findActiveAutomation(sb, d.user_id);
+    if (active) {
+      skipped.push({
+        device_id: d.id,
+        reason: "automation_already_active",
+        active,
+        slots,
+      });
       continue;
     }
 

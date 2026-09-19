@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { getSupabase, isConfigured } from "@/lib/supabase";
+import { guardNoActiveAutomation } from "@/lib/automation_guard";
 
 /**
  * "Jab chahe" trigger — user dashboard se turant automation chalaye.
@@ -77,23 +78,14 @@ export async function POST(
     );
   }
 
+  // One-run-per-user guard (2026-09-19): ek time me ek hi automation.
   // Ek device pe ek hi request pending/running ho sakti hai (run-pipeline
-  // jaisa). DB me partial unique index bhi hai
-  // (pipeline_requests_active_device_uniq) — race me bhi double-enqueue
-  // impossible; unique violation ko 409 me badalte hain.
-  const { data: existing } = await sb
-    .from("pipeline_requests")
-    .select("id")
-    .eq("device_id", params.id)
-    .eq("user_id", user.id)
-    .in("status", ["pending", "running"])
-    .limit(1);
-  if (existing && existing.length > 0) {
-    return NextResponse.json(
-      { error: "Pipeline already pending/running for this device." },
-      { status: 409 }
-    );
-  }
+  // jaisa) — ye guard use device-scoped check se upar (user-scoped) hai.
+  // DB me partial unique index bhi hai (pipeline_requests_active_device_uniq)
+  // — race me bhi double-enqueue impossible; unique violation ko 409 me
+  // badalte hain.
+  const conflict = await guardNoActiveAutomation(sb, user.id);
+  if (conflict) return conflict;
 
   const { data: pr, error: insErr } = await sb
     .from("pipeline_requests")
@@ -109,7 +101,10 @@ export async function POST(
     const msg = insErr?.message ?? "Insert failed.";
     if (isUniqueViolation(msg)) {
       return NextResponse.json(
-        { error: "Pipeline already pending/running for this device." },
+        {
+          error:
+            "Ek automation pehle se chal rahi hai — uske complete/fail hone ka wait karo.",
+        },
         { status: 409 }
       );
     }

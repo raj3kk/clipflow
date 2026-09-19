@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { getSupabase, isConfigured } from "@/lib/supabase";
+import { guardNoActiveAutomation } from "@/lib/automation_guard";
 
 /**
  * Run Now → full pipeline (zero-touch).
@@ -58,23 +59,15 @@ export async function POST(
     );
   }
 
-  // Ek device pe ek hi request pending/running ho sakti hai.
-  // DB me partial unique index bhi hai (pipeline_requests_active_device_uniq)
-  // — race me bhi double-enqueue impossible; unique violation ko 409 me
-  // badalte hain.
-  const { data: existing } = await sb
-    .from("pipeline_requests")
-    .select("id")
-    .eq("device_id", params.id)
-    .eq("user_id", user.id)
-    .in("status", ["pending", "running"])
-    .limit(1);
-  if (existing && existing.length > 0) {
-    return NextResponse.json(
-      { error: "Pipeline already pending/running for this device." },
-      { status: 409 }
-    );
-  }
+  // One-run-per-user guard (2026-09-19): ek time me ek hi automation.
+  // Website AI agent "Abhi Run Karo" bhi UI se yahi route hit karta hai,
+  // isliye server-side reject yahin hota hai — user click ke baad 409 milega.
+  // Ek device pe ek hi request pending/running ho sakti hai — ye guard use
+  // device-scoped check se upar (user-scoped) hai. Race me double-enqueue
+  // DB partial unique index (pipeline_requests_active_device_uniq) rokta hai
+  // — unique violation ko 409 me badalte hain.
+  const conflict = await guardNoActiveAutomation(sb, user.id);
+  if (conflict) return conflict;
 
   const { data: req, error: insErr } = await sb
     .from("pipeline_requests")
@@ -89,7 +82,10 @@ export async function POST(
     const msg = insErr?.message ?? "Insert failed.";
     if (/duplicate key|unique constraint|23505/i.test(msg)) {
       return NextResponse.json(
-        { error: "Pipeline already pending/running for this device." },
+        {
+          error:
+            "Ek automation pehle se chal rahi hai — uske complete/fail hone ka wait karo.",
+        },
         { status: 409 }
       );
     }
