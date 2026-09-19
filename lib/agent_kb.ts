@@ -86,8 +86,7 @@ export const GUIDES: Record<
     steps: [
       "**Step 1:** Neeche **Devices** page kholo aur apne phone ke card me **Schedule** editor kholo.",
       "**Step 2:** Time chuno — kab clip post karna hai. Yaad rakho: ek din me **max 4 run**, aur do run ke beech **kam se kam 4 ghante** ka gap.",
-      "**Step 3:** **Clip package** bharo — video URL + caption + Whop submit URL. Bina iske Run Now kaam nahi karega.",
-      "**Step 4:** **Save** dabao — schedule set ho gaya!",
+      "**Step 3:** **Save** dabao — schedule set ho gaya! Campaign, clip, caption — sab automatic banega, tumhe kuch manual bharna nahi hai.",
     ],
     done: "Ho gaya! Ab phone online rakho — time pe automatic chalega. Test karna ho to isi chat me **Abhi Run Karo** dabao. Kuch aur puchna ho to bolo.",
   },
@@ -164,7 +163,7 @@ function kb(): { test: RegExp; build: () => IntentResult }[] {
       build: () =>
         R(
           "run_now_info",
-          "**Abhi Run Karo** dabate hi poora pipeline chal padta hai — campaign → clip → Instagram post → Whop submit, sab automatic.\n\nShart: device ke **Clip package** (video URL + caption + Whop URL) pehle se set hona chahiye, aur device **online** hona chahiye.\n\nMain khud run nahi karta — neeche **Abhi Run Karo** button hai, dabao to confirm puchunga, phir hi chalega.",
+          "**Abhi Run Karo** dabate hi poora pipeline chal padta hai — campaign → clip → Instagram post → Whop submit, sab automatic.\n\nShart: device **enrolled** aur **online** hona chahiye, aur app me **Whop + Instagram login** valid hona chahiye. Kuch manual bharna nahi padta.\n\nMain khud run nahi karta — neeche **Abhi Run Karo** button hai, dabao to confirm puchunga, phir hi chalega.",
           { showRunNow: true, link: { label: "Devices page kholo", href: "/devices" } }
         ),
     },
@@ -267,7 +266,7 @@ function kb(): { test: RegExp; build: () => IntentResult }[] {
       build: () =>
         R(
           "trouble",
-          "Sabse pehle ye check karo:\n\n**1.** **Live** page dekho — job kahan atka (Devices → Live tab)\n**2.** Phone **online** hai? (last seen 5 min ke andar)\n**3.** App me **Whop + Instagram** login abhi bhi valid hai?\n**4.** **Battery optimization OFF** hai?\n**5.** Clip package (video URL + caption + Whop URL) set hai?\n\nPhir bhi na bane to error ka **screenshot** lo aur exact step batao — main aage guide karunga.",
+          "Sabse pehle ye check karo:\n\n**1.** **Live** page dekho — pipeline kahan atki (Devices → Live tab)\n**2.** Phone **online** hai? (last seen 5 min ke andar)\n**3.** App me **Whop + Instagram** login abhi bhi valid hai?\n**4.** **Battery optimization OFF** hai?\n\nPhir bhi na bane to error ka **screenshot** lo aur exact step batao — main aage guide karunga.",
           { link: { label: "Live status dekho", href: "/devices/live" } }
         ),
     },

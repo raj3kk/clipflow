@@ -312,23 +312,20 @@ export default function AgentWidget() {
     if (!confirmRun || running) return;
     setRunning(true);
     try {
-      const r = await fetch(`/api/devices/${confirmRun.id}/run-now`, {
+      const r = await fetch(`/api/devices/${confirmRun.id}/run-pipeline`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "automation" }),
       });
       const d = await r.json();
-      if (!r.ok) throw new Error(d.error ?? d.detail ?? r.status);
-      const via = d.via === "fcm" ? "phone ko push bhej diya — turant chalega" : "job queue ho gaya — phone agle check pe uthayega";
+      if (!r.ok) throw new Error(d.error ?? r.status);
       pushBot({
         role: "bot",
-        text: `**Run Now shuru!** ${confirmRun.device_name} pe ${via}.\n\nLive progress **Devices → Live** tab pe dekho.`,
+        text: `**Run Now shuru!** ${confirmRun.device_name} pe full pipeline chal padha — campaign → clip → Instagram post → Whop submit, sab automatic.\n\nLive progress **Devices → Live** tab pe dekho.`,
         link: { label: "Live status dekho", href: "/devices/live" },
       });
     } catch (e) {
       pushBot({
         role: "bot",
-        text: `Run Now nahi ho paya: ${e instanceof Error ? e.message : "error"}\n\nAksar wajah: clip package set nahi hai ya device paused hai. Devices page pe check karo.`,
+        text: `Run Now nahi ho paya: ${e instanceof Error ? e.message : "error"}\n\nAksar wajah: device paused/offline hai, ya ek pipeline pehle se chal rahi hai. Devices page pe check karo.`,
         link: { label: "Devices page kholo", href: "/devices" },
       });
     } finally {
