@@ -107,12 +107,18 @@ export async function POST(
 
   const now = new Date().toISOString();
   await sb.from("device_jobs").update({ status }).eq("id", job.id);
+  // discover_detail job_runs.result me bhi rakho taaki debug me query ho sake
+  const jobTypeEarly = (job as { type?: string }).type ?? "";
+  const extraResult: Record<string, unknown> =
+    jobTypeEarly === "discover_campaigns" && typeof meta.vars?.discover_detail === "string"
+      ? { discover_detail: (meta.vars.discover_detail as string).slice(0, 2000) }
+      : {};
   await sb.from("job_runs").insert({
     job_id: job.id,
     device_id: ident.deviceId,
     user_id: ident.userId,
     status,
-    result: { vars: meta.vars ?? {}, error: meta.error ?? null },
+    result: { vars: meta.vars ?? {}, error: meta.error ?? null, ...extraResult },
     screenshots: shotPaths,
     finished_at: now,
   });
@@ -378,7 +384,8 @@ export async function POST(
       ident.userId,
       discoverStatus === "discovered" ? "campaigns_discovered" : "discover_failed",
       discoverStatus === "discovered"
-        ? `🔎 Phone ne Whop pe ${found.length} campaigns dekhe, ${added} naye campaigns table me jude. Ab verify hoga.`
+        ? `🔎 Phone ne Whop pe ${found.length} campaigns dekhe, ${added} naye campaigns table me jude. Ab verify hoga.` +
+          (discoverDetail ? ` Debug: ${discoverDetail.slice(0, 500)}` : "")
         : `⚠️ Campaign discovery ${discoverStatus}: ${discoverDetail.slice(0, 200)}`
     );
   }
