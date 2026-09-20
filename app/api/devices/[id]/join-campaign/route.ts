@@ -66,11 +66,13 @@ export async function POST(
   }
 
   // campaign row — naam + campaign_url ke liye
+  // Main hub campaigns (user_id = nil UUID) bhi allowed hain
+  const MAIN_HUB_USER_ID = "00000000-0000-0000-0000-000000000000";
   const { data: campaign } = await sb
     .from("campaigns")
-    .select("id, name, campaign_url, joined, join_status")
+    .select("id, name, campaign_url, joined, join_status, notes")
     .eq("id", campaignSlug)
-    .eq("user_id", device.user_id)
+    .or(`user_id.eq.${device.user_id},user_id.eq.${MAIN_HUB_USER_ID}`)
     .single();
   if (!campaign) {
     return NextResponse.json(
@@ -130,7 +132,17 @@ export async function POST(
     device.user_id,
     device.id,
     "join_campaign",
-    buildJoinCampaignPayload(campaignSlug, campaignUrl),
+    buildJoinCampaignPayload(
+      campaignSlug,
+      campaignUrl,
+      // notes me whop_url ho to wo, warna campaign_url se guess
+      (() => {
+        try {
+          const notes = JSON.parse((campaign.notes as string) || "{}");
+          return notes.whop_url || "";
+        } catch { return ""; }
+      })()
+    ),
     {
       idempotency_key: `join:${device.id}:${campaignSlug}`,
       // join ka campaign-dedup sirf join_campaign jobs me — live clip
