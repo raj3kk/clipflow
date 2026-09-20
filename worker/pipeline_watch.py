@@ -99,6 +99,17 @@ def _worker_alive(pid: int) -> bool:
         return False
 
 
+def _planner_pid_alive(pid: int) -> bool:
+    """Detached planner ka PID zinda hai? (2026-09-20: worker_pid ab
+    planner ka PID hota hai, pipeline_watch ka nahi.)"""
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            cmd = f.read().replace(b"\0", b" ").decode("utf-8", "replace")
+        return "planner_v2" in cmd
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _planner_alive_on_vm() -> bool:
     """Kya is VM pe koi planner_v2.py process chal raha hai?
 
@@ -144,6 +155,31 @@ def requeue(req_id: str, note: str) -> None:
             f"request pending/running hi rahegi, agla fetch retry karega")
         return
     log(f"{req_id}: transient → wapas pending (retry agle run me)")
+
+
+def requeue_infra(req_id: str, attempts_before: int, note: str) -> None:
+    """Infra outage (Supabase unreachable) → wapas `pending`, attempt WAPAS.
+
+    2026-09-20 CORE FIX: handle() planner chalane se PEHLE attempts+1 mark
+    karta hai. Agar planner infra ki wajah se gira (exit 3 / transient),
+    to ye koshish user ki 3 me se nahi gini chahiye — attempts ko
+    attempts_before pe restore karo. Nahi to 3 network blip = request marr
+    jati (aaj 6fea4ba8/2957a4c5/5ebad7ff ke saath yahi hua).
+    """
+    try:
+        config.sb_patch("pipeline_requests", req_id,
+                        {"status": "pending", "started_at": None,
+                         "finished_at": None, "note": note[:500],
+                         "stage": None, "stage_at": None,
+                         "worker_pid": None, "worker_boot": None,
+                         "next_retry_at": None,
+                         "attempts": attempts_before})
+    except Exception as e:  # noqa: BLE001
+        log(f"{req_id}: requeue_infra bhi fail ({type(e).__name__}) — "
+            f"request running hi rahegi, agla fetch retry karega")
+        return
+    log(f"{req_id}: infra blip → wapas pending, attempt wapas "
+        f"(attempts={attempts_before})")
 
 
 def mark_failed(req_id: str, note: str, attempts: int,
@@ -200,6 +236,20 @@ def _looks_transient_text(s: str) -> bool:
     return any(m in low for m in _TRANSIENT_MARKERS)
 
 
+# 2026-09-20 FIX: deterministic schema/logic errors (PostgREST 42703,
+# "column ... does not exist") kabhi transient NAHI hote — retry karne se
+# theek nahi honge. Inhe infra-blip samajh ke requeue karne se infinite
+# retry loop banta hai. Ye check transient se PEHLE lagao.
+_DETERMINISTIC_MARKERS = (
+    "42703", "does not exist", "pgrst",
+)
+
+
+def _looks_deterministic_text(s: str) -> bool:
+    low = (s or "").lower()
+    return any(m in low for m in _DETERMINISTIC_MARKERS)
+
+
 def _terminal_failure(j: dict) -> bool:
     """Ye job terminal failure hai — cap me count NAHI hogi.
 
@@ -234,6 +284,119 @@ def cap_count(uid: str) -> int:
     return n_posts + n_jobs
 
 
+def _planner_log_path(req_id: str) -> str:
+    """Har request ka planner output file."""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "logs", f"planner_{req_id[:8]}.log")
+
+
+def launch_planner_detached(device_id: str, req_id: str) -> int:
+    """planner_v2.py --once DETACHED chalao (scheduler-timeout fix 2026-09-20).
+
+    Pehle subprocess.run (blocking) tha — Meta scheduler ~60s me
+    pipeline_watch ko kill kar deta tha, planner beech me marr jata tha,
+    aur orphan-requeue attempt kha jata tha. Ab planner apne session me
+    chalta hai (start_new_session), output per-request log file me.
+    Returns planner PID. pipeline_watch turant return karta hai;
+    agla tick reap_finished_planners() se outcome uthata hai.
+    """
+    env = dict(os.environ)
+    env["PLANNER_DEVICE_ID"] = device_id
+    env["PLANNER_REQUEST_ID"] = req_id
+    log_path = _planner_log_path(req_id)
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    lf = open(log_path, "w")
+    try:
+        proc = subprocess.Popen(
+            [VENV_PY, PLANNER, "--once"],
+            env=env, stdout=lf, stderr=subprocess.STDOUT,
+            start_new_session=True,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+        )
+    except Exception:
+        lf.close()
+        raise
+    # lf ko khula chhodo — planner likhta rahega; PID return karo
+    log(f"{req_id}: planner detached launch (pid {proc.pid})")
+    return proc.pid
+
+
+def _parse_planner_outcome(log_path: str) -> tuple[str, str]:
+    """Planner log file se outcome nikalo. Returns (outcome, detail)."""
+    try:
+        with open(log_path, "r") as f:
+            content = f.read()
+    except OSError:
+        return ("error:no_log", "planner log file nahi mili")
+    tail = content[-1500:]
+    m = re.search(r"^.*done:\s*(\S+)\s*$", tail, re.MULTILINE)
+    if m:
+        return (m.group(1), "")
+    # done: nahi mila — aakhri lines se andaza
+    if "Traceback" in tail:
+        return ("error:exception", tail[-500:])
+    if not tail.strip():
+        return ("error:empty", "planner ne kuch output nahi diya")
+    return ("error:no_outcome", tail[-300:])
+
+
+def reap_finished_planners() -> None:
+    """Dead planner PID wali 'running' requests ka outcome finalize karo.
+
+    launch_planner_detached ke baad planner background me chalta hai.
+    Jab uska PID marr jaye to log file se outcome padhkar
+    finalize_planner_outcome() chalao. Ye reclaim_orphans() se PEHLE
+    chalna chahiye taaki finished planner orphan na bane.
+    """
+    try:
+        running = config.sb_request(
+            "GET", "/rest/v1/pipeline_requests",
+            query={"status": "eq.running",
+                   "select": "id,attempts,worker_pid,worker_boot",
+                   "limit": "20"})
+    except Exception as e:  # noqa: BLE001
+        log(f"reap fetch failed ({type(e).__name__}) — skip")
+        return
+    boot = boot_id()
+    for r in running or []:
+        rid = r["id"]
+        rpid = r.get("worker_pid")
+        rboot = r.get("worker_boot")
+        # Sirf isi VM ke detached planner — purane blocking-mode ke liye nahi
+        if not rpid or (rboot and rboot != boot):
+            continue
+        if _planner_pid_alive(int(rpid)):
+            continue  # abhi chal raha hai
+        # Planner khatam — outcome nikalo aur finalize karo
+        attempts = r.get("attempts") or 1
+        attempts_before = max(0, attempts - 1)
+        outcome, detail = _parse_planner_outcome(_planner_log_path(rid))
+        log(f"{rid}: planner pid {rpid} finished → outcome={outcome}")
+        # 2026-09-20: no_log = launch hi toot gaya tha (log file bani hi
+        # nahi) — ye infra issue hai, planner logic nahi. Requeue karo,
+        # terminal fail nahi.
+        if outcome == "error:no_log":
+            log(f"{rid}: planner log missing — launch fail, requeue")
+            try:
+                config.sb_patch("pipeline_requests", rid, {
+                    "status": "pending", "started_at": None,
+                    "finished_at": None, "worker_pid": None,
+                    "worker_boot": None,
+                    "note": "planner launch incomplete — dobara koshish"})
+            except Exception:
+                pass
+            continue
+        try:
+            finalize_planner_outcome(rid, outcome, detail,
+                                     attempts, attempts_before)
+        except Exception as e:  # noqa: BLE001
+            log(f"{rid}: finalize fail ({type(e).__name__}) — pending rakho")
+            try:
+                config.sb_patch("pipeline_requests", rid, {"status": "pending"})
+            except Exception:
+                pass
+
+
 def run_planner(device_id: str, req_id: str) -> tuple[str, str]:
     """planner_v2.py --once chalao. Returns (outcome, tail_note).
 
@@ -257,7 +420,12 @@ def run_planner(device_id: str, req_id: str) -> tuple[str, str]:
         print(line)  # planner ka apna log preserve karo
     m = re.search(r"^.*done:\s*(\S+)\s*$", tail, re.MULTILINE)
     if proc.returncode != 0:
-        return (f"error:exit{proc.returncode}", (proc.stderr or "")[-300:])
+        # 2026-09-20 CORE FIX: pehle sirf stderr ka tail detail me jata tha,
+        # lekin planner FATAL stdout pe print karta hai → transient markers
+        # ("incompleteread" wagera) kabhi match nahi hote the → attempt jal
+        # jata tha. Ab stdout+stderr dono check karo.
+        err_tail = (proc.stderr or "")[-300:]
+        return (f"error:exit{proc.returncode}", f"{tail[-500:]} || {err_tail}")
     if not m:
         return ("error:no_outcome", tail[-300:])
     return (m.group(1), "")
@@ -268,15 +436,17 @@ def handle(req: dict) -> None:
     device_id = req["device_id"]
     uid = req["user_id"]
     attempts = req.get("attempts") or 0
+    attempts_before = attempts  # 2026-09-20: infra blip pe ye wapas hoga
     log(f"request {req_id} device={device_id} user={uid} "
         f"attempt={attempts + 1}/{MAX_ATTEMPTS}")
 
-    # 1. running mark — attempts+1, worker pid/boot (orphan detect ke liye),
-    #    stage reset. Ye bhi na ho paya to pending hi rehne do.
+    # 1. running mark — attempts+1, stage reset. worker_pid BAAD me
+    # planner ka PID hoga (detached launch ke baad). Ye bhi na ho paya
+    # to pending hi rehne do.
     try:
         mark(req_id, "running", extra={
             "attempts": attempts + 1,
-            "worker_pid": os.getpid(),
+            "worker_pid": None,
             "worker_boot": boot_id(),
             "stage": "taiyaar_ho_raha",
             "stage_at": now_iso(),
@@ -296,7 +466,8 @@ def handle(req: dict) -> None:
             n = cap_count(uid)
         except Exception as e:  # noqa: BLE001
             if isinstance(e, config.TransientError) or _looks_transient_text(str(e)):
-                requeue(req_id, f"transient cap-check: {type(e).__name__}: {e}")
+                requeue_infra(req_id, attempts_before,
+                             f"transient cap-check: {type(e).__name__}: {e}")
             else:
                 tb = traceback.format_exc()
                 mark_failed(req_id,
@@ -310,9 +481,13 @@ def handle(req: dict) -> None:
             log(f"{req_id}: cap full (>=4/24h) → failed (no retry)")
             return
 
-    # 3. planner chalao
+    # 3. planner DETACHED chalao (2026-09-20 scheduler-timeout fix).
+    # Pehle blocking subprocess.run tha — scheduler ~60s me pipeline_watch
+    # ko kill kar deta tha, planner beech me marr jata tha. Ab planner apne
+    # session me chalta hai; outcome agla tick reap_finished_planners()
+    # se uthata hai.
     try:
-        outcome, detail = run_planner(device_id, req_id)
+        planner_pid = launch_planner_detached(device_id, req_id)
     except Exception as e:  # noqa: BLE001
         tb = traceback.format_exc()
         if isinstance(e, config.TransientError) or _looks_transient_text(str(e)):
@@ -324,7 +499,26 @@ def handle(req: dict) -> None:
                         attempts)
             log(f"{req_id}: watcher error {type(e).__name__} → failed")
         return
+    # worker_pid = PLANNER ka PID (pehle pipeline_watch ka tha — galat tha).
+    try:
+        mark(req_id, "running", extra={"worker_pid": planner_pid})
+    except Exception as e:  # noqa: BLE001
+        log(f"{req_id}: worker_pid update fail ({type(e).__name__}) — "
+            f"planner kill karke requeue")
+        try:
+            os.kill(planner_pid, 15)
+        except Exception:
+            pass
+        requeue(req_id, "planner launch ke baad pid update fail — requeue")
+        return
+    log(f"{req_id}: detached planner pid {planner_pid} — outcome agle tick me")
+    return
 
+def finalize_planner_outcome(req_id: str, outcome: str, detail: str,
+                             attempts: int, attempts_before: int) -> None:
+    """Planner ke outcome ko done/requeue/failed me classify karo.
+    2026-09-20: handle() se nikala — ab detached planner ke reap me bhi
+    use hota hai (scheduler-timeout fix)."""
     # 4. planner ka outcome — definitive hi failed, transient wapas pending
     if outcome == "enqueued":
         mark_done(req_id, "pipeline enqueued")
@@ -336,15 +530,29 @@ def handle(req: dict) -> None:
         requeue(req_id, "discover chal raha hai — agle tick me phir dekhenge")
         log(f"{req_id}: discover_pending → requeue (not failed)")
         return
+    # 2026-09-20 CORE FIX: exit 3 = planner ne kaha "infra down hai"
+    # (Supabase unreachable, saare retries ke baad). Ye user ki koshish
+    # nahi gini chahiye — attempts wapas karo, request pending rakho.
+    if outcome == "error:exit3" or "infra_unavailable" in (detail or ""):
+        requeue_infra(
+            req_id, attempts_before,
+            "Supabase se connection nahi hua (network blip) — "
+            "thodi der me dobara koshish hogi, ye koshish nahi gini")
+        return
     note = (outcome if outcome.startswith(("skipped:", "error:", "timeout"))
             else f"failed:{outcome}")
     if detail:
         note = f"{note} | {detail}"[:480]
     blob = f"{outcome} {detail}"
+    if _looks_deterministic_text(blob):
+        # Schema/logic error — retry bekaar hai, seedha failed.
+        mark_failed(req_id, f"deterministic:{note}", attempts)
+        log(f"{req_id}: planner outcome {outcome} → failed (deterministic, no requeue)")
+        return
     if outcome.startswith(("error:", "timeout")) and _looks_transient_text(blob):
         # Planner apne retries ke baad bhi network blip me gira —
-        # definitive nahi, agla run retry karega.
-        requeue(req_id, f"transient planner: {note}")
+        # definitive nahi, agla run retry karega. Attempt wapas (infra).
+        requeue_infra(req_id, attempts_before, f"transient planner: {note}")
         return
     mark_failed(req_id, note, attempts)
     log(f"{req_id}: planner outcome {outcome} → failed (auto-retry if eligible)")
@@ -380,7 +588,8 @@ def reclaim_orphans() -> None:
         reason = ""
         if rboot and rboot != boot:
             orphan, reason = True, "server restart hua tha"
-        elif rpid and not _worker_alive(int(rpid)):
+        elif rpid and not (_worker_alive(int(rpid))
+                           or _planner_pid_alive(int(rpid))):
             orphan, reason = True, "planner process band ho gaya tha"
         else:
             started = r.get("started_at")
@@ -480,8 +689,15 @@ def reconcile_device_jobs() -> None:
                 # hai — use PATCH me bhejne se PostgREST 400 (PGRST204) aata
                 # hai aur poora watchdog action fail ho jata tha. Wajah
                 # job_runs.result me record hoti hai (neeche).
+                # p35 FIX (2026-09-20): requeue pe current_step/last_heartbeat/
+                # heartbeat_count CLEAR karo — nahi to Live page pe "queued"
+                # status ke saath purana failed step dikhta hai (stale mixed
+                # state = user ka "data update nahi hota" complaint).
                 config.sb_patch("device_jobs", jid, {
                     "status": "queued",
+                    "current_step": None,
+                    "last_heartbeat": None,
+                    "heartbeat_count": 0,
                     "run_after": (datetime.now(timezone.utc)
                                   + timedelta(minutes=1)).isoformat()})
                 config.sb_request("POST", "/rest/v1/job_runs", body=[{
@@ -566,6 +782,9 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         log(f"FATAL: fetch failed {type(e).__name__}: {e}")
         return 1
+    # 2026-09-20: reap PEHLE — finished detached planner ka outcome
+    # finalize ho, warna reclaim_orphans use orphan samajh lega.
+    reap_finished_planners()
     reclaim_orphans()
     promote_retries()
     reconcile_device_jobs()  # P0 watchdog — phone-poll independent
