@@ -111,8 +111,10 @@ def activity(uid: str | None, event: str, detail: str = "") -> None:
 # ke liye hai.
 # --------------------------------------------------------------------------
 def sb_retry(method: str, path: str, query: dict | None = None,
-             body: dict | None = None, tries: int = 6,
+             body: dict | None = None, tries: int = 10,
              headers: dict | None = None):
+    # 2026-09-20 CORE FIX: tries 6→10 (config.sb_request ke saath sync).
+    # Egress proxy chronic flaky hai; 6 tries bad burst me kaafi nahi the.
     return config.sb_request(method, path, body=body, query=query,
                              timeout=60, tries=tries, headers=headers)
 
@@ -127,7 +129,12 @@ def sb_select_retry(table: str, filters: dict | None = None,
     if extra:
         q.update(extra)
     res = sb_retry("GET", f"/rest/v1/{table}", query=q)
-    return res if isinstance(res, list) else [res]
+    # 2026-09-20 CORE FIX: proxy kabhi-kabhi 200 pe junk body (JSON string)
+    # bhej deta hai — pehle [res] me lipti str aage jaake
+    # "'str' object has no attribute 'get'" se crash karti thi. Sirf dicts rakho.
+    if isinstance(res, list):
+        return [r for r in res if isinstance(r, dict)]
+    return [res] if isinstance(res, dict) else []
 
 
 # --------------------------------------------------------------------------
@@ -201,48 +208,148 @@ def get_device_user() -> tuple[str, str]:
 MAIN_HUB_USER_ID = "00000000-0000-0000-0000-000000000000"
 
 
-def get_campaigns(uid: str) -> list[dict]:
-    """Main hub (shared pool) se campaigns.
-    User-specific purane campaigns ab use nahi hote."""
-    return sb_select_retry(
+# 2026-09-20 CORE FIX (egress proxy IncompleteRead):
+# `notes` me full_brief JSON hai (~250KB / 26 rows) — proxy har baar connection
+# kaat deta tha, 6 retries bhi fail. Ab list query LIGHT hai (notes NAHI),
+# aur sirf CHUNI HUI campaign ka full row (~10KB) alag se aata hai.
+_LIGHT_COLS = ("id,name,sponsor,payout_per_1k_usd,budget_remaining_usd,"
+               "min_seconds,max_seconds,requirements,caption_template,"
+               "hashtags,brief_url,campaign_url,joined,join_status")
+
+
+def get_campaign_ids() -> list[str]:
+    """Sirf campaign IDs — TINIEST query (~1KB, proxy-safe).
+    2026-09-20 CORE FIX: 15KB wali light-list bhi proxy pe 0/10 fail ho rahi
+    thi. Sirf IDs (~23B/row) 7/8 success deti hai. Detail har candidate ke
+    liye alag-alag lazy fetch hoti hai."""
+    rows = sb_select_retry(
         "campaigns", {"user_id": MAIN_HUB_USER_ID, "active": True},
-        select=("id,name,sponsor,payout_per_1k_usd,budget_remaining_usd,"
-                "min_seconds,max_seconds,requirements,caption_template,"
-                "hashtags,brief_url,campaign_url,joined,join_status,notes"),
-        limit=30, extra={"order": "created_at.desc"})
+        select="id", limit=50, extra={"order": "created_at.desc"})
+    return [r["id"] for r in rows
+            if isinstance(r, dict) and r.get("id")]
+
+
+def get_campaigns(uid: str) -> list[dict]:
+    """Main hub (shared pool) se LIGHT campaign list — notes KE BINA
+    (proxy-safe, ~13KB). uid legacy signature ke liye; pool hamesha MAIN_HUB.
+    Poori detail chahiye to get_campaign_full(cid) use karo.
+    2026-09-20: NAYA code get_campaign_ids() use kare; ye sirf legacy
+    callers ke liye bacha hai."""
+    rows = sb_select_retry(
+        "campaigns", {"user_id": MAIN_HUB_USER_ID, "active": True},
+        select=_LIGHT_COLS, limit=30, extra={"order": "created_at.desc"})
+    return [r for r in rows if isinstance(r, dict)]
+
+
+def get_campaign_full(cid: str) -> dict | None:
+    """Single campaign ka FULL row (notes ke saath) — chhota response
+    (~10KB), proxy-safe. Selection ke BAAD sirf picked campaign pe call karo."""
+    rows = sb_select_retry("campaigns", {"id": cid}, select="*", limit=1)
+    for r in rows:
+        if isinstance(r, dict) and r.get("id") == cid:
+            return r
+    return None
 
 
 def _is_eligible(campaign: dict) -> bool:
     """2026-09-20: notes.eligible=false wale campaigns planner pool se bahar.
     (jaise Nilo — official Drive asset URL missing + IG Roblox-fit unverified).
     Explicit flag hai, reversible; activity me reason logged."""
-    try:
-        n = json.loads(campaign.get("notes") or "{}")
-    except Exception:
+    n = campaign.get("notes")
+    if isinstance(n, str):
+        try:
+            n = json.loads(n or "{}")
+        except Exception:
+            return True
+    if not isinstance(n, dict):
         return True
-    if n.get("eligible") is False:
-        return False
-    return True
+    return n.get("eligible") is not False
+
+
+def select_campaign_via_server(uid: str) -> dict | None:
+    """Vercel server-side selection (2026-09-20).
+
+    VM se Supabase tak ka network flaky hai — selection Vercel pe hota hai
+    (reliable network), VM ko sirf ~3KB ka normalized campaign milta hai.
+    Fail ho to None (caller local pick_random_campaign fallback use karega).
+    """
+    import urllib.request
+    url = config.CLIPFLOW_URL.rstrip("/") + "/api/worker/select-campaign"
+    body = json.dumps({"user_id": uid}).encode()
+    for i in range(3):
+        try:
+            req = urllib.request.Request(url, data=body, method="POST")
+            req.add_header("Content-Type", "application/json")
+            if config.WORKER_SECRET:
+                req.add_header("x-worker-secret", config.WORKER_SECRET)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode())
+            if data.get("ok") and data.get("campaign"):
+                c = data["campaign"]
+                log(f"SERVER PICK: '{c.get('name')}' ({c.get('id')}) "
+                    f"${c.get('payout_per_1k_usd')}/1k "
+                    f"(pool={data.get('pool_size')}, brief={data.get('with_brief')}, "
+                    f"class={c.get('classification')})")
+                # Planner ke purane format se compatible banao
+                c["notes"] = json.dumps({
+                    "eligible": c.pop("notes_eligible", True),
+                    "classification": c.get("classification", "clip_ready"),
+                    "classification_reasons": c.get("classification_reasons", []),
+                })
+                return c
+            log(f"server select: {data.get('reason')} — local fallback")
+            return None
+        except Exception as e:  # noqa: BLE001
+            log(f"server select try {i + 1}/3: {type(e).__name__}")
+            time.sleep(2 * (i + 1))
+    log("server select fail — local fallback")
+    return None
 
 
 def pick_random_campaign(uid: str, exclude_ids=None) -> dict | None:
     """25 me se RANDOM ek campaign select karo (2026-09-20: user requirement).
-    Pehle submit ho chuke campaigns exclude hote hain; notes.eligible=false
-    wale bhi pool se bahar."""
+    Pehle submit ho chuke campaigns exclude hote hain.
+    CORE FIX (2026-09-20): sirf IDs ki list fetch karo (~1KB, proxy-safe),
+    shuffle karke har candidate ka FULL row lazy fetch karo aur
+    notes.eligible=false wale skip karo. 15KB wali bulk query HATA DI —
+    wo proxy pe 10/10 fail ho rahi thi. 3 consecutive full-fetch fail =
+    infra down → TransientError (exit 3)."""
     import random
-    campaigns = get_campaigns(uid)
+    ids = get_campaign_ids()
     if exclude_ids:
-        campaigns = [c for c in campaigns if c["id"] not in exclude_ids]
-    eligible = [c for c in campaigns if _is_eligible(c)]
-    skipped = len(campaigns) - len(eligible)
-    if skipped:
-        log(f"eligibility filter: {skipped} campaign(s) ineligible (notes.eligible=false)")
-    if not eligible:
+        ids = [cid for cid in ids if cid not in exclude_ids]
+    if not ids:
         return None
-    picked = random.choice(eligible)
-    log(f"RANDOM PICK: '{picked.get('name')}' ({picked['id']}) "
-        f"${picked.get('payout_per_1k_usd')}/1k")
-    return picked
+    random.shuffle(ids)
+    skipped_inelig = 0
+    consec_fail = 0
+    for cid in ids:
+        try:
+            full = get_campaign_full(cid)
+        except Exception as e:  # noqa: BLE001
+            consec_fail += 1
+            log(f"pick: {cid[:8]} full fetch fail ({type(e).__name__}), next "
+                f"(lagatar fail {consec_fail})")
+            if consec_fail >= 3:
+                raise config.TransientError(
+                    f"campaign detail lagatar 3 fail — infra down")
+            continue
+        consec_fail = 0
+        if not full:
+            log(f"pick: {cid[:8]} full row nahi mila, next")
+            continue
+        if not _is_eligible(full):
+            skipped_inelig += 1
+            continue
+        if skipped_inelig:
+            log(f"eligibility filter: {skipped_inelig} campaign(s) ineligible "
+                f"(notes.eligible=false)")
+        log(f"RANDOM PICK: '{full.get('name')}' ({full['id']}) "
+            f"${full.get('payout_per_1k_usd')}/1k")
+        return full
+    if skipped_inelig:
+        log(f"eligibility filter: {skipped_inelig} ineligible, koi eligible nahi bacha")
+    return None
 
 
 def is_joined(campaign: dict) -> bool:
@@ -663,10 +770,9 @@ def download_section(url: str, start: int, end: int, tmp: str) -> str:
         grab_section(url, s, e, out, config.YTDLP, use_node=True, log=log)
     elif _is_direct_media(url):
         log("direct media download …")
-        subprocess.run(["curl", "-L", "--fail", "--max-time", "570",
-                        "--max-filesize", str(400 * 1024 * 1024),
-                        "-o", out, url],
-                       check=True, capture_output=True, timeout=900)
+        # 2026-09-20: robust_download (retry+resume) — pehle ek blip pe
+        # poora attempt waste hota tha.
+        brain.robust_download(url, out, log_fn=log)
         # section kaat lo (curated/brain moment ke hisab se)
         cut = os.path.join(tmp, "src_cut.mp4")
         subprocess.run(["ffmpeg", "-y", "-v", "error",
@@ -1141,41 +1247,79 @@ DEAD_SIGNALS = (
 
 def health_check_campaigns(uid: str, dry_run: bool = False) -> int:
     """Active campaigns me dead signals dhoondho, auto-deactivate karo.
-    Returns: kitni deactivate hui."""
+    Returns: kitni deactivate hui.
+    2026-09-20 CORE FIX:
+    - Pehle device-user pool check karta tha — MAIN_HUB pool kabhi scan hi
+      nahi hota tha. Ab MAIN_HUB_USER_ID.
+    - notes wali bulk query (~250KB) proxy pe IncompleteRead deti thi.
+      Ab budget check LIGHT query se, dead-signal scan per-campaign
+      (~8KB each) + circuit breaker."""
     rows = sb_select_retry(
         "campaigns",
-        {"user_id": uid, "active": True},
-        select="id,budget_remaining_usd,notes,name",
+        {"user_id": MAIN_HUB_USER_ID, "active": True},
+        select="id,budget_remaining_usd,name",
     ) or []
     dead = 0
+    deactivated_ids = set()
+
+    def _deactivate(cid, name, reason):
+        nonlocal dead
+        if dry_run:
+            log(f"DRY-RUN: campaign {cid} dead hoti ({reason})")
+        else:
+            sb_retry("PATCH", "/rest/v1/campaigns",
+                     query={"id": f"eq.{cid}"},
+                     body={"active": False})
+            activity(uid, "campaign_auto_deactivated",
+                     f"Agent ne '{name or cid}' deactivate ki — {reason}.")
+        log(f"campaign {cid} auto-deactivated — {reason}")
+        dead += 1
+        deactivated_ids.add(cid)
+
+    # Pass 1 (light): budget khatam
     for c in rows:
         cid = c.get("id")
-        reason = ""
         try:
             budget = c.get("budget_remaining_usd")
             if budget is not None and float(budget) <= 0:
-                reason = "budget khatam (%.2f)" % float(budget)
+                _deactivate(cid, c.get("name"),
+                            "budget khatam (%.2f)" % float(budget))
         except (TypeError, ValueError):
             pass
-        if not reason:
-            notes = c.get("notes") or {}
-            blob = json.dumps(notes).lower()
-            req = str(notes.get("verified_requirements") or "").lower()
-            for sig in DEAD_SIGNALS:
-                if sig in blob or sig in req:
-                    reason = "Whop pe band ka signal: '%s'" % sig
-                    break
-        if reason:
-            if dry_run:
-                log(f"DRY-RUN: campaign {cid} dead hoti ({reason})")
-            else:
-                sb_retry("PATCH", "/rest/v1/campaigns",
-                         query={"id": f"eq.{cid}"},
-                         body={"active": False})
-                activity(uid, "campaign_auto_deactivated",
-                         f"Agent ne '{c.get('name') or cid}' deactivate ki — {reason}.")
-            log(f"campaign {cid} auto-deactivated — {reason}")
-            dead += 1
+
+    # Pass 2: dead signals — per-campaign notes fetch (proxy-safe),
+    # consecutive 3 fail pe circuit breaker (non-fatal, agle tick me phir).
+    consec_fail = 0
+    for c in rows:
+        cid = c.get("id")
+        if cid in deactivated_ids:
+            continue
+        try:
+            full = get_campaign_full(cid)
+        except Exception:  # noqa: BLE001
+            consec_fail += 1
+            if consec_fail >= 3:
+                log("health check: lagatar 3 notes fetch fail — scan roka (agle tick)")
+                break
+            continue
+        consec_fail = 0
+        if not full:
+            continue
+        notes = full.get("notes") or {}
+        if isinstance(notes, str):
+            try:
+                notes = json.loads(notes)
+            except Exception:
+                notes = {}
+        if not isinstance(notes, dict):
+            continue
+        blob = json.dumps(notes).lower()
+        req = str(notes.get("verified_requirements") or "").lower()
+        for sig in DEAD_SIGNALS:
+            if sig in blob or sig in req:
+                _deactivate(cid, full.get("name"),
+                            "Whop pe band ka signal: '%s'" % sig)
+                break
     if not dead:
         log(f"campaign health: {len(rows)} active, sab zinda")
     return dead
@@ -1222,23 +1366,19 @@ def daily_discover_refresh(uid: str, dry_run: bool = False) -> str:
     if dry_run:
         return "dryrun"
     # Purani discovered campaigns deactivate (joined/worked ko chhodo)
+    # 2026-09-20 CORE FIX: sirf zaroori JSON fields (via, discovered_at) —
+    # poora notes (full_brief) proxy pe IncompleteRead deta tha.
     rows = sb_select_retry(
         "campaigns",
         {"user_id": uid, "active": True},
-        select="id,name,joined,notes",
+        select="id,joined,notes->via,notes->discovered_at",
     ) or []
     cleaned = 0
     for c in rows:
         if c.get("joined"):
             continue
-        notes = c.get("notes") or {}
-        if isinstance(notes, str):
-            try:
-                notes = json.loads(notes)
-            except Exception:
-                notes = {}
-        via = str(notes.get("via") or "")
-        disc = str(notes.get("discovered_at") or "")
+        via = str(c.get("via") or "")
+        disc = str(c.get("discovered_at") or "")
         if via != "phone" or not disc:
             continue
         try:
@@ -1313,8 +1453,11 @@ def plan_once(dry_run: bool) -> str:
     # 2b. VERIFICATION-FIRST (Round-7b): server ke paas Whop login nahi hai,
     # isliye FINAL chunav phone karta hai. Sirf fresh-verified (7d) campaigns
     # eligible hain; warna phone se verification mangwao, blind clip nahi.
-    campaigns = get_campaigns(uid)
-    if not campaigns:
+    # 2026-09-20 CORE FIX: sirf IDs check karo (~1KB) — 15KB wali
+    # get_campaigns() proxy pe marr jati thi. Detail pick_random_campaign
+    # me lazy fetch hoti hai.
+    campaign_ids = get_campaign_ids()
+    if not campaign_ids:
         # DISCOVER-FIRST (2026-09-20): koi active campaign nahi — SERVER
         # contentrewards.com se naye campaigns nikalega (public, no login).
         log("koi active campaign nahi — server se discovery")
@@ -1339,13 +1482,26 @@ def plan_once(dry_run: bool) -> str:
     # PERMANENT RULE (user-locked): same account kabhi same campaign me
     # dobara submit nahi karega — ye TESTING_NO_LIMITS se independent hai.
     submitted_ids = set()
+    # 2026-09-20 FIX: submissions table me campaign_id column NAHI hai
+    # (42703 crash tha). submissions.post_id → posts.campaign_id se nikalo.
     sub_rows = sb_retry("GET", "/rest/v1/submissions", query={
-        "select": "campaign_id", "user_id": f"eq.{uid}", "limit": "100"})
-    submitted_ids = {r["campaign_id"] for r in sub_rows if r.get("campaign_id")}
+        "select": "post_id", "user_id": f"eq.{uid}", "limit": "100"})
+    _pids = [r["post_id"] for r in sub_rows if r.get("post_id")]
+    if _pids:
+        _prows = sb_retry("GET", "/rest/v1/posts", query={
+            "select": "campaign_id",
+            "id": f"in.({','.join(_pids)})", "limit": "100"})
+        submitted_ids = {r["campaign_id"] for r in _prows if r.get("campaign_id")}
     if submitted_ids:
         log(f"permanent exclusion: {len(submitted_ids)} campaigns pehle submit ho chuke")
 
-    picked = pick_random_campaign(uid, exclude_ids=submitted_ids)
+    # 2026-09-20: SERVER-SIDE SELECTION pehle (Vercel endpoint).
+    # VM ka Supabase network flaky hai — Vercel reliable hai. Server se
+    # ~3KB me normalized campaign aata hai. Fail → local fallback.
+    # (Server khud submitted/eligible filter karta hai.)
+    picked = select_campaign_via_server(uid)
+    if not picked:
+        picked = pick_random_campaign(uid, exclude_ids=submitted_ids)
     if not picked:
         log("SKIP: koi campaign available nahi (sab submit ho chuke ya pool khali)")
         return "skipped:no_campaign"
@@ -1369,8 +1525,36 @@ def plan_once(dry_run: bool) -> str:
             if res.get("ok") and not res.get("deduped"):
                 set_stage("ho_gaya")
                 return f"join_requested:{picked['id']}"
+            if res.get("needs_app_update"):
+                log(f"SKIP join: app update pending — {res.get('error')}")
+                return "skipped:join_needs_app_update"
+            if res.get("deduped") or res.get("conflict"):
+                # Server ke paas join job pehle se live hai — ye fail
+                # nahi, pending hai. (2026-09-20 fix: pehle ye galat
+                # tareeke se join_failed me girta tha aur 3 attempt
+                # bekaar me jal jate the.)
+                log(f"join already live server-side "
+                    f"(deduped={res.get('deduped')}, "
+                    f"conflict={res.get('conflict')}) — join_pending")
+                return "skipped:join_pending"
+            # Non-ok aur wajah unknown — response body log karo taaki
+            # agli baar andaza na lagana pade (2026-09-20 obs fix).
+            log(f"join enqueue non-ok: {str(res)[:300]}")
         except Exception as e:
             log(f"join enqueue error: {type(e).__name__}: {str(e)[:200]}")
+            # Network blip me response kho sakta hai jabki server ne
+            # job bana diya ho — pehle reconcile karo, seedha
+            # join_failed mat kaho. (2026-09-20 fix: da57be3d me job
+            # 7d1cfa7f ban gaya tha phir bhi request mar gayi thi.)
+            try:
+                live = live_join_job(uid, picked["id"])
+            except Exception as e2:  # noqa: BLE001
+                live = None
+                log(f"join reconcile check failed: {type(e2).__name__}")
+            if live:
+                log(f"join job server pe mil gaya "
+                    f"({live['id'][:8]}…) — join_pending")
+                return "skipped:join_pending"
             return "skipped:join_error"
         return "skipped:join_failed"
 
@@ -1401,11 +1585,26 @@ def main() -> None:
     try:
         outcome = plan_once(dry_run=args.dry_run)
     except Exception as e:  # noqa: BLE001
+        # 2026-09-20 CORE FIX: Supabase unreachable (saare retries ke baad bhi)
+        # = INFRASTRUCTURE failure, campaign/planner logic ka fault nahi.
+        # Exit code 3 → pipeline_watch attempt jalaye BINA requeue karega.
+        # Pehle ye exit 1 (FATAL) hota tha → watcher stderr me transient marker
+        # nahi dhundh pata tha → attempt jal jata tha → 3 me request marr jati.
+        is_infra = isinstance(e, config.TransientError)
+        if not is_infra:
+            low = f"{type(e).__name__} {e}".lower()
+            is_infra = any(m in low for m in (
+                "remotedisconnected", "incompleteread", "connection reset",
+                "connection aborted", "timed out", "temporary failure",
+                "bad gateway", "service unavailable", "gateway timeout"))
         log(f"FATAL: {type(e).__name__}: {e}")
         try:
             activity(None, "planner_v2_error", str(e)[:300])
         except Exception:
             pass
+        if is_infra:
+            log("done: infra_unavailable")
+            sys.exit(3)
         sys.exit(1)
     log(f"done: {outcome}")
     sys.exit(0)
