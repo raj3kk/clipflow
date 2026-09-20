@@ -285,9 +285,7 @@ export default function CampaignsPage() {
     <div>
       <div className="flex items-center justify-between mb-1">
         <h1 className="text-2xl font-bold">Campaigns</h1>
-        <button className={btnPrimary} onClick={() => setShowAdd((s) => !s)}>
-          {showAdd ? "Close" : "+ Scout-add campaign"}
-        </button>
+        {/* Manual add BAND (2026-09-20): campaigns phone se auto-discover hote hain */}
       </div>
       <p className="text-slate-600 text-sm mb-6">
         {campaigns.length} campaigns · sorted by payout · naye campaigns phone
@@ -297,53 +295,7 @@ export default function CampaignsPage() {
 
       {data && !data.configured && <SetupBanner />}
       <Msg msg={msg} />
-
-      {showAdd && (
-        <form onSubmit={scoutAdd} className={`${cardCls} mb-8 grid gap-3 md:grid-cols-2`}>
-          <h2 className="font-semibold md:col-span-2">Scout-add campaign</h2>
-          <label className="text-sm">ID (slug)*
-            <input required value={form.id} onChange={set("id")} placeholder="perplexity-jre" className={inputCls} />
-          </label>
-          <label className="text-sm">Name*
-            <input required value={form.name} onChange={set("name")} className={inputCls} />
-          </label>
-          <label className="text-sm">Sponsor
-            <input value={form.sponsor} onChange={set("sponsor")} className={inputCls} />
-          </label>
-          <label className="text-sm">Payout $/1K views*
-            <input required type="number" step="any" min={0} value={form.payout_per_1k_usd} onChange={set("payout_per_1k_usd")} className={inputCls} />
-          </label>
-          <label className="text-sm">Budget remaining ($)
-            <input type="number" step="any" min={0} value={form.budget_remaining_usd} onChange={set("budget_remaining_usd")} className={inputCls} />
-          </label>
-          <label className="text-sm">Min seconds
-            <input type="number" min={1} value={form.min_seconds} onChange={set("min_seconds")} className={inputCls} />
-          </label>
-          <label className="text-sm">Max seconds
-            <input type="number" min={1} value={form.max_seconds} onChange={set("max_seconds")} className={inputCls} />
-          </label>
-          <label className="text-sm md:col-span-2">Requirements
-            <textarea rows={3} value={form.requirements} onChange={set("requirements")} className={inputCls} />
-          </label>
-          <label className="text-sm md:col-span-2">Caption template
-            <textarea rows={2} value={form.caption_template} onChange={set("caption_template")} className={inputCls} />
-          </label>
-          <label className="text-sm">Hashtags (comma separated)
-            <input value={form.hashtags} onChange={set("hashtags")} placeholder="#BlizzardPartner, #DiabloV" className={inputCls} />
-          </label>
-          <div className="grid gap-3 md:grid-cols-2 md:col-span-2">
-            <label className="text-sm">Brief URL
-              <input value={form.brief_url} onChange={set("brief_url")} className={inputCls} />
-            </label>
-            <label className="text-sm">Campaign URL
-              <input value={form.campaign_url} onChange={set("campaign_url")} className={inputCls} />
-            </label>
-          </div>
-          <button type="submit" disabled={adding} className={`${btnPrimary} md:col-span-2`}>
-            {adding ? "Adding…" : "Add campaign"}
-          </button>
-        </form>
-      )}
+      {/* Manual add form REMOVED (2026-09-20) */}
 
       <div className="grid gap-4">
         {campaigns.length === 0 && (
