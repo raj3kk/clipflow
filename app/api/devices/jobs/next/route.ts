@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDeviceIdentity, touchDevice } from "@/lib/device_auth";
 import { getSupabase, isConfigured } from "@/lib/supabase";
 import { reconcileStaleJobs } from "@/lib/device_jobs";
+import { getLatestRelease } from "@/lib/app_release";
 
 /**
  * Phone ka long-poll: "mere liye koi kaam hai?"
@@ -87,6 +88,8 @@ export async function GET(req: Request) {
       type: held.type,
       payload: (held as { payload?: Record<string, unknown> }).payload ?? {},
       held: true,
+      // WP4 piggyback: phone ko alag /api/app/version call nahi karni padegi.
+      app_update: await getLatestRelease(sb),
     });
   }
 
@@ -136,5 +139,7 @@ export async function GET(req: Request) {
     job_id: c.id,
     type: c.type,
     payload: (c as { payload?: Record<string, unknown> }).payload ?? {},
+    // WP4 piggyback: phone ko alag /api/app/version call nahi karni padegi.
+    app_update: await getLatestRelease(sb),
   });
 }

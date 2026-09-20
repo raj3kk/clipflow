@@ -7,7 +7,6 @@ import {
   reconcileStaleJobs,
 } from "@/lib/device_jobs";
 import { validateClipPackage, buildAutomationPayload } from "@/lib/v2_workflow";
-import { sendWakePush } from "@/lib/fcm";
 
 /**
  * Schedule ticker — server khud schedule pe automation job banata hai.
@@ -289,21 +288,22 @@ export async function POST(req: Request) {
         { idempotency_key: key }
       );
       if (res.ok && !res.deduped) {
-        created.push({ device_id: d.id, job_id: res.job_id, slot: key });
-        // Best-effort wake push: phone turant jaag jaye. FCM fail ho to bhi
-        // job queue me safe hai — phone agle poll pe utha lega. Request kabhi fail nahi hogi.
-        if (d.fcm_token) {
-          try {
-            const w = await sendWakePush(d.fcm_token);
-            const entry = created[created.length - 1] as Record<string, unknown>;
-            entry.wake = w.via;
-            if (!w.sent) entry.wake_reason = w.reason;
-          } catch (e) {
-            const entry = created[created.length - 1] as Record<string, unknown>;
-            entry.wake = "poll";
-            entry.wake_reason = e instanceof Error ? e.message : "wake failed";
+        // Wake push ab createAutomationJob me centralized hai (device_jobs.wakeDevice) —
+        // yahan sirf uska outcome log/response me daalo.
+        const entry: Record<string, unknown> = {
+          device_id: d.id,
+          job_id: res.job_id,
+          slot: key,
+        };
+        if (res.wake) {
+          entry.wake = res.wake.via;
+          if (!res.wake.reason) {
+            /* fcm success — reason nahi */
+          } else {
+            entry.wake_reason = res.wake.reason;
           }
         }
+        created.push(entry);
       } else if (res.ok) {
         skipped.push({ device_id: d.id, reason: "already_queued_for_slot", slot: key });
       } else {

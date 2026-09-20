@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { getSupabase, isConfigured } from "@/lib/supabase";
 import { guardNoActiveAutomation } from "@/lib/automation_guard";
+import { wakeDevice } from "@/lib/device_jobs";
 
 /**
  * "Jab chahe" trigger — user dashboard se turant automation chalaye.
@@ -110,5 +111,14 @@ export async function POST(
     }
     return NextResponse.json({ error: msg }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, request_id: pr.id });
+  // 2026-09-20 (work package 3): run-now pe phone ko turant jagao (best-effort
+  // FCM wake). Pipeline_request job nahi hai — phone ka planner ise process
+  // karke phone job banayega (plan-job → createAutomationJob → wahan bhi wake
+  // hota hai). Wake fail ho to bhi request safal hai — phone 15-min poll se uthayega.
+  const wake = await wakeDevice(sb, params.id);
+  return NextResponse.json({
+    ok: true,
+    request_id: pr.id,
+    wake: { via: wake.via, reason: wake.reason ?? null },
+  });
 }

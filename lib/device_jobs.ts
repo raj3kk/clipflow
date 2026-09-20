@@ -17,6 +17,41 @@
 export const CAP_COUNT = 4;
 export const CAP_WINDOW_HOURS = 24;
 
+import { sendWakePush } from "@/lib/fcm";
+
+/**
+ * Best-effort FCM wake (2026-09-20, work package 3): har fresh job-enqueue
+ * ke baad phone ko turant jagao. FCM fail/unconfigured/token-missing →
+ * { via: "poll" } — phone agle poll pe job utha lega. Kabhi throw nahi
+ * karta, request ko kabhi fail nahi karta. Log via + reason (calling route
+ * ise response/diagnostics me dalti hai).
+ */
+export async function wakeDevice(
+  sb: any,
+  deviceId: string
+): Promise<{ via: "fcm" | "poll"; reason?: string }> {
+  try {
+    const { data: d } = await sb
+      .from("devices")
+      .select("fcm_token")
+      .eq("id", deviceId)
+      .single();
+    if (!d?.fcm_token) {
+      return {
+        via: "poll",
+        reason:
+          "Phone ne FCM token register nahi kiya (app purana ya Firebase setup baaki).",
+      };
+    }
+    return await sendWakePush(d.fcm_token);
+  } catch (e) {
+    return {
+      via: "poll",
+      reason: e instanceof Error ? e.message : "wake failed",
+    };
+  }
+}
+
 /**
  * TESTING MODE (user-set 2026-09-20): "abhi check hoga, jb production ready
  * sara kch ok hoga tb lagayenge sara kch limitation" — testing ke dauraan
@@ -260,7 +295,17 @@ export const LIVE_JOB_STATUSES = new Set([
 ]);
 
 export type JobCreateResult =
-  | { ok: true; job_id: string; status: string; deduped?: boolean }
+  | {
+      ok: true;
+      job_id: string;
+      status: string;
+      deduped?: boolean;
+      /**
+       * FCM wake ka outcome (sirf fresh insert pe; deduped pe undefined).
+       * via:"poll" = phone agle poll pe uthayega — koi failure nahi.
+       */
+      wake?: { via: "fcm" | "poll"; reason?: string };
+    }
   | { ok: false; code: 404 | 409 | 429 | 500; error: string; cap?: number; window_hours?: number; used?: number; resets_at?: string | null; duplicateCampaign?: boolean };
 
 export async function createAutomationJob(
@@ -405,7 +450,10 @@ export async function createAutomationJob(
       .single();
 
     if (!jobErr && job) {
-      return { ok: true, job_id: job.id, status: "queued" };
+      // Fresh job queue hua → phone ko turant jagao (best-effort FCM wake).
+      // Deduped jobs pe wake nahi — phone pehle se janta hai.
+      const wake = await wakeDevice(sb, deviceId);
+      return { ok: true, job_id: job.id, status: "queued", wake };
     }
 
     const msg = jobErr?.message ?? "Job create failed.";
@@ -436,6 +484,59 @@ export async function createAutomationJob(
     return { ok: false, code: 500, error: msg };
   }
   return { ok: false, code: 500, error: "Job create failed." };
+}
+
+/**
+ * WebView session health (2026-09-20 WP3): device ne IG/Whop authenticated
+ * page kab dekha tha. Freshness window 7 din — usse purana signal =
+ * session expire ho sakti hai (phone pe dobara login verify karna padega).
+ * Kabhi throw nahi karta; unknown (null signals) = gate nahi lagata
+ * (purane apps signals nahi bhejte — unhe punish nahi karenge).
+ */
+export const SESSION_FRESH_DAYS = 7;
+
+export interface SessionHealth {
+  ig_ok_at: string | null;
+  whop_ok_at: string | null;
+  ig_fresh: boolean;
+  whop_fresh: boolean;
+  /** dono signals me se koi bhi kabhi nahi aaya */
+  unknown: boolean;
+}
+
+export async function getSessionHealth(
+  sb: any,
+  deviceId: string
+): Promise<SessionHealth> {
+  const empty: SessionHealth = {
+    ig_ok_at: null,
+    whop_ok_at: null,
+    ig_fresh: false,
+    whop_fresh: false,
+    unknown: true,
+  };
+  try {
+    const { data: d } = await sb
+      .from("devices")
+      .select("ig_session_ok_at, whop_session_ok_at")
+      .eq("id", deviceId)
+      .single();
+    if (!d) return empty;
+    const cutoff = Date.now() - SESSION_FRESH_DAYS * 24 * 3600 * 1000;
+    const igAt = (d.ig_session_ok_at as string | null) ?? null;
+    const whopAt = (d.whop_session_ok_at as string | null) ?? null;
+    const igFresh = !!igAt && new Date(igAt).getTime() > cutoff;
+    const whopFresh = !!whopAt && new Date(whopAt).getTime() > cutoff;
+    return {
+      ig_ok_at: igAt,
+      whop_ok_at: whopAt,
+      ig_fresh: igFresh,
+      whop_fresh: whopFresh,
+      unknown: !igAt && !whopAt,
+    };
+  } catch {
+    return empty;
+  }
 }
 
 /**

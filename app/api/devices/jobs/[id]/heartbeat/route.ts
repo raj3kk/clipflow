@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDeviceIdentity, touchDevice } from "@/lib/device_auth";
 import { getSupabase, isConfigured } from "@/lib/supabase";
+import { getLatestRelease } from "@/lib/app_release";
 
 /**
  * Phone job execution ke dauraan har ~5 min me heartbeat bhejta hai
@@ -23,7 +24,12 @@ import { getSupabase, isConfigured } from "@/lib/supabase";
  * legacy cutoff (claim-time se). Watchdog: pipeline_watch.py har 1 min +
  * schedule-tick har 15 min + jobs/next har poll.
  *
- * POST /api/devices/jobs/:id/heartbeat  { step?: string }  →  { ok: true }
+ * POST /api/devices/jobs/:id/heartbeat  { step?: string, sessions?: { ig?: boolean, whop?: boolean } }  →  { ok: true }
+ *
+ * sessions (2026-09-20 WP3 — WebView session persistence): phone batata hai
+ * "maine abhi authenticated IG/Whop page dekha". true aane pe devices ki
+ * ig_session_ok_at / whop_session_ok_at refresh hoti hai. Sirf boolean
+ * signals — koi cookie/token server pe nahi aata.
  */
 export async function POST(
   req: Request,
@@ -41,10 +47,19 @@ export async function POST(
   }
 
   let step: string | null = null;
+  let sessions: { ig?: boolean; whop?: boolean } | null = null;
   try {
     const body = await req.json();
     if (body && typeof body.step === "string") {
       step = body.step.slice(0, 64) || null;
+    }
+    if (body && body.sessions && typeof body.sessions === "object") {
+      const s = body.sessions as Record<string, unknown>;
+      sessions = {
+        ig: s.ig === true ? true : undefined,
+        whop: s.whop === true ? true : undefined,
+      };
+      if (sessions.ig === undefined && sessions.whop === undefined) sessions = null;
     }
   } catch {
     /* body optional */
@@ -98,11 +113,29 @@ export async function POST(
   await sb.from("device_jobs").update(update).eq("id", job.id);
   await touchDevice(ident.deviceId);
 
+  // WebView session signals (WP3): true aaya to device timestamps refresh.
+  // Best-effort — fail ho to heartbeat phir bhi ok hai.
+  if (sessions) {
+    try {
+      const sessUpdate: Record<string, unknown> = {};
+      if (sessions.ig) sessUpdate.ig_session_ok_at = now;
+      if (sessions.whop) sessUpdate.whop_session_ok_at = now;
+      if (Object.keys(sessUpdate).length > 0) {
+        await sb.from("devices").update(sessUpdate).eq("id", ident.deviceId);
+      }
+    } catch {
+      /* best-effort */
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     job_id: job.id,
     status: update.status ?? job.status,
     heartbeat_count: update.heartbeat_count,
     current_step: step,
+    // WP4 piggyback: run ke dauraan phone ko pata chale naya release aaya
+    // (download bg me hoga; install prompt sirf idle pe).
+    app_update: await getLatestRelease(sb),
   });
 }
