@@ -685,9 +685,49 @@ def frame_is_blank(png_path: str, stddev_floor: float = 4.0) -> bool:
     return ImageStat.Stat(im).stddev[0] < stddev_floor
 
 
+def _build_overlay_profile(campaign: dict, tmp: str) -> str | None:
+    """Brief ke required_overlay / required_logo se clip_factory profile banao.
+    Returns profile JSON path, ya None agar koi overlay requirement nahi.
+    Overlay safe zone: top 10%+ neeche (user locked rule)."""
+    try:
+        notes = json.loads(campaign.get("notes") or "{}")
+    except Exception:
+        notes = {}
+    fb = notes.get("full_brief") or {}
+    overlay_text = (fb.get("required_overlay") or "").strip()
+    # Kuch briefs me overlay requirements do/dont me hote hain
+    if not overlay_text:
+        return None
+    # Bahut lamba overlay text video pe kharab lagega — pehle 80 chars
+    if len(overlay_text) > 80:
+        overlay_text = overlay_text[:77] + "..."
+    profile = {
+        "text_overlays": [{
+            "text": overlay_text,
+            "font_size": 56,
+            "color": "white",
+            "position": "top-center",
+            "start_sec": 0,
+            "end_sec": None,
+        }],
+        "effects": {"punch_zoom": True, "ken_burns": True, "emphasis_pulse": True},
+    }
+    # Logo URL ho to profile me dalo (clip_factory download karke lagayega)
+    logo_url = (fb.get("required_logo") or "").strip()
+    if logo_url.startswith("http"):
+        profile["logo"] = {"url": logo_url, "position": "top-right",
+                           "scale": 0.15, "opacity": 0.9}
+    path = os.path.join(tmp, "overlay_profile.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(profile, f)
+    return path
+
+
 def render_clip(src: str, start: int, end: int, tmp: str,
                 campaign: dict) -> str:
-    """clip_factory v2 chalao. Returns rendered 1080x1920 mp4 path."""
+    """clip_factory v2 chalao. Returns rendered 1080x1920 mp4 path.
+    2026-09-20: brief ka required_overlay (in-video text/logo) ab video pe
+    burn hota hai — pehle ye ignore ho raha tha."""
     dur = end - start
     out = os.path.join(tmp, "clip.mp4")
     # yt-dlp section me 10s ka head margin hai; direct me 2s
@@ -695,6 +735,12 @@ def render_clip(src: str, start: int, end: int, tmp: str,
     cmd = [VENV_PY, config.FACTORY, "--src", src,
            "--start", str(head), "--end", str(head + dur),
            "--out", out]
+    # Brief se overlay: required_overlay text ko video pe burn karo
+    # (clip_factory ka --profile > text_overlays use hota hai)
+    profile_path = _build_overlay_profile(campaign, tmp)
+    if profile_path:
+        cmd += ["--profile", profile_path]
+        log("overlay profile lagaya (brief required_overlay)")
     log(f"clip_factory v2 render ({dur}s, face-tracked) …")
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     if proc.returncode != 0:
@@ -735,10 +781,23 @@ def build_caption(campaign: dict, hook_text: str) -> str:
     if isinstance(tags, str):
         tags = [t.strip() for t in tags.replace(",", " ").split() if t.strip()]
     tag_str = " ".join(t if str(t).startswith("#") else f"#{t}" for t in tags)
+    # 2026-09-20: brief ke required_tags (@mentions) bhi caption me — pehle
+    # ye missing the (sirf hashtags judte the, @tags nahi)
+    try:
+        _notes = json.loads(campaign.get("notes") or "{}")
+        _fb = _notes.get("full_brief") or {}
+        _req_tags = _fb.get("required_tags") or []
+    except Exception:
+        _req_tags = []
+    mention_str = " ".join(
+        t if str(t).startswith("@") else f"@{t}"
+        for t in _req_tags if str(t).strip())
     caption = ((template.replace("{hook}", hook_text.strip())
                 if "{hook}" in template
                 else (hook_text.strip() + "\n" + template).strip())
                + "\n" + tag_str).strip()
+    if mention_str and mention_str.lower() not in caption.lower():
+        caption = (caption + " " + mention_str).strip()
     # mandatory tags zaroor hon
     required = [str(t).lstrip("#").lower() for t in tags]
     missing = [t for t in required if t not in caption.lower()]
