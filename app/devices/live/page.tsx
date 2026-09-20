@@ -291,6 +291,74 @@ const PRESENCE_LABEL: Record<string, string> = {
   offline: "offline",
 };
 
+/** Phone ki live screen — capture timestamp ke saath (stale label). */
+function LivePreview({ deviceId }: { deviceId: string }) {
+  const [at, setAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const r = await fetch(`/api/devices/${deviceId}/live-preview?meta=1`);
+        if (r.ok && alive) {
+          const j = await r.json();
+          setAt(j.at ?? null);
+        }
+      } catch {
+        /* preview na ho to chup — img onError handle karega */
+      }
+    };
+    load();
+    const t = setInterval(load, 10000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [deviceId]);
+
+  const ageS =
+    at !== null
+      ? Math.max(0, Math.floor((Date.now() - new Date(at).getTime()) / 1000))
+      : null;
+  // Phone automation ke dauraan har 15s me preview bhejta hai —
+  // 90s se purana matlab ye purani tasveer hai, live nahi.
+  const stale = ageS !== null && ageS > 90;
+
+  return (
+    <div className="mt-3">
+      <div className="text-xs font-medium text-slate-700 mb-1 flex items-center gap-2 flex-wrap">
+        <span>📱 Phone ki live screen:</span>
+        {ageS !== null && (
+          <span
+            className={`text-[11px] px-2 py-0.5 rounded-full border ${
+              stale
+                ? "bg-amber-50 text-amber-700 border-amber-300"
+                : "bg-emerald-50 text-emerald-700 border-emerald-200"
+            }`}
+          >
+            {stale
+              ? `⚠ purana screenshot (${ageS < 60 ? ageS + "s" : Math.floor(ageS / 60) + "m"} pehle ka)`
+              : `${ageS}s pehle ka`}
+          </span>
+        )}
+      </div>
+      <img
+        key={`preview-${deviceId}-${Math.floor(Date.now() / 10000)}`}
+        src={`/api/devices/${deviceId}/live-preview`}
+        alt="Phone live preview"
+        className="w-full rounded-lg border border-slate-200 bg-slate-100"
+        style={{ maxHeight: "400px", objectFit: "contain" }}
+        onError={(e) => {
+          (e.target as HTMLImageElement).style.display = "none";
+        }}
+      />
+      <div className="text-[11px] text-slate-500 mt-1">
+        Har 10 sec me refresh hota hai — yahan dikhega app kahan kya kar raha hai
+      </div>
+    </div>
+  );
+}
+
 export default function LivePage() {
   const { data, loading, error, reload } = useApi<LiveResp>("/api/devices/live");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
@@ -412,25 +480,9 @@ export default function LivePage() {
                         </div>
                       )}
                     </div>
-                    {/* LIVE PREVIEW (2026-09-20): phone abhi kya kar raha hai — har 10 sec refresh */}
-                    <div className="mt-3">
-                      <div className="text-xs font-medium text-slate-700 mb-1">
-                        📱 Phone ki live screen:
-                      </div>
-                      <img
-                        key={`preview-${j.device_id}-${Math.floor(Date.now() / 10000)}`}
-                        src={`/api/devices/${j.device_id}/live-preview`}
-                        alt="Phone live preview"
-                        className="w-full rounded-lg border border-slate-200 bg-slate-100"
-                        style={{ maxHeight: "400px", objectFit: "contain" }}
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = "none";
-                        }}
-                      />
-                      <div className="text-[11px] text-slate-500 mt-1">
-                        Har 10 sec me refresh hota hai — yahan dikhega app kahan kya kar raha hai
-                      </div>
-                    </div>
+                    {/* LIVE PREVIEW (2026-09-20): phone abhi kya kar raha hai — har 10 sec refresh,
+                        capture timestamp + stale label ke saath */}
+                    <LivePreview deviceId={j.device_id} />
                   </div>
                   );
                 })}
