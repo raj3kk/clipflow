@@ -2,11 +2,16 @@ import { NextResponse } from "next/server";
 import { getDeviceIdentity } from "@/lib/device_auth";
 
 /**
- * USA egress proxy (p35, 2026-09-20).
+ * USA egress proxy (p35, 2026-09-20; p41 redirect cookie-jar fix).
  *
  * Phone ke WebView ke Whop/ContentRewards requests ko US IP se forward
  * karta hai taaki region-locked campaigns ("not available in your region")
  * join ho saken. Vercel iad1 (Ashburn, Virginia, USA) se egress hota hai.
+ *
+ * p41: phone ab MAIN-FRAME document loads bhi isi se proxy karta hai
+ * (JobEngine.shouldInterceptRequest) — region lock page-load pe lagta hai.
+ * Instagram/Supabase/Google egress se bahar hain (IG account India ka hai;
+ * US datacenter IP se security challenge ka risk).
  *
  * POST /api/net/egress  (x-device-id + x-device-key)
  *   { url, method?, headers?, body_base64? }
@@ -79,15 +84,76 @@ export async function POST(req: Request) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 25000);
   try {
-    const resp = await fetch(u.toString(), {
-      method,
-      headers,
-      // TS2769 fix: DOM fetch ka BodyInit Node Buffer accept nahi karta
-      // (Buffer<ArrayBufferLike> vs Uint8Array<ArrayBuffer)) — plain Uint8Array banao.
-      body: body ? new Uint8Array(body) : undefined,
-      signal: ctrl.signal,
-      redirect: "follow",
-    });
+    // p41: redirects MANUALLY follow karo — undici ka redirect:"follow"
+    // beech ke hops ke set-cookie nigal jata hai, jisse Whop session
+    // redirect chain me toot jata tha. Har hop ke cookies jama karke
+    // agle hop pe bhejo (cookie jar), max 5 hops.
+    let current = u.toString();
+    let methodNow = method;
+    // TS2769 fix: Uint8Array<ArrayBuffer> (exact ArrayBuffer) chahiye —
+    // Buffer ka pooled ArrayBuffer DOM BodyInit se match nahi karta.
+    let bodyNow: Uint8Array<ArrayBuffer> | undefined = body
+      ? new Uint8Array(body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer)
+      : undefined;
+    const jar = new Map<string, string>(); // name -> value
+    // phone ke bheje Cookie header ko bhi jar me daalo taaki redirect hops
+    // pe stale+fresh values duplicate na hon (jar = single source of truth)
+    for (const [k, v] of Object.entries(headers)) {
+      if (k.toLowerCase() === "cookie") {
+        for (const part of String(v).split(";")) {
+          const m = /^\s*([^=;]+)=([^;]*)/.exec(part);
+          if (m) jar.set(m[1].trim(), m[2]);
+        }
+        delete headers[k];
+      }
+    }
+    let resp: Response | null = null;
+    for (let hop = 0; hop < 6; hop++) {
+      const h2: Record<string, string> = { ...headers };
+      if (jar.size > 0) {
+        const parts: string[] = [];
+        jar.forEach((v, k) => parts.push(`${k}=${v}`));
+        h2["Cookie"] = parts.join("; ");
+      }
+      const r = await fetch(current, {
+        method: methodNow,
+        headers: h2,
+        body: bodyNow,
+        signal: ctrl.signal,
+        redirect: "manual",
+      });
+      const sc: string[] =
+        typeof (r.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie === "function"
+          ? (r.headers as unknown as { getSetCookie: () => string[] }).getSetCookie()
+          : [];
+      for (const c of sc) {
+        const m = /^([^=;]+)=([^;]*)/.exec(c.trim());
+        if (m) jar.set(m[1].trim(), m[2]);
+      }
+      if ([301, 302, 303, 307, 308].includes(r.status)) {
+        const loc = r.headers.get("location");
+        await r.arrayBuffer().catch(() => {});
+        if (!loc) {
+          resp = r;
+          break;
+        }
+        const next = new URL(loc, current);
+        if (!hostAllowed(next.hostname)) {
+          return NextResponse.json({ ok: false, error: "redirect host not allowed" }, { status: 403 });
+        }
+        current = next.toString();
+        if (r.status === 303 || ((r.status === 301 || r.status === 302) && methodNow === "POST")) {
+          methodNow = "GET";
+          bodyNow = undefined;
+        }
+        continue;
+      }
+      resp = r;
+      break;
+    }
+    if (!resp) {
+      return NextResponse.json({ ok: false, error: "too many redirects" }, { status: 502 });
+    }
     const buf = Buffer.from(await resp.arrayBuffer());
     if (buf.length > MAX_BODY_BYTES) {
       return NextResponse.json({ ok: false, error: "response too large" }, { status: 502 });
@@ -103,7 +169,7 @@ export async function POST(req: Request) {
       }
       outHeaders[k] = v;
     });
-    // set-cookie ke multiple values (undici getSetCookie)
+    // set-cookie ke multiple values (undici getSetCookie) — final hop ke
     const setCookies: string[] =
       typeof (resp.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie === "function"
         ? (resp.headers as unknown as { getSetCookie: () => string[] }).getSetCookie()
