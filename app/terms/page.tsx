@@ -60,7 +60,7 @@ export default function TermsPage() {
             <p>
               Agar automation ke kaaran aapke account pe koi action hota hai (warning, limit,
               block ya ban), to uski <strong>zimmedari ClipFlow ki nahi hogi</strong>. Hum aapko
-              safe settings (jaise din me max 4 runs) dene ki koshish karte hain, lekin final risk
+              safe settings dene ki koshish karte hain, lekin final risk
               aapka hai.
             </p>
           </Section>
