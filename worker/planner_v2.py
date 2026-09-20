@@ -918,6 +918,12 @@ def enqueue_join(uid: str, campaign: dict) -> dict:
         f"/api/devices/{DEVICE_ID}/join-campaign",
         {"campaign_slug": cid, "campaign_url": url,
          "whop_url": whop_url})
+    if res.get("needs_app_update"):
+        log(f"JOIN BLOCKED: app update pending (p33+) — {res.get('error')}")
+        activity(uid, "join_blocked_app_update",
+                 str(res.get("error"))[:160])
+        return {"ok": False, "needs_app_update": True,
+                "error": res.get("error")}
     if res.get("ok") and not res.get("deduped"):
         log(f"JOIN ENQUEUED: job {res.get('job_id')} "
             f"— phone Whop pe '{campaign.get('name')}' join karega"
@@ -1078,6 +1084,15 @@ def attempt_campaign(uid: str, campaign: dict, score: float,
 
     set_stage("phone_ko_bhej_rahe")
     res = enqueue(video_url, caption, whop_submit_url, campaign_slug=cid)
+    if res.get("needs_app_update"):
+        # 2026-09-20: p33+ chahiye (wait_js). Purane app pe job fail hogi,
+        # isliye enqueue hi mat karo — user app update karega.
+        log(f"APP UPDATE PENDING: {res.get('error')} — p33 install hone tak "
+            f"koi job enqueue nahi hogi")
+        activity(uid, "enqueue_blocked_app_update",
+                 str(res.get("error"))[:160])
+        set_stage("app_update_pending")
+        return "skipped:need_p33"
     if res.get("ok"):
         log(f"ENQUEUED job {res.get('job_id')} "
             f"(deduped={res.get('deduped')}) — phone poll pe uthayega")
