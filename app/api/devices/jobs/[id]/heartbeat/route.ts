@@ -26,6 +26,10 @@ import { getLatestRelease } from "@/lib/app_release";
  *
  * POST /api/devices/jobs/:id/heartbeat  { step?: string, sessions?: { ig?: boolean, whop?: boolean } }  →  { ok: true }
  *
+ * p42: step ab 280 chars tak (pehle 64) — brain ki poori reasoning
+ * (FAILED_NO_ACTION detail, tried candidates) Live page pe dikhegi.
+ * current_step column text hai, isliye safe hai.
+ *
  * sessions (2026-09-20 WP3 — WebView session persistence): phone batata hai
  * "maine abhi authenticated IG/Whop page dekha". true aane pe devices ki
  * ig_session_ok_at / whop_session_ok_at refresh hoti hai. Sirf boolean
@@ -51,7 +55,7 @@ export async function POST(
   try {
     const body = await req.json();
     if (body && typeof body.step === "string") {
-      step = body.step.slice(0, 64) || null;
+      step = body.step.slice(0, 280) || null;
     }
     if (body && body.sessions && typeof body.sessions === "object") {
       const s = body.sessions as Record<string, unknown>;
