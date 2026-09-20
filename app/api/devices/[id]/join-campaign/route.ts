@@ -135,13 +135,14 @@ export async function POST(
     buildJoinCampaignPayload(
       campaignSlug,
       campaignUrl,
-      // notes me whop_url ho to wo, warna campaign_url se guess
-      (() => {
-        try {
-          const notes = JSON.parse((campaign.notes as string) || "{}");
-          return notes.whop_url || "";
-        } catch { return ""; }
-      })()
+      // 2026-09-20: planner body me whop_url bheje to wo, warna notes se
+      (typeof b.whop_url === "string" && b.whop_url.trim()) ||
+        (() => {
+          try {
+            const notes = JSON.parse((campaign.notes as string) || "{}");
+            return notes.whop_url || "";
+          } catch { return ""; }
+        })()
     ),
     {
       idempotency_key: `join:${device.id}:${campaignSlug}`,
