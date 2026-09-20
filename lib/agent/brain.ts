@@ -728,6 +728,86 @@ async function act(
   };
 }
 
+/* ---------------- DRY-RUN gates (read-only: mastery → veto → cap) ----------------
+ * dry_run me act() ke side effects (enqueue/issue/memory) skip hote hain, lekin
+ * gates evaluate hone chahiye — warna decision misleading hota. Ye sirf padhta
+ * hai, kuch likhta nahi.
+ */
+async function gatesDryRun(
+  sb: any,
+  opts: BrainOptions,
+  _p: Perception,
+  decision: Decision
+): Promise<{ cap: BrainRunResult["cap"]; errors: string[] }> {
+  const errors: string[] = [];
+  const plan = goalPlan((opts.goal ?? "clip_post").trim() || "clip_post");
+  const userId = opts.userId;
+
+  if (decision.chosen_action !== "enqueue_phone_job" || !plan) {
+    return { cap: null, errors };
+  }
+
+  // GATE 1: mastery (read-only)
+  try {
+    const mastery = await getSkillMastery(sb, userId, decision.skill);
+    if (!mastery.autonomous) {
+      decision.chosen_action = "needs_review";
+      decision.rationale += ` [dry-run mastery gate: ${mastery.note}]`;
+      return { cap: null, errors };
+    }
+  } catch (e) {
+    errors.push(`dry-run mastery read fail: ${String((e as Error)?.message ?? e).slice(0, 120)}`);
+    decision.chosen_action = "needs_review";
+    decision.rationale += " [dry-run: mastery read fail → fail-closed]";
+    return { cap: null, errors };
+  }
+
+  // GATE 2: compliance veto (pure evaluate — koi side effect nahi)
+  const campaignInput = opts.campaign
+    ? {
+        id: typeof opts.campaign.id === "string" ? opts.campaign.id : undefined,
+        name: (opts.campaign.name as string | null) ?? null,
+        requirements: (opts.campaign.requirements as string | null) ?? null,
+        caption_template: (opts.campaign.caption_template as string | null) ?? null,
+        hashtags: (opts.campaign.hashtags as string | null) ?? null,
+        brief_url: (opts.campaign.brief_url as string | null) ?? null,
+        campaign_url: (opts.campaign.campaign_url as string | null) ?? null,
+        submitted: opts.campaign.submitted === true,
+        notes:
+          opts.campaign.notes && typeof opts.campaign.notes === "object"
+            ? (opts.campaign.notes as Record<string, unknown>)
+            : null,
+      }
+    : undefined;
+  const vetoRes = SKILLS["compliance-guard"].evaluate({
+    campaign: campaignInput,
+    job_kind: plan.jobKind,
+  });
+  if (vetoRes.veto) {
+    decision.chosen_action = "needs_review";
+    decision.rationale += ` [dry-run COMPLIANCE VETO: ${vetoRes.reasons.join(" | ").slice(0, 300)} — live run me HIGH issue + needs_review]`;
+    return { cap: null, errors };
+  }
+
+  // GATE 3: cap (read-only)
+  let cap: BrainRunResult["cap"] = null;
+  if (isCountedAutomationType(plan.jobType)) {
+    try {
+      const c = await checkCap(sb, userId);
+      cap = { used: c.used, limit: c.limit, remaining: c.remaining, resets_at: c.resets_at };
+      if (!c.ok) {
+        decision.chosen_action = "wait";
+        decision.rationale += ` [dry-run cap gate: ${c.error.slice(0, 160)}]`;
+      }
+    } catch (e) {
+      errors.push(`dry-run cap read fail: ${String((e as Error)?.message ?? e).slice(0, 120)}`);
+      decision.chosen_action = "needs_review";
+      decision.rationale += " [dry-run: cap read fail → fail-closed]";
+    }
+  }
+  return { cap, errors };
+}
+
 /* ---------------- runBrain: poora loop ---------------- */
 
 export async function runBrain(sb: any, opts: BrainOptions): Promise<BrainRunResult> {
@@ -739,15 +819,19 @@ export async function runBrain(sb: any, opts: BrainOptions): Promise<BrainRunRes
   // UNDERSTAND + REASON
   const decision = reason(p, opts);
 
-  // dry_run → sirf decision, koi side effect nahi (no enqueue, no issue, no memory)
+  // dry_run → sirf decision, koi side effect nahi (no enqueue, no issue, no memory).
+  // Gates (mastery/veto/cap) READ-ONLY evaluate hote hain taaki dry-run decision
+  // honest ho — bina gates ke "enqueue_phone_job" misleading hota.
   if (opts.dryRun) {
+    const g = await gatesDryRun(sb, opts, p, decision);
+    decision.rationale += ` [dry_run: gates evaluated, koi side effect nahi]`;
     return {
       ok: true,
       decision,
-      cap: null,
+      cap: g.cap,
       verified: false,
       attempts: 0,
-      errors: [],
+      errors: g.errors,
     };
   }
 
