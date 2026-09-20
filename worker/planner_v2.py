@@ -266,12 +266,20 @@ def _is_eligible(campaign: dict) -> bool:
     return n.get("eligible") is not False
 
 
-def select_campaign_via_server(uid: str) -> dict | None:
+def select_campaign_via_server(uid: str) -> tuple[dict | None, str]:
     """Vercel server-side selection (2026-09-20).
 
     VM se Supabase tak ka network flaky hai — selection Vercel pe hota hai
     (reliable network), VM ko sirf ~3KB ka normalized campaign milta hai.
-    Fail ho to None (caller local pick_random_campaign fallback use karega).
+
+    Returns (campaign_or_None, reason): ok response pe (campaign, "ok");
+    server ne refuse kiya to (None, server reason e.g. 'no_clip_ready');
+    3 try ke baad exception to (None, 'server_unreachable').
+
+    FAIL-CLOSED (2026-09-20): caller local pick_random_campaign fallback
+    use NAHI karega — server ka classification (clip_ready | join_only |
+    needs_phone | ugc_unsupported) bypass hota tha wo local pick se.
+    Server se no/refusal mila to run skip hota hai.
     """
     import urllib.request
     url = config.CLIPFLOW_URL.rstrip("/") + "/api/worker/select-campaign"
@@ -296,60 +304,28 @@ def select_campaign_via_server(uid: str) -> dict | None:
                     "classification": c.get("classification", "clip_ready"),
                     "classification_reasons": c.get("classification_reasons", []),
                 })
-                return c
-            log(f"server select: {data.get('reason')} — local fallback")
-            return None
+                return c, "ok"
+            log(f"server select: {data.get('reason')} — local fallback HATA DIYA, fail-closed skip")
+            return None, str(data.get("reason") or "unknown")
         except Exception as e:  # noqa: BLE001
             log(f"server select try {i + 1}/3: {type(e).__name__}")
             time.sleep(2 * (i + 1))
-    log("server select fail — local fallback")
-    return None
+    log("server select fail — local fallback HATA DIYA, fail-closed skip")
+    return None, "server_unreachable"
 
 
 def pick_random_campaign(uid: str, exclude_ids=None) -> dict | None:
-    """25 me se RANDOM ek campaign select karo (2026-09-20: user requirement).
-    Pehle submit ho chuke campaigns exclude hote hain.
-    CORE FIX (2026-09-20): sirf IDs ki list fetch karo (~1KB, proxy-safe),
-    shuffle karke har candidate ka FULL row lazy fetch karo aur
-    notes.eligible=false wale skip karo. 15KB wali bulk query HATA DI —
-    wo proxy pe 10/10 fail ho rahi thi. 3 consecutive full-fetch fail =
-    infra down → TransientError (exit 3)."""
-    import random
-    ids = get_campaign_ids()
-    if exclude_ids:
-        ids = [cid for cid in ids if cid not in exclude_ids]
-    if not ids:
-        return None
-    random.shuffle(ids)
-    skipped_inelig = 0
-    consec_fail = 0
-    for cid in ids:
-        try:
-            full = get_campaign_full(cid)
-        except Exception as e:  # noqa: BLE001
-            consec_fail += 1
-            log(f"pick: {cid[:8]} full fetch fail ({type(e).__name__}), next "
-                f"(lagatar fail {consec_fail})")
-            if consec_fail >= 3:
-                raise config.TransientError(
-                    f"campaign detail lagatar 3 fail — infra down")
-            continue
-        consec_fail = 0
-        if not full:
-            log(f"pick: {cid[:8]} full row nahi mila, next")
-            continue
-        if not _is_eligible(full):
-            skipped_inelig += 1
-            continue
-        if skipped_inelig:
-            log(f"eligibility filter: {skipped_inelig} campaign(s) ineligible "
-                f"(notes.eligible=false)")
-        log(f"RANDOM PICK: '{full.get('name')}' ({full['id']}) "
-            f"${full.get('payout_per_1k_usd')}/1k")
-        return full
-    if skipped_inelig:
-        log(f"eligibility filter: {skipped_inelig} ineligible, koi eligible nahi bacha")
-    return None
+    """LOCAL campaign fallback — PERMANENTLY DISABLED (2026-09-20, fail-closed).
+
+    Kyun: ye fallback /api/worker/select-campaign ka classification bypass
+    karta tha (clip_ready | join_only | needs_phone | ugc_unsupported) —
+    local random pick non-compliant campaign pe clip bana deta tha. Server
+    selection hi source of truth hai; server refuse/unreachable ho to planner
+    run skip karta hai (select site pe fail-closed). Function signature sirf
+    import-compatibility ke liye rakha hai — call mat karo.
+    """
+    raise RuntimeError(
+        "local campaign fallback disabled — fail closed, server selection only")
 
 
 def is_joined(campaign: dict) -> bool:
@@ -1495,16 +1471,23 @@ def plan_once(dry_run: bool) -> str:
     if submitted_ids:
         log(f"permanent exclusion: {len(submitted_ids)} campaigns pehle submit ho chuke")
 
-    # 2026-09-20: SERVER-SIDE SELECTION pehle (Vercel endpoint).
+    # 2026-09-20: SERVER-SIDE SELECTION hi source of truth (Vercel endpoint).
     # VM ka Supabase network flaky hai — Vercel reliable hai. Server se
-    # ~3KB me normalized campaign aata hai. Fail → local fallback.
+    # ~3KB me normalized campaign aata hai. Server classification
+    # (clip_ready | join_only | needs_phone | ugc_unsupported) karta hai.
     # (Server khud submitted/eligible filter karta hai.)
-    picked = select_campaign_via_server(uid)
+    # 2026-09-20 FAIL-CLOSED: local pick_random_campaign fallback PERMANENTLY
+    # HATA DIYA — wo server ka classification bypass karta tha. Server se
+    # campaign nahi mila (refuse ya unreachable) to run SKIP, blind pick nahi.
+    picked, server_reason = select_campaign_via_server(uid)
     if not picked:
-        picked = pick_random_campaign(uid, exclude_ids=submitted_ids)
-    if not picked:
-        log("SKIP: koi campaign available nahi (sab submit ho chuke ya pool khali)")
-        return "skipped:no_campaign"
+        log(f"SKIP: server-side selection ne campaign nahi diya "
+            f"(reason={server_reason}) — local fallback permanently removed, "
+            f"fail-closed skip")
+        activity(uid, "select_refused",
+                 f"server_reason={server_reason}; local fallback disabled")
+        set_stage("ho_gaya")
+        return f"skipped:server_select:{server_reason}"
 
     # JOIN CHECK (2026-09-20): agar joined nahi to pehle join karo
     if not is_joined(picked):
