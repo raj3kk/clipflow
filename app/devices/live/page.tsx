@@ -412,6 +412,25 @@ export default function LivePage() {
                         </div>
                       )}
                     </div>
+                    {/* LIVE PREVIEW (2026-09-20): phone abhi kya kar raha hai — har 10 sec refresh */}
+                    <div className="mt-3">
+                      <div className="text-xs font-medium text-slate-700 mb-1">
+                        📱 Phone ki live screen:
+                      </div>
+                      <img
+                        key={`preview-${j.device_id}-${Math.floor(Date.now() / 10000)}`}
+                        src={`/api/devices/${j.device_id}/live-preview`}
+                        alt="Phone live preview"
+                        className="w-full rounded-lg border border-slate-200 bg-slate-100"
+                        style={{ maxHeight: "400px", objectFit: "contain" }}
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = "none";
+                        }}
+                      />
+                      <div className="text-[11px] text-slate-500 mt-1">
+                        Har 10 sec me refresh hota hai — yahan dikhega app kahan kya kar raha hai
+                      </div>
+                    </div>
                   </div>
                   );
                 })}
