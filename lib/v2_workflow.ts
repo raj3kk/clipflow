@@ -194,13 +194,24 @@ export function buildClipSteps(pkg: ClipPackage): Step[] {
  */
 export function buildJoinCampaignPayload(
   campaignSlug: string,
-  campaignUrl: string
+  campaignUrl: string,
+  whopUrl?: string
 ): Record<string, unknown> {
   return {
     workflow: "v2-join-campaign",
-    workflow_version: 1,
+    workflow_version: 2,  // v2: pehle whop join, phir campaign join (2026-09-20 verified)
     campaign_slug: campaignSlug,
     campaign_url: campaignUrl,
+    // Brand ka Whop (community) — pehle iska member banna padta hai
+    // (FundingPips: free tha, koi payment nahi). Phir campaign join hota hai.
+    whop_url: whopUrl || "",
+    join_steps: [
+      "1. whop_url kholo (brand ka Whop page)",
+      "2. Agar 'Join' button dikhe to dabao (free hona chahiye; agar payment mange to STOP + needs_user)",
+      "3. campaign_url kholo (contentrewards.com preview)",
+      "4. 'Join Campaign' dabao → Whop app me deep link hoga",
+      "5. Verify: Whop app me campaign kholo — 'Accepting clips' + 'Submit clip' button = joined",
+    ],
   };
 }
 
