@@ -96,7 +96,7 @@ const steps: Step[] = [
     t: "Schedule lagao ya Run Now dabao",
     who: "dono",
     d: [
-      "Website pe campaign chuno aur time set karo (schedule) — ya turant shuru karne ke liye “Run Now” dabao. Din me max 4 runs.",
+      "Website pe campaign chuno aur time set karo (schedule) — ya turant shuru karne ke liye “Run Now” dabao. Testing me abhi koi daily limit nahi hai.",
       "Uske baad sab AUTOMATIC: phone khud video download karega → 9:16 clip banayega → Instagram pe post karega → Whop pe submit karega.",
       "Live page pe dekh sakte ho kaam kahan tak pahuncha (download → edit → post → submit).",
     ],
