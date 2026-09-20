@@ -290,8 +290,9 @@ export default function CampaignsPage() {
         </button>
       </div>
       <p className="text-slate-600 text-sm mb-6">
-        {campaigns.length} campaigns · sorted by payout · autopilot sirf{" "}
-        <b>joined</b> campaigns pe chalta hai
+        {campaigns.length} campaigns · sorted by payout · naye campaigns phone
+        khud Whop pe dhoondh ke <b>join</b> karta hai, phir autopilot chalata
+        hai — manually add karne ki zaroorat nahi
       </p>
 
       {data && !data.configured && <SetupBanner />}
@@ -346,7 +347,10 @@ export default function CampaignsPage() {
 
       <div className="grid gap-4">
         {campaigns.length === 0 && (
-          <p className="text-slate-500 text-sm">No campaigns yet — scout-add the first one above.</p>
+          <p className="text-slate-500 text-sm">
+            No campaigns yet — phone Whop pe dhoondh raha hai, thodi der me
+            yahan dikhenge. (Manual add sirf advanced option hai.)
+          </p>
         )}
         {campaigns.map((c) => (
           <CampaignCard key={c.id} c={c} onSaved={(m) => { setMsg(m); reload(); }} />
