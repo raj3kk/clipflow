@@ -126,6 +126,34 @@ export async function POST(
     );
   }
 
+  // p42: DEVICE-WIDE single-flight — ek device/user pe ek hi live
+  // join_campaign job. Pehle sirf same campaign dedup hota tha, isliye
+  // COD live hote hue Charlie Berens ka job queue ho gaya tha.
+  const { data: anyLiveJoin } = await sb
+    .from("device_jobs")
+    .select("id, status, payload")
+    .eq("user_id", device.user_id)
+    .eq("device_id", params.id)
+    .eq("type", "join_campaign")
+    .in("status", ["queued", "claimed", "dispatched", "running"])
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  const anySlug =
+    (anyLiveJoin as { payload?: { campaign_slug?: string } } | null)?.payload
+      ?.campaign_slug || "";
+  if (anyLiveJoin && anySlug !== campaignSlug) {
+    return NextResponse.json(
+      {
+        error: "Ek join job pehle se live hai — pehle uska result aane do.",
+        conflict: true,
+        live_job_id: (anyLiveJoin as { id: string }).id,
+        live_campaign_slug: anySlug,
+      },
+      { status: 409 }
+    );
+  }
+
   // LIVE join dedup (type-aware): isi campaign ka join_campaign job already
   // queued/claimed/dispatched/running ho to naya mat banao.
   const { data: liveJoin } = await sb
