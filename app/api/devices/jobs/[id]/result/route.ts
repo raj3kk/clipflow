@@ -341,6 +341,31 @@ export async function POST(
         typeof f.payout_text === "string" ? (f.payout_text as string) : "";
       const pm = pt.match(/\$(\d+(?:\.\d+)?)/);
       if (pm) payout = parseFloat(pm[1]);
+      // budget: "$52K remaining" jaisa text se number (2026-09-20: p28 se aata hai)
+      let budget: number | null = null;
+      const bt =
+        typeof f.budget_text === "string" ? (f.budget_text as string) : "";
+      const bm = bt.match(/\$([\d,]+(?:\.\d+)?)\s*(K|M)?/i);
+      if (bm) {
+        budget = parseFloat(bm[1].replace(/,/g, ""));
+        if (bm[2]?.toUpperCase() === "K") budget *= 1000;
+        if (bm[2]?.toUpperCase() === "M") budget *= 1000000;
+      }
+      // duration: "15-30 seconds" jaisa text se min/max seconds
+      let minSec: number | null = null;
+      let maxSec: number | null = null;
+      const dt =
+        typeof f.duration_text === "string" ? (f.duration_text as string) : "";
+      const dm = dt.match(/(\d+)\s*-\s*(\d+)\s*(sec|seconds)/i);
+      if (dm) {
+        minSec = parseInt(dm[1], 10);
+        maxSec = parseInt(dm[2], 10);
+      }
+      // requirements text (card context se)
+      const reqText =
+        typeof f.requirements_text === "string"
+          ? (f.requirements_text as string).slice(0, 1000)
+          : "";
       const { data: existing } = await sb
         .from("campaigns")
         .select("id")
@@ -351,7 +376,15 @@ export async function POST(
       if (existing) {
         await sb
           .from("campaigns")
-          .update({ campaign_url: url, active: true })
+          .update({
+            campaign_url: url,
+            active: true,
+            payout_per_1k_usd: payout,
+            budget_remaining_usd: budget,
+            min_seconds: minSec,
+            max_seconds: maxSec,
+            requirements: reqText || undefined,
+          })
           .eq("user_id", ident.userId)
           .eq("id", cid);
       } else {
@@ -362,6 +395,10 @@ export async function POST(
           sponsor,
           campaign_url: url,
           payout_per_1k_usd: payout,
+          budget_remaining_usd: budget,
+          min_seconds: minSec,
+          max_seconds: maxSec,
+          requirements: reqText || null,
           active: true,
           joined: false,
           join_status: "not_joined",
