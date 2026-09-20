@@ -137,23 +137,66 @@ export type CapCheck =
 /**
  * Central cap gate — createAutomationJob (Schedule + Run Now dono) isi se
  * hota hai. Fail ho chuki (3 attempts) automation isme nahi gini jaati.
+ *
+ * 2026-09-20 (user demand): 1 SUCCESSFUL automation ke baad agla automation
+ * sirf 1 ghante baad — cooldown. 4/24h cap alag se lagta hai.
  */
+const SUCCESS_COOLDOWN_MS = 60 * 60 * 1000; // 1 ghanta
+
 export async function checkCap(sb: any, userId: string): Promise<CapCheck> {
   const usage = await countCapUsage(sb, userId);
-  if (usage.used < usage.limit) {
-    return { ok: true, ...usage };
+  if (usage.used >= usage.limit) {
+    return {
+      ok: false,
+      code: 429,
+      ...usage,
+      error:
+        `Automation cap full ho gaya hai — pichhle 24 ghante me ${usage.used} ` +
+        `automation runs ho chuki hain (limit ${usage.limit}).` +
+        formatResetIST(usage.resets_at) +
+        ` Fail ho chuki automation (3 attempts me complete nahi hui) isme ` +
+        `nahi gini jaati — sirf genuine runs ka hisaab hai.`,
+    };
   }
-  return {
-    ok: false,
-    code: 429,
-    ...usage,
-    error:
-      `Automation cap full ho gaya hai — pichhle 24 ghante me ${usage.used} ` +
-      `automation runs ho chuki hain (limit ${usage.limit}).` +
-      formatResetIST(usage.resets_at) +
-      ` Fail ho chuki automation (3 attempts me complete nahi hui) isme ` +
-      `nahi gini jaati — sirf genuine runs ka hisaab hai.`,
-  };
+  // Success cooldown: pichhla successful automation 1 ghante ke andar hua
+  // to naya automation block — IG action-block se bachne ke liye gap.
+  try {
+    const { data: lastOk } = await sb
+      .from("device_jobs")
+      .select("last_heartbeat, created_at")
+      .eq("user_id", userId)
+      .eq("status", "succeeded")
+      .order("last_heartbeat", { ascending: false, nullsFirst: false })
+      .limit(1);
+    const doneAt = lastOk?.[0]
+      ? new Date(lastOk[0].last_heartbeat ?? lastOk[0].created_at).getTime()
+      : 0;
+    const waitMs = SUCCESS_COOLDOWN_MS - (Date.now() - doneAt);
+    if (doneAt > 0 && waitMs > 0) {
+      const mins = Math.ceil(waitMs / 60000);
+      const resumeAt = new Date(doneAt + SUCCESS_COOLDOWN_MS);
+      return {
+        ok: false,
+        code: 429,
+        ...usage,
+        error:
+          `Pichla automation safal hua tha — agla automation ${mins} min baad ` +
+          `shuru ho sakta hai (1 ghante ka gap). ` +
+          resumeAt.toLocaleString("en-IN", {
+            timeZone: "Asia/Calcutta",
+            day: "numeric",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: true,
+          }) +
+          ` (IST) ke baad dobara try karo.`,
+      };
+    }
+  } catch {
+    /* cooldown check fail ho to cap ko block mat karo */
+  }
+  return { ok: true, ...usage };
 }
 
 /**
