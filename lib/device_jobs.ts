@@ -23,7 +23,7 @@ export const CAP_WINDOW_HOURS = 24;
  * 4/24h cap AUR 1-hour success cooldown DONO disabled. Production-ready hone
  * pe isko false karke deploy karo — limitations wapas lag jayengi.
  */
-export const TESTING_NO_LIMITS = true;
+export const TESTING_NO_LIMITS = false;
 
 /**
  * Housekeeping job types — ye "automation run" NAHI hain, isliye inpe na
@@ -174,7 +174,9 @@ const SUCCESS_COOLDOWN_MS = 60 * 60 * 1000; // 1 ghanta
 
 export async function checkCap(sb: any, userId: string): Promise<CapCheck> {
   // TESTING MODE (user-set 2026-09-20): testing me koi cap/cooldown nahi.
-  // Production-ready pe TESTING_NO_LIMITS=false karke wapas lagao.
+  // 2026-09-20 agent-system deploy: hard constraint "max 4 posting automation
+  // runs / 24h" ke hisab se cap wapas ON — TESTING_NO_LIMITS=false.
+  // Testing ke liye ise wapas true karna ho to deliberate change karo.
   if (TESTING_NO_LIMITS) {
     return {
       ok: true,
