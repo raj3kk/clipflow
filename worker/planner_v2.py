@@ -212,16 +212,34 @@ def get_campaigns(uid: str) -> list[dict]:
         limit=30, extra={"order": "created_at.desc"})
 
 
+def _is_eligible(campaign: dict) -> bool:
+    """2026-09-20: notes.eligible=false wale campaigns planner pool se bahar.
+    (jaise Nilo — official Drive asset URL missing + IG Roblox-fit unverified).
+    Explicit flag hai, reversible; activity me reason logged."""
+    try:
+        n = json.loads(campaign.get("notes") or "{}")
+    except Exception:
+        return True
+    if n.get("eligible") is False:
+        return False
+    return True
+
+
 def pick_random_campaign(uid: str, exclude_ids=None) -> dict | None:
     """25 me se RANDOM ek campaign select karo (2026-09-20: user requirement).
-    Pehle submit ho chuke campaigns exclude hote hain."""
+    Pehle submit ho chuke campaigns exclude hote hain; notes.eligible=false
+    wale bhi pool se bahar."""
     import random
     campaigns = get_campaigns(uid)
     if exclude_ids:
         campaigns = [c for c in campaigns if c["id"] not in exclude_ids]
-    if not campaigns:
+    eligible = [c for c in campaigns if _is_eligible(c)]
+    skipped = len(campaigns) - len(eligible)
+    if skipped:
+        log(f"eligibility filter: {skipped} campaign(s) ineligible (notes.eligible=false)")
+    if not eligible:
         return None
-    picked = random.choice(campaigns)
+    picked = random.choice(eligible)
     log(f"RANDOM PICK: '{picked.get('name')}' ({picked['id']}) "
         f"${picked.get('payout_per_1k_usd')}/1k")
     return picked
