@@ -58,6 +58,16 @@ export async function POST(
 
   const now = new Date().toISOString();
 
+  // Capture timestamp alag metadata file me — GET ?meta=1 se Live page
+  // dikha sake screenshot kitna purana hai (stale label ke liye).
+  const metaPath = `${ident.userId}/${params.id}/live.json`;
+  await sb.storage
+    .from("device-shots")
+    .upload(metaPath, Buffer.from(JSON.stringify({ at: now })), {
+      contentType: "application/json",
+      upsert: true,
+    });
+
   await touchDevice(params.id);
   return NextResponse.json({ ok: true, at: now });
 }
@@ -90,6 +100,23 @@ export async function GET(
   }
 
   const path = `${userId}/${params.id}/live.png`;
+
+  // ?meta=1 → sirf capture timestamp (Live page stale label ke liye)
+  const url = new URL(req.url);
+  if (url.searchParams.get("meta") === "1") {
+    const { data: meta } = await sb.storage
+      .from("device-shots")
+      .download(`${userId}/${params.id}/live.json`);
+    if (!meta) {
+      return NextResponse.json({ error: "No preview yet." }, { status: 404 });
+    }
+    const metaJson = JSON.parse(await meta.text());
+    return NextResponse.json(
+      { at: metaJson.at ?? null },
+      { headers: { "Cache-Control": "no-cache, no-store" } }
+    );
+  }
+
   const { data, error } = await sb.storage
     .from("device-shots")
     .download(path);
