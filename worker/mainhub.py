@@ -183,3 +183,4 @@ if __name__ == "__main__":
     force = "--force" in sys.argv
     result = refresh_pool(force=force)
     print(json.dumps(result, indent=2))
+# Main Hub deploy trigger
