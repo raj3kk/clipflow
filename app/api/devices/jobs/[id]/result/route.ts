@@ -283,15 +283,23 @@ export async function POST(
       found = [];
     }
     let added = 0;
+    // Nav/generic naam — ye campaigns nahi hain (server-side safety net;
+    // app bhi filter karta hai lekin purane app versions se aa sakta hai).
+    const NAV_NAME =
+      /^(content rewards|bounties|joined|discover|home|dashboard|wallet|payouts?|settings|profile|notifications?|messages?|search|explore|earn|rewards)$/i;
     for (const f of found) {
       const url =
         typeof f.campaign_url === "string"
           ? (f.campaign_url as string).trim()
           : "";
-      if (!/^https:\/\/whop\.com\/.+/.test(url)) continue;
+      // whop.com, apps.whop.com, contentrewards.com — sab allowed
+      // (Content Rewards app iframe se aane wale URLs)
+      if (!/^https:\/\/(www\.)?(whop\.com|apps\.whop\.com|contentrewards\.com)\/.+/.test(url))
+        continue;
       const name =
         (typeof f.name === "string" && (f.name as string).trim().slice(0, 120)) ||
         "Whop campaign";
+      if (NAV_NAME.test(name)) continue;
       // id: URL slug se (stable), warna name slug
       let cid = "";
       try {
