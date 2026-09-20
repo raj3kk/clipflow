@@ -232,8 +232,66 @@ export default function AdminPage() {
       <Msg msg={msg} />
 
       <OpsAgentCard />
+      <MainHubCard />
       <AppUpdateCard />
       <WhopOAuthCard />
+    </div>
+  );
+}
+
+// ---------- Main Hub — Daily Campaign Pool + Agents ----------
+interface HubStatus {
+  poolCount: number;
+  poolAgeHours: number;
+  needsRefresh: boolean;
+  agents: { name: string; role: string; status: string; lastRun: string | null }[];
+}
+
+function MainHubCard() {
+  const [hub, setHub] = useState<HubStatus | null>(null);
+  const [hubMsg, setHubMsg] = useState("");
+  const [hubBusy, setHubBusy] = useState(false);
+
+  async function loadHub() {
+    try {
+      const r = await fetch("/api/admin/mainhub");
+      if (r.ok) setHub(await r.json());
+    } catch {}
+  }
+  useEffect(() => { loadHub(); }, []);
+
+  async function refreshHub() {
+    setHubBusy(true); setHubMsg("");
+    try {
+      const r = await fetch("/api/admin/mainhub", { method: "POST" });
+      const j = await r.json();
+      setHubMsg(r.ok ? `Pool refresh: ${j.count} campaigns` : (j.error || "Refresh fail"));
+      await loadHub();
+    } catch { setHubMsg("Refresh fail"); }
+    setHubBusy(false);
+  }
+
+  return (
+    <div className={cardCls + " mt-4"}>
+      <h2 className="font-semibold mb-1">Main Hub — Daily Campaign Pool</h2>
+      <p className="text-sm opacity-70 mb-3">
+        Roz 25 campaigns (bina sign-in, server-side). 24h baad auto-delete + naye 25.
+        Automation har run pe inme se RANDOM ek chunta hai.
+      </p>
+      {hub ? (
+        <div className="text-sm space-y-1 mb-3">
+          <div>Pool: <b>{hub.poolCount}</b> campaigns ({hub.poolAgeHours.toFixed(1)}h purana)</div>
+          <div>Status: {hub.needsRefresh ? "⚠️ Refresh chahiye" : "✅ Fresh"}</div>
+          <div className="mt-2 font-medium">Agents:</div>
+          {hub.agents.map((a, i) => (
+            <div key={i} className="ml-2">🤖 <b>{a.name}</b> — {a.role} ({a.status})</div>
+          ))}
+        </div>
+      ) : <div className="text-sm opacity-60 mb-3">Loading...</div>}
+      <button onClick={refreshHub} disabled={hubBusy} className={btnPrimary}>
+        {hubBusy ? "Refreshing..." : "Abhi 25 Campaigns Nikalo"}
+      </button>
+      <Msg msg={hubMsg} />
     </div>
   );
 }
