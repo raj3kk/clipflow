@@ -893,17 +893,35 @@ def live_join_job(uid: str, cid: str) -> dict | None:
 
 def enqueue_join(uid: str, campaign: dict) -> dict:
     """POST /api/devices/<id>/join-campaign. Returns parsed JSON
-    ({"ok":..., "deduped":..., "capped":..., "conflict":...})."""
+    ({"ok":..., "deduped":..., "capped":..., "conflict":...}).
+    2026-09-20: whop_url (brand community) bhi bhejo — phone pehle
+    community join karega, phir campaign (FundingPips flow)."""
     cid = campaign["id"]
     url = (campaign.get("campaign_url") or "").strip()
     if not url:
         raise RuntimeError("campaign_url nahi hai — join page ka pata nahi")
+    # notes.full_brief ya notes.whop_url se brand community URL nikalo
+    whop_url = ""
+    try:
+        _n = json.loads(campaign.get("notes") or "{}")
+        whop_url = (_n.get("whop_url") or "").strip()
+        if not whop_url:
+            _fb = _n.get("full_brief") or {}
+            for src in (_fb.get("official_sources") or []):
+                if isinstance(src, str) and "whop.com/" in src \
+                        and "/discover/" not in src:
+                    whop_url = src.strip()
+                    break
+    except Exception:
+        pass
     res = _post_worker(
         f"/api/devices/{DEVICE_ID}/join-campaign",
-        {"campaign_slug": cid, "campaign_url": url})
+        {"campaign_slug": cid, "campaign_url": url,
+         "whop_url": whop_url})
     if res.get("ok") and not res.get("deduped"):
         log(f"JOIN ENQUEUED: job {res.get('job_id')} "
-            f"— phone Whop pe '{campaign.get('name')}' join karega")
+            f"— phone Whop pe '{campaign.get('name')}' join karega"
+            + (f" (community: {whop_url[:50]}…)" if whop_url else ""))
         activity(uid, "join_requested",
                         f"{cid} job={res.get('job_id')}")
     return res
@@ -932,6 +950,23 @@ def attempt_campaign(uid: str, campaign: dict, score: float,
     if not brief_url:
         log("SKIP: campaign me brief_url nahi")
         return "skipped:no_brief"
+
+    # 2026-09-20 BIO LINK SAFETY: kuch campaigns (jaise FundingPips) IG bio me
+    # specific link mangte hain. Bio link IG app me manually set hota hai —
+    # bina uske submission reject ho sakta hai. Isliye bio-link-required
+    # campaign ko skip karo aur activity me warn karo (fail-safe).
+    try:
+        _bn = json.loads(campaign.get("notes") or "{}")
+        _bfb = _bn.get("full_brief") or {}
+        _bio = str(_bfb.get("required_bio_link") or "").strip()
+        if _bio and _bio != "brief_unavailable" and _bio.startswith("http"):
+            log(f"SKIP: bio link required ({_bio[:50]}…) — IG bio me manually "
+                f"set karna padega, bina uske reject hoga")
+            activity(uid, "planner_bio_link_skip",
+                     f"'{campaign.get('name')}' skip — bio link chahiye: {_bio[:80]}")
+            return "skipped:bio_link_required"
+    except Exception:
+        pass
 
     # moment candidates: curated pehle (agar uski video pehle nahi bheji),
     # phir brain ke top-3 DISTINCT moments. Pehla candidate jo compliance +
