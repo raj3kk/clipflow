@@ -12,7 +12,7 @@ import {
  *
  * Server ke paas Whop user-login NAHI hai — naye Content Rewards campaigns
  * bhi PHONE dhoondta hai (uska WebView Whop me logged-in hai). Phone
- * discover_url kholta hai (default https://whop.com/hub/), campaign cards
+ * discover_url kholta hai (default https://whop.com/discover/content-rewards/), campaign cards
  * nikalta hai (name, campaign_url, payout) aur result bhejta hai; result
  * route unhe campaigns table me upsert karta hai. Uske baad verify protocol
  * (propose-campaigns) unpe chalta hai.
@@ -98,6 +98,11 @@ export async function POST(
     });
   }
 
+  // IDEMPOTENCY (2026-09-20 fix): static key `discover:${device.id}` purane
+  // succeeded job ko hamesha dedupe-live manta tha → fresh scan kabhi nahi
+  // hota tha. Daily-versioned key: same-day duplicate dedupe hota hai,
+  // agle din fresh scan allowed hai.
+  const dayKey = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
   const res = await createAutomationJob(
     sb,
     device.user_id,
@@ -105,7 +110,7 @@ export async function POST(
     "discover_campaigns",
     buildDiscoverCampaignsPayload(discoverUrl),
     {
-      idempotency_key: `discover:${device.id}`,
+      idempotency_key: `discover:${device.id}:${dayKey}`,
       campaignDedupTypes: ["discover_campaigns"],
     }
   );
