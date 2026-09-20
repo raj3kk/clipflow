@@ -58,11 +58,30 @@ export async function POST(
   // device ka owner (user_id) nikaalo
   const { data: device } = await sb
     .from("devices")
-    .select("id, user_id, status")
+    .select("id, user_id, status, app_version")
     .eq("id", params.id)
     .single();
   if (!device) {
     return NextResponse.json({ error: "Unknown device." }, { status: 404 });
+  }
+
+  // 2026-09-20: community join step p33+ me hai. Purane app pe incomplete
+  // join hoga — isliye gate.
+  {
+    const ver = String((device as { app_version?: string }).app_version || "");
+    const m = ver.match(/p(\d+)/);
+    const pNum = m ? parseInt(m[1], 10) : 0;
+    if (pNum < 33) {
+      return NextResponse.json(
+        {
+          error: `App update chahiye (p33+): device pe ${ver || "unknown"} hai.`,
+          needs_app_update: true,
+          current_version: ver,
+          min_version: "0.1.0-p33",
+        },
+        { status: 409 }
+      );
+    }
   }
 
   // campaign row — naam + campaign_url ke liye
