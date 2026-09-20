@@ -18,6 +18,14 @@ export const CAP_COUNT = 4;
 export const CAP_WINDOW_HOURS = 24;
 
 /**
+ * TESTING MODE (user-set 2026-09-20): "abhi check hoga, jb production ready
+ * sara kch ok hoga tb lagayenge sara kch limitation" — testing ke dauraan
+ * 4/24h cap AUR 1-hour success cooldown DONO disabled. Production-ready hone
+ * pe isko false karke deploy karo — limitations wapas lag jayengi.
+ */
+export const TESTING_NO_LIMITS = true;
+
+/**
  * Housekeeping job types — ye "automation run" NAHI hain, isliye inpe na
  * 4/24h cap lagta hai na 1-hour success cooldown. Sirf asli posting
  * automation (type "automation", workflow v2-clip-post) cap/cooldown me
@@ -165,6 +173,18 @@ export type CapCheck =
 const SUCCESS_COOLDOWN_MS = 60 * 60 * 1000; // 1 ghanta
 
 export async function checkCap(sb: any, userId: string): Promise<CapCheck> {
+  // TESTING MODE (user-set 2026-09-20): testing me koi cap/cooldown nahi.
+  // Production-ready pe TESTING_NO_LIMITS=false karke wapas lagao.
+  if (TESTING_NO_LIMITS) {
+    return {
+      ok: true,
+      used: 0,
+      limit: CAP_COUNT,
+      window_hours: CAP_WINDOW_HOURS,
+      remaining: CAP_COUNT,
+      resets_at: null,
+    };
+  }
   const usage = await countCapUsage(sb, userId);
   if (usage.used >= usage.limit) {
     return {
