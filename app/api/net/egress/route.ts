@@ -82,7 +82,9 @@ export async function POST(req: Request) {
     const resp = await fetch(u.toString(), {
       method,
       headers,
-      body,
+      // TS2769 fix: DOM fetch ka BodyInit Node Buffer accept nahi karta
+      // (Buffer<ArrayBufferLike> vs Uint8Array<ArrayBuffer)) — plain Uint8Array banao.
+      body: body ? new Uint8Array(body) : undefined,
       signal: ctrl.signal,
       redirect: "follow",
     });
