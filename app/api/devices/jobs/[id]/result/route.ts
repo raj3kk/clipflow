@@ -312,6 +312,15 @@ export async function POST(
           .slice(0, 80);
       }
       if (!cid) continue;
+      // sponsor: campaigns.sponsor NOT NULL hai (2026-09-20 fix — iske bina
+      // discover insert 23502 pe fail ho raha tha aur jhootha "jude" log
+      // banta tha). Naam se brand nikalo: pehla shabd.
+      const sponsorBase = name
+        .replace(/\s*\(.*?\)\s*/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const sponsor =
+        (sponsorBase.split(" ")[0] || name || "Whop").slice(0, 60) || "Whop";
       // payout: "$1.50 per 1,000 views" jaisa text se number
       let payout: number | null = null;
       const pt =
@@ -332,10 +341,11 @@ export async function POST(
           .eq("user_id", ident.userId)
           .eq("id", cid);
       } else {
-        await sb.from("campaigns").insert({
+        const { error: insErr } = await sb.from("campaigns").insert({
           id: cid,
           user_id: ident.userId,
           name,
+          sponsor,
           campaign_url: url,
           payout_per_1k_usd: payout,
           active: true,
@@ -343,7 +353,16 @@ export async function POST(
           join_status: "not_joined",
           notes: JSON.stringify({ discovered_at: now, via: "phone" }),
         });
-        added++;
+        if (insErr) {
+          await logActivity(
+            sb,
+            ident.userId,
+            "discover_insert_failed",
+            `⚠️ Campaign '${name}' table me nahi jud paya: ${insErr.message.slice(0, 200)}`
+          );
+        } else {
+          added++;
+        }
       }
     }
     await logActivity(
