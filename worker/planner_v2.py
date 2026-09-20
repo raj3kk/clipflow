@@ -1318,12 +1318,14 @@ def plan_once(dry_run: bool) -> str:
     from datetime import date as _date
     # 2026-09-20: RANDOM selection (user requirement) — ranking nahi.
     # 25 me se random ek, jo pehle submit nahi hua.
+    # PERMANENT RULE (user-locked): same account kabhi same campaign me
+    # dobara submit nahi karega — ye TESTING_NO_LIMITS se independent hai.
     submitted_ids = set()
-    if not TESTING_NO_LIMITS:
-        # Pehle submit ho chuke campaign IDs nikalo (permanent exclusion)
-        sub_rows = sb_retry("GET", "/rest/v1/submissions", query={
-            "select": "campaign_id", "user_id": f"eq.{uid}", "limit": "100"})
-        submitted_ids = {r["campaign_id"] for r in sub_rows if r.get("campaign_id")}
+    sub_rows = sb_retry("GET", "/rest/v1/submissions", query={
+        "select": "campaign_id", "user_id": f"eq.{uid}", "limit": "100"})
+    submitted_ids = {r["campaign_id"] for r in sub_rows if r.get("campaign_id")}
+    if submitted_ids:
+        log(f"permanent exclusion: {len(submitted_ids)} campaigns pehle submit ho chuke")
 
     picked = pick_random_campaign(uid, exclude_ids=submitted_ids)
     if not picked:
