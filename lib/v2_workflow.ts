@@ -92,8 +92,20 @@ export function buildClipSteps(pkg: ClipPackage): Step[] {
       message:
         "Instagram action blocked lag raha hai ('Try again later') — 24-48h ruko",
     },
-    { phase: "ig-create-wait", action: "wait_text", text: "Create", timeout: 60000 },
-    { phase: "ig-create", action: "click", by: "text", value: "Create" },
+    // Create button mobile web me ICON hai ("Create" text nahi hota) — 2026-09-20
+    // fix: wait_text "Create" kabhi match nahi hota tha (screenshot proof).
+    // aria-label="New post" ya /create href se dhoondke click karo.
+    {
+      phase: "ig-create-wait",
+      action: "wait_js",
+      js: "!!(document.querySelector('[aria-label=\"New post\"]')||document.querySelector('a[href*=\"/create\"]')||[...document.querySelectorAll('a')].find(a=>a.getAttribute('href')==='/create/select/'))",
+      timeout: 60000,
+    },
+    {
+      phase: "ig-create",
+      action: "eval",
+      js: `(function(){var b=document.querySelector('[aria-label="New post"]')||document.querySelector('a[href*="/create"]')||[...document.querySelectorAll('a')].find(a=>a.getAttribute('href')==='/create/select/');if(!b)return 'create-btn-not-found';b.click();return 'create-clicked';})()`,
+    },
     // file chooser phone khud handle karta hai (reel.mp4)
     {
       phase: "ig-upload",
