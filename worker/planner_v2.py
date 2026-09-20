@@ -880,6 +880,60 @@ def attempt_campaign(uid: str, campaign: dict, score: float,
     raise RuntimeError(f"enqueue failed: {res}")
 
 
+# --------------------------------------------------------------------------
+# AGENT CAMPAIGN MONITORING (2026-09-20, user demand: "campaign dekhna agent
+# karega, admin ko nahi karna"). Har planner tick pe active campaigns ka
+# health check — dead campaign (budget khatam / band ho gaya) ko agent khud
+# deactivate karta hai. Admin sirf Activity log dekhta hai, haath nahi lagata.
+# --------------------------------------------------------------------------
+DEAD_SIGNALS = (
+    "submissions closed", "campaign ended", "campaign paused",
+    "no longer accepting", "budget exhausted", "payout paused",
+)
+
+
+def health_check_campaigns(uid: str, dry_run: bool = False) -> int:
+    """Active campaigns me dead signals dhoondho, auto-deactivate karo.
+    Returns: kitni deactivate hui."""
+    rows = sb_select_retry(
+        "campaigns",
+        {"user_id": uid, "active": True},
+        select="id,budget_remaining_usd,notes,name",
+    ) or []
+    dead = 0
+    for c in rows:
+        cid = c.get("id")
+        reason = ""
+        try:
+            budget = c.get("budget_remaining_usd")
+            if budget is not None and float(budget) <= 0:
+                reason = "budget khatam (%.2f)" % float(budget)
+        except (TypeError, ValueError):
+            pass
+        if not reason:
+            notes = c.get("notes") or {}
+            blob = json.dumps(notes).lower()
+            req = str(notes.get("verified_requirements") or "").lower()
+            for sig in DEAD_SIGNALS:
+                if sig in blob or sig in req:
+                    reason = "Whop pe band ka signal: '%s'" % sig
+                    break
+        if reason:
+            if dry_run:
+                log(f"DRY-RUN: campaign {cid} dead hoti ({reason})")
+            else:
+                sb_retry("PATCH", "/rest/v1/campaigns",
+                         query={"id": f"eq.{cid}"},
+                         body={"active": False})
+                activity(uid, "campaign_auto_deactivated",
+                         f"Agent ne '{c.get('name') or cid}' deactivate ki — {reason}.")
+            log(f"campaign {cid} auto-deactivated — {reason}")
+            dead += 1
+    if not dead:
+        log(f"campaign health: {len(rows)} active, sab zinda")
+    return dead
+
+
 def plan_once(dry_run: bool) -> str:
     """Ek planning pass. Returns outcome string: enqueued|dryrun|skipped:*."""
     uid, dname = get_device_user()
@@ -888,6 +942,14 @@ def plan_once(dry_run: bool) -> str:
     # config.api() wali calls (agar bhavishya me hon) user-scoped rahen —
     # bina iske /api/activity jaise endpoints "user_id required" 400 dete hain.
     config.set_worker_user(uid)
+
+    # 0. AGENT CAMPAIGN MONITORING (2026-09-20): admin ko campaign dekhne ki
+    # zaroorat nahi — agent har tick pe dead campaigns (budget khatam / band)
+    # khud deactivate karta hai. Nayi campaigns discover-first se aati hain.
+    try:
+        health_check_campaigns(uid, dry_run=dry_run)
+    except Exception as e:  # noqa: BLE001
+        log(f"campaign health check me dikkat (non-fatal): {e}")
 
     # 1. cap guard (dry-run me sirf check+log — enqueue hota hi nahi,
     #    isliye cap violate nahi ho sakta)
