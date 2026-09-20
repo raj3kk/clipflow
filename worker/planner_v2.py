@@ -7,14 +7,21 @@ ClipFlow v2 zero-touch planner — campaign se ready clip package tak, bina user
 Pipeline (VM pe chalta hai):
   1. CAP GUARD: pichhle 24h me v1 posts + v2 device_jobs >= 4 → SILENT SKIP.
      (join_campaign jobs bhi isi cap me gine jate hain.)
-  2. AUTO-JOIN (Round-7, 2026-09-19): Whop ka campaign-join public API nahi
-     deta, lekin phone ka WebView Whop me LOGGED-IN hai (user ne app me Whop
-     login kiya tha). Best-fit campaign agar joined nahi hai to clip pipeline
-     ki jagah pehle `join_campaign` job enqueue hoti hai
-     (POST /api/devices/<id>/join-campaign → outcome `join_requested:<slug>`).
-     Phone campaign page kholke Join dabata hai; result pe server
-     campaigns.joined / join_status update karta hai. Join safal hone ke baad
-     agle tick me normal clip pipeline chalta hai.
+  2. AUTO-JOIN (Round-7, 2026-09-19; verified 2026-09-20 via browser):
+     Whop ka campaign-join public API nahi deta, lekin phone ka WebView Whop
+     me LOGGED-IN hai (user ne app me Whop login kiya tha). Best-fit campaign
+     agar joined nahi hai to clip pipeline ki jagah pehle `join_campaign` job
+     enqueue hoti hai (POST /api/devices/<id>/join-campaign →
+     outcome `join_requested:<slug>`). Phone campaign page kholke Join dabata
+     hai; result pe server campaigns.joined / join_status update karta hai.
+     JOIN FLOW (2026-09-20 verified): contentrewards.com preview page ka
+     "Join Campaign" button Whop app me deep-link karta hai (koi terms dialog
+     nahi). Pehle us brand ka WHOP (community) join karna padta hai —
+     FundingPips ka whop FREE tha (koi payment nahi). Whop join ke baad
+     campaign Whop app me accessible: "Accepting clips" + "Submit clip"
+     button = joined. Public preview page ka Join button reliable indicator
+     NAHI hai (hamesha dikhta hai). Join safal hone ke baad agle tick me
+     normal clip pipeline chalta hai.
      - needs_user (Whop login expire / extra verification) → dobara join job
        NAHI banti (cap bachao); user Campaigns tab me 'needs_user' dekhega.
      - live join job already hai → dobara nahi banti (dedup).
@@ -74,6 +81,11 @@ DEVICE_ID = os.environ.get(
 VENV_PY = os.path.expanduser("~/workspace/whop-edit-env/bin/python")
 CAP_MAX = 4
 CAP_WINDOW_H = 24
+# TESTING MODE (user-set 2026-09-20): "abhi check hoga, jb production ready
+# sara kch ok hoga tb lagayenge sara kch limitation" — testing me 4/24h cap,
+# 7-day campaign cooldown, aur 48h fail-blacklist SAB disabled. Production
+# pe isko False karo — limitations wapas lag jayengi.
+TESTING_NO_LIMITS = True
 WHOP_DEFAULT_SUBMIT = "https://whop.com/content-rewards/"
 YT_PATTERNS = ("youtube.com/watch", "youtu.be/",
                "youtube.com/shorts/", "youtube.com/live/")
@@ -99,9 +111,10 @@ def activity(uid: str | None, event: str, detail: str = "") -> None:
 # ke liye hai.
 # --------------------------------------------------------------------------
 def sb_retry(method: str, path: str, query: dict | None = None,
-             body: dict | None = None, tries: int = 6):
+             body: dict | None = None, tries: int = 6,
+             headers: dict | None = None):
     return config.sb_request(method, path, body=body, query=query,
-                             timeout=60, tries=tries)
+                             timeout=60, tries=tries, headers=headers)
 
 
 def sb_select_retry(table: str, filters: dict | None = None,
@@ -184,13 +197,34 @@ def get_device_user() -> tuple[str, str]:
 # --------------------------------------------------------------------------
 # 2. campaigns + ranking
 # --------------------------------------------------------------------------
+# Main hub UUID (shared pool marker — worker/mainhub.py se sync)
+MAIN_HUB_USER_ID = "00000000-0000-0000-0000-000000000000"
+
+
 def get_campaigns(uid: str) -> list[dict]:
+    """Main hub (shared pool) se campaigns.
+    User-specific purane campaigns ab use nahi hote."""
     return sb_select_retry(
-        "campaigns", {"user_id": uid, "active": True},
+        "campaigns", {"user_id": MAIN_HUB_USER_ID, "active": True},
         select=("id,name,sponsor,payout_per_1k_usd,budget_remaining_usd,"
                 "min_seconds,max_seconds,requirements,caption_template,"
                 "hashtags,brief_url,campaign_url,joined,join_status,notes"),
-        limit=30, extra={"order": "payout_per_1k_usd.desc"})
+        limit=30, extra={"order": "created_at.desc"})
+
+
+def pick_random_campaign(uid: str, exclude_ids=None) -> dict | None:
+    """25 me se RANDOM ek campaign select karo (2026-09-20: user requirement).
+    Pehle submit ho chuke campaigns exclude hote hain."""
+    import random
+    campaigns = get_campaigns(uid)
+    if exclude_ids:
+        campaigns = [c for c in campaigns if c["id"] not in exclude_ids]
+    if not campaigns:
+        return None
+    picked = random.choice(campaigns)
+    log(f"RANDOM PICK: '{picked.get('name')}' ({picked['id']}) "
+        f"${picked.get('payout_per_1k_usd')}/1k")
+    return picked
 
 
 def is_joined(campaign: dict) -> bool:
@@ -246,26 +280,24 @@ def verified_requirements(campaign: dict) -> str:
 
 
 # --------------------------------------------------------------------------
-# 2c. discover-first (Round-7b): koi active campaign nahi to phone Whop pe
-# naye Content Rewards campaigns dhoondta hai (discover_campaigns job).
+# 2c. discover-first (2026-09-20 rebuild): koi active campaign nahi to
+# SERVER contentrewards.com/discover se campaigns nikalta hai (PUBLIC,
+# sign-in nahi chahiye). Phone discovery HATA DIYA (user order 2026-09-20:
+# "App se campaign find krne wala jo h remove kro... server p workflow bna dena").
 # --------------------------------------------------------------------------
 def enqueue_discover(uid: str) -> dict:
-    """POST /api/devices/<id>/discover-campaigns — phone Whop (logged-in)
-    pe campaign cards nikalta hai; result route campaigns table me upsert
-    karta hai. CAP-EXEMPT (discovery, post nahi)."""
-    res = _post_worker(f"/api/devices/{DEVICE_ID}/discover-campaigns", {})
-    if res.get("needs_app_update"):
-        log(f"APP UPDATE PENDING: {res.get('error')}")
-        activity(uid, "discover_blocked_app_update",
-                        str(res.get("error"))[:160])
-        return {"ok": False, "needs_app_update": True,
-                "error": res.get("error")}
-    if res.get("ok") and not res.get("deduped"):
-        log(f"DISCOVER ENQUEUED: job {res.get('job_id')} — phone Whop pe "
-            f"naye campaigns dhoondhega")
-        activity(uid, "discover_requested",
-                        f"job={res.get('job_id')}")
-    return res
+    """Server-side discovery — discover_server.py use karta hai.
+    CAP-EXEMPT (discovery, post nahi)."""
+    try:
+        from discover_server import server_discover
+        res = server_discover(uid)
+        if res.get("ok"):
+            log(f"SERVER DISCOVER OK: {res.get('saved')}/{res.get('total')} "
+                f"campaigns saved")
+        return res
+    except Exception as e:
+        log(f"SERVER DISCOVER FAIL: {e}")
+        return {"ok": False, "error": str(e)}
 
 
 def enqueue_verify(uid: str,
@@ -302,32 +334,92 @@ def enqueue_verify(uid: str,
     return res
 
 
-def rank_campaigns(campaigns: list[dict]) -> list[tuple[float, dict]]:
+def rank_campaigns(campaigns: list[dict], uid: str = "",
+                    date_seed: str = "") -> list[tuple[float, dict]]:
+    """Campaign selection criteria (2026-09-20 rebuild — user: 'badhiya
+    campaign ka criteria fir se banao').
+
+    Score = payout_per_1k × budget_factor × fit
+
+    Fit factors:
+    - Official footage (brief_url ya verified video links): REQUIRED.
+      Nahi hai to 0.1x (clip ban hi nahi sakta).
+    - Instagram platform support: REQUIRED. Nahi hai to skip.
+    - Payout per 1k: core — zyada = behtar.
+    - Budget remaining: zyada = campaign zyada chalega.
+    - Requirements detailed (>100 chars): 1.3x — clear brief = kam rejection.
+    - Hashtags/caption template: 1.15x — posting instructions clear.
+    - Joined: 1.25x — join step skip, tez. (Not-joined bhi OK, auto-join hai.)
+    - Fresh (<24h discovered): 1.2x — kam saturated.
+
+    Per-user randomization: top candidates ko uid+date seed se shuffle karo
+    taaki alag-alag users alag-alag campaigns pe kaam karein (duplicate
+    submission se bachao).
+    """
     scored: list[tuple[float, dict]] = []
     for c in campaigns:
         payout = float(c.get("payout_per_1k_usd") or 0)
         if payout <= 0:
+            continue
+        # Instagram support required
+        platforms = str(c.get("platforms") or "").lower()
+        if platforms and "instagram" not in platforms and "ig" not in platforms:
+            log(f"campaign {c.get('id')}: Instagram support nahi — skip")
             continue
         budget = c.get("budget_remaining_usd")
         try:
             budget_f = float(budget) if budget and float(budget) > 0 else 1000.0
         except (TypeError, ValueError):
             budget_f = 1000.0
-        if not budget or not float(budget or 0) > 0:
-            log(f"campaign {c.get('id')}: budget unknown → neutral 1000")
         fit = 1.0
-        if c.get("joined"):
+        # Official footage — sabse zaroori
+        has_footage = bool(c.get("brief_url")) or bool(
+            verified_video_url(c))
+        if has_footage:
             fit *= 1.5
-        if not c.get("brief_url"):
-            fit *= 0.3
-        if c.get("hashtags"):
-            fit *= 1.2
+        else:
+            fit *= 0.1
+        # Requirements quality
         req = str(c.get("requirements") or "")
-        if len(req) > 50:
-            fit *= 1.1
+        vreq = verified_requirements(c)
+        req_len = max(len(req), len(vreq))
+        if req_len > 200:
+            fit *= 1.3
+        elif req_len > 50:
+            fit *= 1.15
+        # Posting instructions clear
+        if c.get("hashtags"):
+            fit *= 1.15
+        # Joined = tez (lekin not-joined bhi chalega, auto-join hai)
+        if c.get("joined"):
+            fit *= 1.25
+        # Fresh = kam saturated
+        try:
+            notes = c.get("notes") or ""
+            import json as _json
+            nd = _json.loads(notes) if isinstance(notes, str) and notes.startswith("{") else {}
+            disc = nd.get("discovered_at", "")
+            if disc:
+                from datetime import datetime, timezone
+                dt = datetime.fromisoformat(disc.replace("Z", "+00:00"))
+                age_h = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+                if age_h < 24:
+                    fit *= 1.2
+        except Exception:
+            pass
         score = payout * budget_f * fit
         scored.append((score, c))
     scored.sort(key=lambda t: t[0], reverse=True)
+    # Per-user shuffle: top-10 me se uid+date seed se order badlo taaki
+    # har user alag campaign uthaye
+    if uid and date_seed and len(scored) > 1:
+        import random as _random
+        rng = _random.Random(f"{uid}:{date_seed}")
+        top = scored[:10]
+        rest = scored[10:]
+        rng.shuffle(top)
+        scored = top + rest
+        log(f"rank: {len(scored)} campaigns, top-10 user-shuffled ({uid[:8]}…)")
     return scored
 
 
@@ -799,9 +891,26 @@ def attempt_campaign(uid: str, campaign: dict, score: float,
             candidates.append(cm)
     lo = float(campaign.get("min_seconds") or 15)
     hi = float(campaign.get("max_seconds") or 60)
-    log(f"brain.pick_moments ({lo:.0f}-{hi:.0f}s, top-3) …")
-    for bm in brain.pick_moments(brief_url, lo, hi,
-                                 extract_keywords(campaign), top_n=3):
+    log(f"brain.pick_moments ({lo:.0f}-{hi:.0f}s, top-10) …")
+    brain_moments = brain.pick_moments(brief_url, lo, hi,
+                                       extract_keywords(campaign), top_n=10)
+    # Per-user randomization (2026-09-20 — user: "har user ka alag alag
+    # random video official asset se, unique edit, duplicate reject na ho").
+    # Top-10 me se uid+date seed se weighted-shuffle: har user alag moment
+    # pehle try karega, lekin acche moments ko zyada chance milega.
+    if brain_moments and uid:
+        from datetime import date as _date
+        rng = random.Random(f"{uid}:{_date.today().isoformat()}:{cid}")
+        # Weighted shuffle: score ke hisaab se order, thoda randomness
+        weighted = []
+        for bm in brain_moments:
+            w = float(bm.get("score") or 0.1) * rng.uniform(0.5, 1.5)
+            weighted.append((w, bm))
+        weighted.sort(key=lambda t: t[0], reverse=True)
+        brain_moments = [bm for _, bm in weighted]
+        log(f"moments user-shuffled ({uid[:8]}…) — pehla: "
+            f"{brain_moments[0]['start_sec']}-{brain_moments[0]['end_sec']}s")
+    for bm in brain_moments:
         if not any(bm["start_sec"] == c.get("start_sec")
                    and bm["end_sec"] == c.get("end_sec") for c in candidates):
             candidates.append(bm)
@@ -835,6 +944,17 @@ def attempt_campaign(uid: str, campaign: dict, score: float,
         log(f"SKIP: koi candidate pass nahi hua ({last_skip})")
         return last_skip
     start, end = int(moment["start_sec"]), int(moment["end_sec"])
+    # Per-user trim jitter (2026-09-20): uid seed se ±2s shift taaki do
+    # users ka same moment bhi alag-alag trim ho — duplicate reject se
+    # bachao. Compliance range (min/max seconds) ke andar rehta hai.
+    if uid:
+        jrng = random.Random(f"trim:{uid}:{cid}:{start}:{end}")
+        shift = jrng.randint(-2, 2)
+        if shift:
+            dur = end - start
+            start = max(0, start + shift)
+            end = start + dur
+            log(f"trim jitter: {shift:+d}s (user-unique)")
     log(f"moment: {start}-{end}s hook='{moment.get('hook_text','')[:60]}'")
 
     # download → render → caption → upload
@@ -934,6 +1054,90 @@ def health_check_campaigns(uid: str, dry_run: bool = False) -> int:
     return dead
 
 
+def daily_discover_refresh(uid: str, dry_run: bool = False) -> str:
+    """Daily 15-campaign refresh (2026-09-20 — user: '24h me 15 campaign
+    find, 24h baad list refresh + purana media delete, har user ko alag
+    campaign, ek user ek campaign ek baar hi submit karega').
+
+    - Last discover se 24h+ ho gaye to purani discovered (not-joined,
+      kaam na hui) campaigns deactivate karo aur fresh discover enqueue karo.
+    - Joined ya already-worked campaigns ko haath nahi lagate.
+    Returns: 'refreshed' | 'not_due' | 'skipped:*'
+    """
+    # Last discover kab hua tha?
+    logs = sb_select_retry(
+        "activity_log",
+        {"user_id": uid, "event": "campaigns_discovered"},
+        select="ts", limit=1,
+    ) or []
+    # activity_log me user_id column hai ya nahi — fallback: sabse recent
+    if not logs:
+        logs = sb_retry("GET", "/rest/v1/activity_log",
+                        query={"event": "eq.campaigns_discovered",
+                               "select": "ts",
+                               "order": "ts.desc", "limit": "1"}) or []
+    last_ts = ""
+    if logs:
+        last_ts = str(logs[0].get("ts") or "")
+    due = True
+    if last_ts:
+        try:
+            from datetime import datetime, timezone
+            dt = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
+            age_h = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+            due = age_h >= 24
+            if not due:
+                log(f"daily refresh not due (last discover {age_h:.1f}h pehle)")
+                return "not_due"
+        except Exception:
+            pass
+    log("daily refresh DUE — purani discovered list saaf karke nayi layenge")
+    if dry_run:
+        return "dryrun"
+    # Purani discovered campaigns deactivate (joined/worked ko chhodo)
+    rows = sb_select_retry(
+        "campaigns",
+        {"user_id": uid, "active": True},
+        select="id,name,joined,notes",
+    ) or []
+    cleaned = 0
+    for c in rows:
+        if c.get("joined"):
+            continue
+        notes = c.get("notes") or {}
+        if isinstance(notes, str):
+            try:
+                notes = json.loads(notes)
+            except Exception:
+                notes = {}
+        via = str(notes.get("via") or "")
+        disc = str(notes.get("discovered_at") or "")
+        if via != "phone" or not disc:
+            continue
+        try:
+            from datetime import datetime, timezone
+            dt = datetime.fromisoformat(disc.replace("Z", "+00:00"))
+            age_h = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+        except Exception:
+            continue
+        if age_h >= 24:
+            sb_retry("PATCH", "/rest/v1/campaigns",
+                     query={"id": f"eq.{c['id']}"},
+                     body={"active": False})
+            cleaned += 1
+    if cleaned:
+        activity(uid, "campaigns_refreshed",
+                 f"🗑️ {cleaned} purani (24h+) discovered campaigns hatayi — "
+                 f"fresh list aa rahi hai.")
+        log(f"daily refresh: {cleaned} stale campaigns deactivated")
+    # Fresh discover enqueue
+    res = enqueue_discover(uid)
+    if res.get("ok") and not res.get("deduped"):
+        log(f"daily refresh: discover enqueued ({str(res.get('job_id'))[:8]}…)")
+        return "refreshed"
+    return f"skipped:{res.get('error') or 'deduped'}"
+
+
 def plan_once(dry_run: bool) -> str:
     """Ek planning pass. Returns outcome string: enqueued|dryrun|skipped:*."""
     uid, dname = get_device_user()
@@ -951,10 +1155,23 @@ def plan_once(dry_run: bool) -> str:
     except Exception as e:  # noqa: BLE001
         log(f"campaign health check me dikkat (non-fatal): {e}")
 
+    # 0b. DAILY DISCOVER REFRESH (2026-09-20): 24h me ek baar fresh
+    # 15-campaign list — purani discovered saaf + media delete, nayi discover.
+    # Har user ka alag list (user_id scoped), koi daily manual kaam nahi.
+    # Run time pe (Run Now/schedule) pehle se mili campaigns se pick hota hai.
+    try:
+        refresh_res = daily_discover_refresh(uid, dry_run=dry_run)
+        if refresh_res == "refreshed":
+            set_stage("ho_gaya")
+            return "discover_requested:daily_refresh"
+    except Exception as e:  # noqa: BLE001
+        log(f"daily refresh me dikkat (non-fatal): {e}")
+
     # 1. cap guard (dry-run me sirf check+log — enqueue hota hi nahi,
     #    isliye cap violate nahi ho sakta)
-    n_used = cap_count(uid)
-    if n_used >= CAP_MAX and not dry_run:
+    #    TESTING MODE (2026-09-20): cap disabled — production pe wapas lagao.
+    n_used = 0 if TESTING_NO_LIMITS else cap_count(uid)
+    if not TESTING_NO_LIMITS and n_used >= CAP_MAX and not dry_run:
         log(f"SKIP: cap full ({CAP_MAX}/{CAP_WINDOW_H}h) — silent")
         return "skipped:cap"
     if dry_run and n_used >= CAP_MAX:
@@ -971,11 +1188,11 @@ def plan_once(dry_run: bool) -> str:
     # eligible hain; warna phone se verification mangwao, blind clip nahi.
     campaigns = get_campaigns(uid)
     if not campaigns:
-        # DISCOVER-FIRST (Round-7b): koi active campaign nahi — phone Whop pe
-        # naye Content Rewards campaigns dhoondhega, phir verify hoga.
-        log("koi active campaign nahi — phone se Whop pe discovery")
+        # DISCOVER-FIRST (2026-09-20): koi active campaign nahi — SERVER
+        # contentrewards.com se naye campaigns nikalega (public, no login).
+        log("koi active campaign nahi — server se discovery")
         if dry_run:
-            log("DRY-RUN: discover-campaigns skip")
+            log("DRY-RUN: server-discover skip")
             return "dryrun"
         res = enqueue_discover(uid)
         if res.get("needs_app_update"):
@@ -989,103 +1206,54 @@ def plan_once(dry_run: bool) -> str:
             return "skipped:discover_pending"
         log(f"discover enqueue fail: {res.get('error') or res}")
         return "skipped:discover_error"
-    ranked = rank_campaigns(campaigns)
-    if not ranked:
-        log("SKIP: koi campaign positive payout pe nahi")
-        return "skipped:no_scored"
-    verified = [(s, c) for s, c in ranked if is_fresh_verified(c)]
-    if verified:
-        log(f"fresh-verified campaigns: {len(verified)} — inhi me se choose "
-            f"(server blind pick nahi karega)")
-        ranked = verified
-    else:
-        log("koi fresh-verified campaign nahi — phone se Whop verification")
-        if dry_run:
-            log("DRY-RUN: propose-campaigns skip")
-            return "dryrun"
-        res = enqueue_verify(uid, ranked)
-        if res.get("needs_app_update"):
-            set_stage("ho_gaya")
-            return "skipped:need_p23"
-        if res.get("ok") and not res.get("deduped"):
-            set_stage("ho_gaya")
-            return f"verify_requested:{str(res.get('job_id'))[:8]}"
-        if res.get("deduped"):
-            log("verify already in flight — agle tick me dekhenge")
-            return "skipped:verify_pending"
-        log(f"verify enqueue fail: {res.get('error') or res} — purana "
-            f"flow try karte hain")
-        # fallback: purana join-then-clip flow (neeche loop)
+    from datetime import date as _date
+    # 2026-09-20: RANDOM selection (user requirement) — ranking nahi.
+    # 25 me se random ek, jo pehle submit nahi hua.
+    submitted_ids = set()
+    if not TESTING_NO_LIMITS:
+        # Pehle submit ho chuke campaign IDs nikalo (permanent exclusion)
+        sub_rows = sb_retry("GET", "/rest/v1/submissions", query={
+            "select": "campaign_id", "user_id": f"eq.{uid}", "limit": "100"})
+        submitted_ids = {r["campaign_id"] for r in sub_rows if r.get("campaign_id")}
 
-    # har ranked campaign try karo jab tak ek safal na ho
-    last_skip = "skipped:no_scored"
-    for score, campaign in ranked:
-        if is_joined(campaign):
-            # Round-7 per-account campaign dedup (user rule): ye campaign
-            # is account se haal me post ho chuki (7d cooldown) ya 24h me
-            # 3+ baar fail hui (48h blacklist) → skip, agla campaign.
-            usable, why = campaign_usable(uid, campaign["id"])
-            if not usable:
-                log(f"SKIP: {why}")
-                last_skip = "skipped:" + why.split(":")[0]
-                continue
-            try:
-                outcome = attempt_campaign(uid, campaign, score, dry_run)
-            except Exception as e:  # noqa: BLE001
-                # CalledProcessError ka str() sirf command dikhata hai —
-                # asli wajah (stderr) download_section pehle hi log kar chuka hai.
-                # Yahan cause chain bhi dikhao taaki root cause turant mile.
-                cause = f" | cause: {e.__cause__}" if e.__cause__ else ""
-                log(f"campaign {campaign.get('id')} error: "
-                    f"{type(e).__name__}: {str(e)[:500]}{cause} — agla try")
-                last_skip = "skipped:error"
-                continue
-            if outcome in ("enqueued", "dryrun"):
-                return outcome
-            last_skip = outcome
-            continue
+    picked = pick_random_campaign(uid, exclude_ids=submitted_ids)
+    if not picked:
+        log("SKIP: koi campaign available nahi (sab submit ho chuke ya pool khali)")
+        return "skipped:no_campaign"
 
-        # --- non-joined → auto-join flow (Round-7) ---
-        cid = campaign["id"]
-        js = campaign.get("join_status") or ""
+    # JOIN CHECK (2026-09-20): agar joined nahi to pehle join karo
+    if not is_joined(picked):
+        js = picked.get("join_status") or ""
         if js == "needs_user":
-            # Pichhle join ko user ka action chahiye (Whop login expire /
-            # extra verification). Dobara job bhejna cap jalayega — user
-            # Campaigns tab me 'needs_user' dekhke action lega.
-            log(f"SKIP join: '{campaign.get('name')}' needs_user — "
-                f"user action pending, agla campaign")
-            last_skip = "skipped:join_needs_user"
-            continue
+            log(f"SKIP join: '{picked.get('name')}' needs_user — user action pending")
+            return "skipped:join_needs_user"
         if dry_run:
-            log(f"DRY-RUN: join_campaign job skip (campaign {cid})")
+            log(f"DRY-RUN: join_campaign job skip (campaign {picked['id']})")
             return "dryrun"
-        log(f"campaign '{campaign.get('name')}' ({cid}) joined nahi — "
-            f"auto-join try (score={score:.1f})")
-        live = live_join_job(uid, cid)
+        log(f"RANDOM PICK '{picked.get('name')}' joined nahi — auto-join")
+        live = live_join_job(uid, picked["id"])
         if live:
-            log(f"join already in flight: job {live['id'][:8]}… "
-                f"({live['status']}) — agla campaign")
-            last_skip = "skipped:join_pending"
-            continue
+            log(f"join already in flight: job {live['id'][:8]}…")
+            return "skipped:join_pending"
         try:
-            res = enqueue_join(uid, campaign)
-        except Exception as e:  # noqa: BLE001
-            log(f"join enqueue error ({cid}): {type(e).__name__}: "
-                f"{str(e)[:200]} — agla campaign")
-            last_skip = "skipped:join_error"
-            continue
-        if res.get("ok") and not res.get("deduped"):
-            return f"join_requested:{cid}"
-        if res.get("deduped"):
-            log("join deduped (live job already) — agla campaign")
-            last_skip = "skipped:join_pending"
-            continue
-        if res.get("capped"):
-            return "skipped:server_guard"
-        # 409 conflict (pehle hi submit ho chuka / device issue)
-        log(f"join conflict ({cid}) — agla campaign")
-        last_skip = "skipped:join_conflict"
-    return last_skip
+            res = enqueue_join(uid, picked)
+            if res.get("ok") and not res.get("deduped"):
+                set_stage("ho_gaya")
+                return f"join_requested:{picked['id']}"
+        except Exception as e:
+            log(f"join enqueue error: {type(e).__name__}: {str(e)[:200]}")
+            return "skipped:join_error"
+        return "skipped:join_failed"
+
+    # Joined hai → clip pipeline
+    log(f"RANDOM PICK '{picked.get('name')}' joined hai — clip pipeline")
+    try:
+        outcome = attempt_campaign(uid, picked, 1.0, dry_run)
+    except Exception as e:
+        cause = f" | cause: {e.__cause__}" if e.__cause__ else ""
+        log(f"campaign {picked.get('id')} error: {type(e).__name__}: {str(e)[:500]}{cause}")
+        return "skipped:error"
+    return outcome
 
 
 def main() -> None:
