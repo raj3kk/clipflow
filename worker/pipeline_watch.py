@@ -56,6 +56,9 @@ PLANNER = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "planner_v2.py")
 CAP_MAX = 4
 CAP_WINDOW_H = 24
+# TESTING MODE (2026-09-20 — user order): saari limits TEMPORARILY removed
+# jab tak production chain pass nahi hoti. cap check poori tarah bypass.
+TESTING_NO_LIMITS = True
 PLANNER_TIMEOUT_S = 50 * 60
 MAX_ATTEMPTS = 3          # ek request zyada se zyada 3 baar try hogi (reclaim+retry milake)
 RETRY_BACKOFF_MIN = 5     # failed → dobara koshish: attempts*5 min baad
@@ -285,24 +288,27 @@ def handle(req: dict) -> None:
         return
     attempts += 1
 
-    # 2. cap check — transient blip → wapas pending, kabhi failed nahi
-    try:
-        n = cap_count(uid)
-    except Exception as e:  # noqa: BLE001
-        if isinstance(e, config.TransientError) or _looks_transient_text(str(e)):
-            requeue(req_id, f"transient cap-check: {type(e).__name__}: {e}")
-        else:
-            tb = traceback.format_exc()
-            mark_failed(req_id,
-                        f"cap check me dikkat: {type(e).__name__}\n{tb[-400:]}",
-                        attempts)
-            log(f"{req_id}: cap check definitive error → failed")
-        return
-    if n >= CAP_MAX:
-        # cap-full kabhi auto-retry nahi hota — kal ka window wait karo
-        mark_failed(req_id, "cap_full_24h", attempts, retryable=False)
-        log(f"{req_id}: cap full (>=4/24h) → failed (no retry)")
-        return
+    # 2. cap check — TESTING MODE me poori tarah bypass (user order 2026-09-20)
+    # Production me wapas lagana hai jab full chain pass ho jaye.
+    n = 0
+    if not TESTING_NO_LIMITS:
+        try:
+            n = cap_count(uid)
+        except Exception as e:  # noqa: BLE001
+            if isinstance(e, config.TransientError) or _looks_transient_text(str(e)):
+                requeue(req_id, f"transient cap-check: {type(e).__name__}: {e}")
+            else:
+                tb = traceback.format_exc()
+                mark_failed(req_id,
+                            f"cap check me dikkat: {type(e).__name__}\n{tb[-400:]}",
+                            attempts)
+                log(f"{req_id}: cap check definitive error → failed")
+            return
+        if n >= CAP_MAX:
+            # cap-full kabhi auto-retry nahi hota — kal ka window wait karo
+            mark_failed(req_id, "cap_full_24h", attempts, retryable=False)
+            log(f"{req_id}: cap full (>=4/24h) → failed (no retry)")
+            return
 
     # 3. planner chalao
     try:
@@ -323,6 +329,12 @@ def handle(req: dict) -> None:
     if outcome == "enqueued":
         mark_done(req_id, "pipeline enqueued")
         log(f"{req_id}: planner enqueued → done")
+        return
+    # discover_pending = "discover chal raha hai, wait karo" — FAIL NAHI HAI.
+    # (2026-09-20 fix: pehle ye 3 attempts ke baad fail ho jata tha)
+    if outcome == "skipped:discover_pending":
+        requeue(req_id, "discover chal raha hai — agle tick me phir dekhenge")
+        log(f"{req_id}: discover_pending → requeue (not failed)")
         return
     note = (outcome if outcome.startswith(("skipped:", "error:", "timeout"))
             else f"failed:{outcome}")
