@@ -54,7 +54,6 @@ export async function POST(
     await logActivity(
       sb,
       ident.userId,
-      ident.deviceId,
       "job_released",
       `Job ${job.id} (${job.type}) released: force_update gate — update ke baad dobara uthegi.`
     );
