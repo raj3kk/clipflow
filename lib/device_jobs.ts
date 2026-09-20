@@ -18,6 +18,24 @@ export const CAP_COUNT = 4;
 export const CAP_WINDOW_HOURS = 24;
 
 /**
+ * Housekeeping job types — ye "automation run" NAHI hain, isliye inpe na
+ * 4/24h cap lagta hai na 1-hour success cooldown. Sirf asli posting
+ * automation (type "automation", workflow v2-clip-post) cap/cooldown me
+ * ginta hai. (2026-09-20 fix: discover_campaigns ki success khud agle
+ * discover ko 1h tak block kar rahi thi — galat tha.)
+ */
+export const HOUSEKEEPING_JOB_TYPES = new Set([
+  "discover_campaigns",
+  "verify_campaigns",
+  "join_campaign",
+]);
+
+/** Ye job type cap/cooldown ke dayre me aata hai? */
+export function isCountedAutomationType(type: string | null | undefined) {
+  return !!type && !HOUSEKEEPING_JOB_TYPES.has(type);
+}
+
+/**
  * Jin statuses ke jobs cap window me dekhe jate hain (rolling 24h).
  * Inme se terminal-failure wale (neeche isTerminalFailure()) cap me
  * count NAHI hote — baaki sab (queued/dispatched/running/succeeded) count.
@@ -76,7 +94,7 @@ export async function countCapUsage(
   ).toISOString();
   const { data, error } = await sb
     .from("device_jobs")
-    .select("id, status, attempts, max_attempts, created_at")
+    .select("id, type, status, attempts, max_attempts, created_at")
     .eq("user_id", userId)
     .gte("created_at", since)
     .in("status", CAP_JOB_STATUSES);
@@ -85,11 +103,14 @@ export async function countCapUsage(
   }
   const counted = ((data ?? []) as Array<{
     id: string;
+    type?: string | null;
     status: string | null;
     attempts: number | null;
     max_attempts: number | null;
     created_at: string | null;
-  }>).filter((j) => !isTerminalFailure(j));
+    // Housekeeping (discover/verify/join) cap me count NAHI hota — sirf
+    // asli posting automation ginta hai.
+  }>).filter((j) => isCountedAutomationType(j.type) && !isTerminalFailure(j));
   counted.sort(
     (a, b) =>
       new Date(a.created_at ?? 0).getTime() -
@@ -158,13 +179,16 @@ export async function checkCap(sb: any, userId: string): Promise<CapCheck> {
         `nahi gini jaati — sirf genuine runs ka hisaab hai.`,
     };
   }
-  // Success cooldown: pichhla successful automation 1 ghante ke andar hua
-  // to naya automation block — IG action-block se bachne ke liye gap.
+  // Success cooldown: pichhla successful POSTING automation 1 ghante ke andar
+  // hua to naya automation block — IG action-block se bachne ke liye gap.
+  // Sirf type="automation" (v2-clip-post) dekho — discover/verify/join ki
+  // success se cooldown trigger NAHI hota.
   try {
     const { data: lastOk } = await sb
       .from("device_jobs")
       .select("last_heartbeat, created_at")
       .eq("user_id", userId)
+      .eq("type", "automation")
       .eq("status", "succeeded")
       .order("last_heartbeat", { ascending: false, nullsFirst: false })
       .limit(1);
@@ -315,9 +339,12 @@ export async function createAutomationJob(
 
   // Cap: rolling 24h — Schedule-tick, Run Now, sab yahi central checkCap()
   // se hote hain. Terminal-failure (3+ attempts) wali jobs count NAHI hoti.
+  // Housekeeping (discover/verify/join) cap-exempt hai — ye posting nahi.
   let cap: CapCheck;
   try {
-    cap = await checkCap(sb, userId);
+    cap = isCountedAutomationType(type)
+      ? await checkCap(sb, userId)
+      : { ok: true, used: 0, limit: CAP_COUNT, window_hours: CAP_WINDOW_HOURS, remaining: CAP_COUNT, resets_at: null };
   } catch (e) {
     return {
       ok: false,
