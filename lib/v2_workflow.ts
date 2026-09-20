@@ -266,7 +266,7 @@ export function buildDiscoverCampaignsPayload(
 }
 
 /** Whop Content Rewards discovery — logged-in hub (campaign cards yahin). */
-export const WHOP_DISCOVER_URL = "https://whop.com/hub/";
+export const WHOP_DISCOVER_URL = "https://whop.com/discover/content-rewards/";
 
 /** Job payload: phone JobEngine seedha chala leta hai. */
 export function buildAutomationPayload(
