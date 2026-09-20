@@ -61,6 +61,24 @@ export async function wakeDevice(
 export const TESTING_NO_LIMITS = false;
 
 /**
+ * Time-bounded cap lift (user-set 2026-09-20 23:05 IST): "Haan, 5-6 chalao —
+ * aaj ke liye cap kholo". Jab tak now < CAP_LIFT_UNTIL, 4/24h cap AUR 1-hour
+ * success cooldown dono bypass hote hain (sirf is lift window ke liye).
+ * Window khatam hote hi cap/cooldown apne aap wapas lag jate hain —
+ * TESTING_NO_LIMITS ko haath lagane ki zaroorat nahi.
+ */
+export const CAP_LIFT_UNTIL = "2026-09-21T18:00:00.000Z";
+
+/** Lift window abhi active hai? */
+export function isCapLiftActive(): boolean {
+  try {
+    return Date.now() < new Date(CAP_LIFT_UNTIL).getTime();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Housekeeping job types — ye "automation run" NAHI hain, isliye inpe na
  * 4/24h cap lagta hai na 1-hour success cooldown. Sirf asli posting
  * automation (type "automation", workflow v2-clip-post) cap/cooldown me
@@ -212,7 +230,7 @@ export async function checkCap(sb: any, userId: string): Promise<CapCheck> {
   // 2026-09-20 agent-system deploy: hard constraint "max 4 posting automation
   // runs / 24h" ke hisab se cap wapas ON — TESTING_NO_LIMITS=false.
   // Testing ke liye ise wapas true karna ho to deliberate change karo.
-  if (TESTING_NO_LIMITS) {
+  if (TESTING_NO_LIMITS || isCapLiftActive()) {
     return {
       ok: true,
       used: 0,
