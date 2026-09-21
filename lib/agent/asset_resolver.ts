@@ -63,6 +63,16 @@ export interface AssetResolution {
    * kyun koi candidate resolve nahi hua. Secret/raw brief content nahi.
    */
   deepHandles?: string[];
+  /**
+   * Authorization evidence (2026-09-21 hardening):
+   * - phone_verified:verified_video_links
+   * - brief_url:direct / brief_doc:official_sources
+   * - requirements_text:scraped
+   * - brief_doc_mention:@handle + keyword_match
+   * Eligible=true pe non-empty hona chahiye — bina iske render/post
+   * kabhi nahi hoga (fail-closed).
+   */
+  authorizationEvidence?: string | null;
 }
 
 /**
@@ -163,6 +173,7 @@ export function resolveCampaignAsset(c: CampaignAssetInput): AssetResolution {
   const fail = (r: string): AssetResolution => ({
     eligible: false, assetUrl: null, assetKind: null, source: "none",
     attributable: false, quarantined: false, reasons: [...reasons, r],
+    authorizationEvidence: null,
   });
 
   // (a) phone-verified links
@@ -176,6 +187,7 @@ export function resolveCampaignAsset(c: CampaignAssetInput): AssetResolution {
       eligible: true, assetUrl: u, assetKind: kindOf(u) || "direct_file",
       source: "verified_links", attributable: true, quarantined: false,
       reasons: [...reasons, "phone-verified official link"],
+      authorizationEvidence: "phone_verified:verified_video_links",
     };
   }
 
@@ -186,6 +198,7 @@ export function resolveCampaignAsset(c: CampaignAssetInput): AssetResolution {
       return {
         eligible: false, assetUrl: null, assetKind: "youtube",
         source: "none", attributable: false, quarantined: true,
+        authorizationEvidence: null,
         reasons: [...reasons,
           `brief_url quarantined patched YouTube ID hai (${youtubeId(brief)}) — ` +
           "authorization (brand brief / phone verification) tak download BLOCKED"],
@@ -197,6 +210,7 @@ export function resolveCampaignAsset(c: CampaignAssetInput): AssetResolution {
         eligible: true, assetUrl: brief, assetKind: k, source: "brief_url",
         attributable: true, quarantined: false,
         reasons: [...reasons, `brief_url usable (${k})`],
+        authorizationEvidence: "brief_url:direct",
       };
     }
     if (k === "brief_doc") {
@@ -215,6 +229,7 @@ export function resolveCampaignAsset(c: CampaignAssetInput): AssetResolution {
             eligible: true, assetUrl: s, assetKind: sk, source: "brief_url",
             attributable: true, quarantined: false,
             reasons: [...reasons, "official brief doc ke official_sources se resolved"],
+            authorizationEvidence: "brief_doc:official_sources",
           };
         }
       }
@@ -240,6 +255,7 @@ export function resolveCampaignAsset(c: CampaignAssetInput): AssetResolution {
         eligible: true, assetUrl: u, assetKind: k, source: "requirements_text",
         attributable: true, quarantined: false,
         reasons: [...reasons, `requirements/notes text se scraped (${k})`],
+        authorizationEvidence: "requirements_text:scraped",
       };
     }
   }
@@ -319,17 +335,28 @@ function docHandleCandidates(text: string | null): string[] {
 }
 
 /**
- * (d) Influencer public lookup — BINA login.
- * YouTube @handle page se channelId nikalo → public RSS feed se latest
- * videos → campaign keywords se match. Attributable official asset milta
- * hai (influencer ka apna channel). NOTE: ye brief-required MOMENT ko
- * replace NAHI karta — hard moment requirements render time pe fail-closed
- * rehte hain (requirement_extractor.hard_requirements).
+ * (d) Influencer public lookup — BINA login. FAIL-CLOSED HARDENING (2026-09-21):
  *
- * 2026-09-21: handle candidates sirf campaign naam se nahi — brief Google
- * Doc ke text se @mentions bhi (doc me "@MacMula" jaise official handles
- * hote hain). Campaign-naam se match karne wale handles pehle try hote
- * hain (misattribution risk kam).
+ * Pehle ye "latest video" fallback karta tha — official channel ka koi bhi
+ * video utha leta tha chahe title campaign se unrelated ho (Ali-A case:
+ * "World's Funniest Kid Test Answers!" Fortnite campaign ke liye). Ye
+ * fail-OPEN tha aur compliance defect hai.
+ *
+ * Ab rules:
+ * - Sirf brief Google Doc me @mentioned handles try honge (docHandles).
+ *   Naam-derived handles (PostforSinparty, Hello, ScrollTheBible jaise
+ *   garbage) kabhi try nahi honge — wo misattribution ka source the.
+ * - Har handle pe sirf keyword-matched video eligible hai. Koi keyword
+ *   match nahi → us handle se koi pick nahi (latest fallback HATA DIYA).
+ * - Official channel milna = attribution evidence, NOT authorization.
+ *   Authorization ke liye chahiye: brief doc me @mention (creator evidence)
+ *   + title me campaign keyword match. Dono milen to hi eligible.
+ * - docHandles empty (brief doc nahi / fetch fail / koi @mention nahi)
+ *   → deep lookup se koi promotion nahi, fail-closed.
+ *
+ * NOTE: ye brief-required MOMENT ko replace NAHI karta — hard moment
+ * requirements render time pe fail-closed rehte hain
+ * (requirement_extractor.hard_requirements).
  */
 export async function resolveCampaignAssetDeep(
   c: CampaignAssetInput,
@@ -344,9 +371,6 @@ export async function resolveCampaignAssetDeep(
     .filter((w) => w.length > 3 && !/clipping|campaign|budget|official/.test(w))
     .slice(0, 6);
 
-  // 2026-09-21: brief doc se official @handles bhi candidate banao.
-  // Doc-text handles + naam-derived handles, dedup; naam-token se match
-  // karne wale doc handles pehle (agency handles baad me).
   const nameTokens = (c.name || "")
     .toLowerCase()
     .split(/[^a-z0-9]+/)
@@ -357,10 +381,30 @@ export async function resolveCampaignAssetDeep(
       nameTokens.some((t) => h.toLowerCase().includes(t)) ? 0 : 1;
     return score(a) - score(b);
   });
-  const handles: string[] = [];
+
+  // Diagnostics ke liye naam-derived handles bhi dikhao, lekin TRY sirf
+  // docHandles honge (fail-closed).
+  const diagHandles: string[] = [];
   for (const h of [...docHandles, ...handleCandidates(c.name)]) {
-    if (!handles.includes(h)) handles.push(h);
+    if (!diagHandles.includes(h)) diagHandles.push(h);
   }
+
+  // Fail-closed: brief creator evidence nahi → koi deep promotion nahi.
+  if (docHandles.length === 0) {
+    return {
+      ...sync,
+      deepHandles: diagHandles,
+      authorizationEvidence: null,
+      reasons: [
+        ...sync.reasons,
+        "influencer deep lookup FAIL-CLOSED: brief doc me koi @creator mention nahi " +
+          "(ya doc fetch nahi hua) — naam-derived handles se promotion allowed nahi. " +
+          "Official channel attribution != authorization.",
+      ],
+    };
+  }
+
+  const handles = docHandles.slice(0, 6);
 
   for (const handle of handles) {
     const page = await fetchText(`https://www.youtube.com/@${handle}`, timeoutMs);
@@ -381,12 +425,14 @@ export async function resolveCampaignAssetDeep(
       if (entries.length > 25) break;
     }
     if (entries.length === 0) continue;
-    // keyword match wala pehla video, warna latest
-    let pick = entries[0];
+    // FAIL-CLOSED: sirf keyword-matched video. Koi match nahi → is handle
+    // se koi pick nahi (latest fallback hata diya 2026-09-21).
+    let pick: { id: string; title: string } | null = null;
     for (const e of entries) {
       const title = e.title.toLowerCase();
       if (keywords.some((k) => title.includes(k))) { pick = e; break; }
     }
+    if (!pick) continue;
     const url = `https://www.youtube.com/watch?v=${pick.id}`;
     if (isQuarantined(url)) continue;
     return {
@@ -396,21 +442,26 @@ export async function resolveCampaignAssetDeep(
       source: "influencer_lookup",
       attributable: true,
       quarantined: false,
+      deepHandles: diagHandles,
+      authorizationEvidence:
+        `brief_doc_mention:@${handle} + keyword_match:"${pick.title.slice(0, 50)}"`,
       reasons: [
         ...sync.reasons,
         `influencer public lookup: @${handle} → channel ${channelId.slice(0, 12)}… → "${pick.title.slice(0, 60)}"`,
-        "NOTE: official channel ka video hai (attributable), lekin brief-required MOMENT nahi — hard moment rules render pe fail-closed",
+        "authorization: brief doc me @mention (creator evidence) + title me campaign keyword match — latest-video fallback nahi",
+        "NOTE: brief-required MOMENT abhi bhi render pe fail-closed rahega",
       ],
     };
   }
   return {
     ...sync,
-    deepHandles: handles,
+    deepHandles: diagHandles,
+    authorizationEvidence: null,
     reasons: [
       ...sync.reasons,
-      `influencer public lookup: ${handles.length} handle(s) tried ` +
-        `(${handles.slice(0, 4).join(", ")}${handles.length > 4 ? "…" : ""}` +
-        `${docHandles.length > 0 ? ", doc se" : ""}) — koi official channel/video nahi mila`,
+      `influencer public lookup FAIL-CLOSED: ${handles.length} doc handle(s) tried ` +
+        `(${handles.slice(0, 4).join(", ")}${handles.length > 4 ? "…" : ""}) — ` +
+        "koi keyword-matched official video nahi mila (latest fallback disabled)",
     ],
   };
 }
