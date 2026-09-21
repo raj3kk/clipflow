@@ -12,6 +12,7 @@
 
 export type SkillKey =
   | "campaign-scout"
+  | "join-navigator"
   | "compliance-guard"
   | "render-director"
   | "upload-coordinator"
@@ -92,15 +93,25 @@ export const SKILLS: Record<SkillKey, Skill> = {
     version: 1,
     description:
       "Campaign discovery aur ranking — eligible pool se payout-weighted pick, " +
-      "no-repeat (submitted exclude) aur notes.eligible=false exclusion ke saath.",
+      "no-repeat (submitted exclude) aur notes.eligible=false exclusion ke saath. " +
+      "Payout mechanics (2026-09-21 Whop docs research): min payout = minimum-views " +
+      "gate (views >= min_payout/rate x 1000 tabhi review), max payout = per-video " +
+      "earning cap, flat fee bonus wale campaigns me chhote views bhi faydemand. " +
+      "Budget dry-up stop rule: remaining budget nazdeek-khaali dikhe to posting roko " +
+      "(late-verifying views unpaid reh jate hain). Brief doc brands kabhi bhi update " +
+      "kar sakte hain — har run se pehle live brief dobara padho, cached brief pe " +
+      "bharosa nahi.",
     preconditions: [
       "active campaigns ka pool load hona chahiye",
       "submitted-campaign exclusion data available hona chahiye (fail-closed: load na ho to koi pick nahi)",
+      "har run pe live brief re-read (cached brief stale ho sakta hai)",
     ],
     masteryCriteria: [
       "7 din me 10+ picks, koi submitted campaign dobara pick nahi",
       "koi ineligible (notes.eligible=false) campaign pick nahi",
       "har pick me payout/budget weighting ka audit trail",
+      "budget dry-up pe posting roki (khaali pool me post nahi)",
+      "har run pe live brief re-read, stale caption se reject nahi",
     ],
     evaluate(input) {
       const reasons: string[] = [];
@@ -119,12 +130,92 @@ export const SKILLS: Record<SkillKey, Skill> = {
   },
 
   /* ------------------------------------------------------------------ */
+  "join-navigator": {
+    key: "join-navigator",
+    version: 1,
+    description:
+      "Whop/Content Rewards join-flow navigator (2026-09-21 video training) — " +
+      "join-type classify karo (A: free-checkout / B: direct-whop / C: " +
+      "application-required), free checkout pe Continue CLICK karke joined " +
+      "verify karo, semantic navigation (koi coordinate/blind tap nahi). " +
+      "Campaign type check: Clipping (brand ke existing videos se short clips) " +
+      "pe hi automation — 'UGC'/'original content' type label dikhe to compliance " +
+      "veto (requirements padhne se pehle).",
+    preconditions: [
+      "campaign card / whop page ka live page-state perceive hua hona chahiye",
+      "join directive me campaign target (whop_url/campaign_url) hona chahiye",
+      "campaign type label check (Clipping vs UGC) — UGC pe veto",
+    ],
+    masteryCriteria: [
+      "10 joins me join-type classification sahi ho",
+      "koi join 'click ho gaya' bina verify claim nahi ho",
+      "koi paid join auto-complete nahi ho",
+      "koi coordinate-based tap nahi ho",
+    ],
+    evaluate(input) {
+      const reasons: string[] = [];
+      const ctx = input.context ?? {};
+      const joinType = String(ctx.join_type ?? "").toUpperCase();
+      const kind = input.job_kind ?? "";
+
+      // 1. Join-type classify hona chahiye (A/B/C) — bina classify andha join nahi
+      if (kind === "join" && !["A", "B", "C"].includes(joinType)) {
+        reasons.push(
+          "join_type classify nahi hua (A=free-checkout / B=direct-whop / " +
+            "C=application) — bina classify andha join nahi"
+        );
+      }
+
+      // 2. Type A (free-checkout): Continue CLICK + joined verification mandatory
+      if (joinType === "A") {
+        if (ctx.checkout_continue_clicked !== true) {
+          reasons.push(
+            "free checkout pe Continue CLICK nahi hua — page kholna kaafi nahi, " +
+            "click ke bina join complete nahi hota (video rule)"
+          );
+        }
+        if (ctx.joined_verified !== true) {
+          reasons.push(
+            "joined state verify nahi hua (community sidebar / welcome " +
+              "notification / Content Rewards page) — 'click ho gaya' kaafi nahi"
+          );
+        }
+        if (ctx.checkout_price_paid === true) {
+          reasons.push("checkout me payment hua — auto-pay KABHI nahi (hard veto)");
+        }
+      }
+
+      // 3. Type C (application-required): manual hai — joined pretend mat karo
+      if (joinType === "C" && ctx.application_completed === true) {
+        reasons.push(
+          "application-required campaign ko joined pretend nahi kar sakte — needs_user"
+        );
+      }
+
+      // 4. Coordinate/blind tap hua to rule toota
+      if (ctx.used_coordinates === true) {
+        reasons.push("coordinate-based tap hua — semantic-only rule toota");
+      }
+
+      return {
+        pass: reasons.length === 0,
+        veto: ctx.checkout_price_paid === true,
+        reasons,
+      };
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
   "compliance-guard": {
     key: "compliance-guard",
     version: 1,
     description:
       "Fail-closed compliance gates — HARD VETO. Ye kabhi bypass nahi hota: " +
-      "veto aaya to brain sirf escalate karega (agent_issue), enqueue kabhi nahi.",
+      "veto aaya to brain sirf escalate karega (agent_issue), enqueue kabhi nahi. " +
+      "HARD boundary (Whop clipping Terms): fake views, bots, artificial engagement, " +
+      "stolen content, impersonation, copyright violation, campaign material misuse " +
+      "-> account suspension/removal. Payout sirf valid traffic pe. Koi view-boosting " +
+      "shortcut kabhi nahi.",
     preconditions: [
       "campaign candidate ka requirements + caption_template + brief/notes data hona chahiye",
       "clip/post-type enqueue se PEHLE mandatory run",
@@ -133,6 +224,7 @@ export const SKILLS: Record<SkillKey, Skill> = {
       "koi payment-looking join auto-enqueue nahi",
       "koi bina-exact-caption / bina-usable-brief clip enqueue nahi",
       "koi original-UGC campaign automation me nahi gaya",
+      "koi fake-views/bots/artificial-engagement attempt kabhi nahi",
     ],
     evaluate(input) {
       const reasons: string[] = [];
@@ -227,7 +319,10 @@ export const SKILLS: Record<SkillKey, Skill> = {
     version: 1,
     description:
       "VM clip_factory ke liye clip spec — source asset, duration, hook/caption " +
-      "safe-zones (Original 9:16) ke saath directive banata hai.",
+      "safe-zones (Original 9:16) ke saath directive banata hai. Duplicate-clip " +
+      "rule: doosre clipper ka same/near-duplicate pehle submit ho chuka ho to " +
+      "reject risk — har post me transformation (unique caption, alag trim, alag " +
+      "opening frame), pool ke sab clippers se distinct.",
     preconditions: [
       "verified video asset URL hona chahiye",
       "campaign ka min/max seconds pata hona chahiye",
@@ -236,6 +331,7 @@ export const SKILLS: Record<SkillKey, Skill> = {
       "har spec me hook ≥10% below top aur captions bottom UI zone se upar",
       "duration campaign min/max ke andar",
       "koi spec bina verified asset ke nahi",
+      "har clip me transformation (duplicate-submission reject nahi)",
     ],
     evaluate(input) {
       const reasons: string[] = [];
@@ -309,15 +405,22 @@ export const SKILLS: Record<SkillKey, Skill> = {
     version: 1,
     description:
       "Whop submit + live-Reel frame verification — post hua Reel kholke " +
-      "frames check karo (~1s hook, 7s/15s/25s captions), phir hi submit.",
+      "frames check karo (~1s hook, 7s/15s/25s captions), phir hi submit. " +
+      "Post se PEHLE verify karo ki posting account Whop se linked hai " +
+      "(unlinked account = submission untrackable = reject). View-dispute " +
+      "evidence: platform analytics ke timestamped screenshots 24h/72h/7d pe rakho " +
+      "(Whop tracker jeetta hai — ye time-series evidence hai).",
     preconditions: [
       "IG pe Reel live post ho chuka hona chahiye (reel URL mile)",
       "Whop submit link/session available hona chahiye",
+      "posting account Whop se linked verify (post se PEHLE)",
     ],
     masteryCriteria: [
       "submit sirf frame-verified Reel pe",
       "har submit ka screenshot proof",
       "submit ke baad v2_submissions me record",
+      "koi submit unlinked account se nahi",
+      "24h/72h/7d analytics screenshots rakhe",
     ],
     evaluate(input) {
       const reasons: string[] = [];
