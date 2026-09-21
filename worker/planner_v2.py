@@ -1003,6 +1003,14 @@ def _post_worker(path: str, payload: dict) -> dict:
                     dj = json.loads(detail)
                 except Exception:
                     dj = {}
+                # 2026-09-21: 409 "Device deleted." / "Device disconnected."
+                # join CONFLICT nahi hai — device hi gone hai. Ise
+                # conflict=True me lapetna galat tha (planner
+                # skipped:join_pending de deta tha). Alag flag.
+                err = str(dj.get("error", detail) or "")
+                if "deleted" in err.lower() or "disconnected" in err.lower():
+                    return {"ok": False, "device_gone": True,
+                            "error": err}
                 return {"ok": False, "conflict": True,
                         "needs_app_update": dj.get("needs_app_update", False),
                         "error": dj.get("error", detail)}
@@ -1619,6 +1627,12 @@ def plan_once(dry_run: bool) -> str:
             return "skipped:join_pending"
         try:
             res = enqueue_join(uid, picked)
+            if isinstance(res, dict) and res.get("device_gone"):
+                # 2026-09-21: device soft-deleted/disconnected — ye join
+                # conflict NAHI (pehle galat skipped:join_pending milta
+                # tha). Fail-closed taaki watcher naya device pick kare.
+                log(f"JOIN device_gone: {res.get('error')} — fail")
+                return f"error:device_gone:{res.get('error', '')[:60]}"
             if res.get("ok") and not res.get("deduped"):
                 set_stage("ho_gaya")
                 return f"join_requested:{picked['id']}"
