@@ -285,6 +285,19 @@ export async function POST(req: Request) {
   // 2026-09-21: 3→8 — brand-naam wale campaigns ka channel naam se nahi
   // milta; brief-doc @handles se milta hai (asset_resolver).
   let deepPromoted = 0;
+  // 2026-09-21: fail-closed diagnostics — har deep-lookup candidate ka
+  // outcome (handles tried, resolver reasons, rejected/timeout errors)
+  // failure response me bhi expose hota hai taaki pata chale kyun koi
+  // candidate resolve nahi hua. Secret/raw brief content kabhi nahi.
+  interface DeepDiag {
+    id: string;
+    name: string | null;
+    brief_url: string | null;
+    tried_handles: string[];
+    outcome: "promoted" | "ineligible" | "rejected";
+    detail: string;
+  }
+  const deepDiags: DeepDiag[] = [];
   if (pool.length === 0 && deepLookup) {
     const assetOnly = classified.filter(
       (x) =>
@@ -300,17 +313,40 @@ export async function POST(req: Request) {
     for (let i = 0; i < assetOnly.length; i++) {
       const x = assetOnly[i];
       const s = settled[i];
-      if (s.status !== "fulfilled") continue;
-      const deep = s.value;
-      if (deep.eligible && !deep.quarantined) {
-        x.asset = deep;
-        x.cls = "clip_ready";
-        x.reasons = [...x.reasons, `deep lookup resolved: ${deep.assetUrl}`];
-        pool.push(x);
-        counts.clip_ready++;
-        counts.join_only--;
-        deepPromoted++;
+      const diag: DeepDiag = {
+        id: x.c.id,
+        name: x.c.name,
+        brief_url: (x.c.brief_url || "").trim().slice(0, 140) || null,
+        tried_handles: [],
+        outcome: "ineligible",
+        detail: "",
+      };
+      if (s.status === "rejected") {
+        // Timeout / fetch crash — fail closed, candidate skip.
+        const err = s.reason;
+        diag.outcome = "rejected";
+        diag.detail = String(
+          (err && (err as Error).message) || err || "unknown error"
+        ).slice(0, 160);
+      } else {
+        const deep = s.value;
+        diag.tried_handles = deep.deepHandles ?? [];
+        if (deep.eligible && !deep.quarantined) {
+          x.asset = deep;
+          x.cls = "clip_ready";
+          x.reasons = [...x.reasons, `deep lookup resolved: ${deep.assetUrl}`];
+          pool.push(x);
+          counts.clip_ready++;
+          counts.join_only--;
+          deepPromoted++;
+          diag.outcome = "promoted";
+          diag.detail = `resolved: ${(deep.assetUrl || "").slice(0, 120)}`;
+        } else {
+          diag.outcome = "ineligible";
+          diag.detail = deep.reasons.slice(-2).join(" | ").slice(0, 220);
+        }
       }
+      deepDiags.push(diag);
     }
   }
 
@@ -325,8 +361,14 @@ export async function POST(req: Request) {
       detail:
         `Koi clip_ready campaign nahi (eligible ${eligible.length}). ` +
         `Breakdown: ${JSON.stringify(counts)}. ` +
+        (deepLookup
+          ? `Deep lookup: ${deepDiags.length} candidate(s) tried, ${deepPromoted} promoted. `
+          : "") +
         (why.length > 0 ? `Examples: ${why.join(" | ")}` : ""),
       counts,
+      deep_lookup: deepLookup,
+      deep_promoted: deepPromoted,
+      deep_diagnostics: deepDiags,
     });
   }
 
