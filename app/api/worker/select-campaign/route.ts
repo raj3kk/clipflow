@@ -1,6 +1,15 @@
 import { NextResponse } from "next/server";
 import { getSupabase, isConfigured } from "@/lib/supabase";
 import { requireWorkerAuth } from "@/lib/worker_auth";
+import {
+  resolveCampaignAsset,
+  resolveCampaignAssetDeep,
+  type AssetResolution,
+} from "@/lib/agent/asset_resolver";
+import {
+  extractRequirements,
+  type ExtractedRequirements,
+} from "@/lib/agent/requirement_extractor";
 
 /**
  * Worker-only: server-side campaign selection (2026-09-20).
@@ -60,25 +69,40 @@ function verifiedVideoUrl(c: Campaign): string | null {
   return null;
 }
 
+/** @deprecated WP3: asset_resolver.resolveCampaignAsset use karo (brief_url ka
+ *  hona kaafi nahi — quarantine + kind checks zaroori hain). */
 function hasUsableBrief(c: Campaign): boolean {
   const url = verifiedVideoUrl(c) || (c.brief_url || "").trim();
   return url.length > 0;
 }
 
 /**
- * Campaign classification (2026-09-20 compliance hardening):
- * - clip_ready:    clip ban sakta hai — pick pool me jayega
- * - join_only:     join kar sakte hain, clip ke liye asset/caption ready nahi
- * - needs_phone:   user ka action chahiye (payment decision / bio link / caption)
+ * Campaign classification (2026-09-20 compliance hardening; 2026-09-20 WP3:
+ * asset resolution + requirement extraction integrated):
+ * - clip_ready:    clip ban sakta hai — pick pool me jayega. Asset RESOLVED
+ *                  hona chahiye (asset_resolver) — sirf brief_url ka hona
+ *                  kaafi nahi. Caption absent ho to extractor compliant
+ *                  caption generate karta hai (generated:true) — needs_phone
+ *                  nahi jata.
+ * - join_only:     join kar sakte hain, clip ke liye asset resolve nahi hua
+ * - needs_phone:   user ka action chahiye (payment decision / bio link /
+ *                  hard required moment jo resolve nahi hua)
  * - ugc_unsupported: original UGC (face-cam/talking-head) mangta hai —
  *                  automation se banaya hua clip compliant nahi hoga
  */
 type CampaignClass = "clip_ready" | "join_only" | "needs_phone" | "ugc_unsupported";
 
-function classify(c: Campaign): { cls: CampaignClass; reasons: string[] } {
+function classify(c: Campaign): {
+  cls: CampaignClass;
+  reasons: string[];
+  asset: AssetResolution;
+  extracted: ExtractedRequirements;
+} {
   const n = (c.notes || {}) as Record<string, unknown>;
   const req = (c.requirements || "").toLowerCase();
   const nameL = (c.name || "").toLowerCase();
+  const asset = resolveCampaignAsset(c);
+  const extracted = extractRequirements(c);
 
   // 1. Payment-looking join → user decide karega (auto-buy KABHI nahi)
   if (
@@ -87,7 +111,7 @@ function classify(c: Campaign): { cls: CampaignClass; reasons: string[] } {
       req + " " + nameL
     )
   ) {
-    return { cls: "needs_phone", reasons: ["payment-looking join — user decide karega"] };
+    return { cls: "needs_phone", reasons: ["payment-looking join — user decide karega"], asset, extracted };
   }
 
   // 2. Original UGC (face-cam / talking-head / khud record karo) → automation se nahi
@@ -96,31 +120,55 @@ function classify(c: Campaign): { cls: CampaignClass; reasons: string[] } {
       req
     )
   ) {
-    return { cls: "ugc_unsupported", reasons: ["original UGC required — automation compliant nahi"] };
+    return { cls: "ugc_unsupported", reasons: ["original UGC required — automation compliant nahi"], asset, extracted };
   }
 
   // 3. Required bio link set nahi → user ka kaam (IG app me manual)
-  const bioLink = n.required_bio_link as string | undefined;
+  const bioLink = (extracted.required_bio_link.value || (n.required_bio_link as string | undefined) || "").trim();
   const bioSet = n.bio_link_set === true;
   if (bioLink && !bioSet) {
     return {
       cls: "needs_phone",
-      reasons: [`required bio link set nahi: ${String(bioLink).slice(0, 60)}`],
+      reasons: [`required bio link set nahi: ${bioLink.slice(0, 60)}`],
+      asset,
+      extracted,
     };
   }
 
-  // 4. Bina usable brief ke clip nahi ban sakta → join_only
-  if (!hasUsableBrief(c)) {
-    return { cls: "join_only", reasons: ["koi verified video asset nahi"] };
+  // 3b. Hard required footage/moment unresolved → KABHI invent mat karo
+  if (extracted.hard_blocked) {
+    return {
+      cls: "needs_phone",
+      reasons: extracted.hard_block_reasons.slice(0, 3),
+      asset,
+      extracted,
+    };
   }
 
-  // 5. Caption exact/normalized nahi → galat caption = reject risk
-  const cap = (c.caption_template || "").trim();
-  if (cap.length < 20 || /\[.*(insert|your|here|brand|tag).*\]/i.test(cap)) {
-    return { cls: "needs_phone", reasons: ["caption exact/normalized nahi hai"] };
+  // 4. Bina RESOLVED asset ke clip nahi ban sakta → join_only.
+  // (WP3: sirf brief_url ka hona kaafi nahi — quarantined patched YouTube
+  // URLs aur Google-Doc-bina-footage yahan filter hote hain.)
+  if (!asset.eligible) {
+    return {
+      cls: "join_only",
+      reasons: asset.quarantined
+        ? ["asset quarantined hai — authorization baaki", ...asset.reasons.slice(0, 2)]
+        : [`koi resolved video asset nahi (${asset.reasons.slice(-1)[0] || "unknown"})`],
+      asset,
+      extracted,
+    };
   }
 
-  return { cls: "clip_ready", reasons: [] };
+  // 5. Caption: exact/normalized nahi → extractor generate karta hai
+  // (generated:true). Galat-caption reject risk ab managed hai — needs_phone nahi.
+  const reasons: string[] = [];
+  if (extracted.caption_template.generated) {
+    reasons.push(`caption generated (brief me exact nahi tha): ${extracted.caption_template.source}`);
+  }
+  if (extracted.hashtags.generated) {
+    reasons.push("hashtags generated (brief me nahi the)");
+  }
+  return { cls: "clip_ready", reasons, asset, extracted };
 }
 
 export async function POST(req: Request) {
@@ -132,7 +180,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Supabase not configured" }, { status: 500 });
   }
 
-  let body: { user_id?: string };
+  let body: { user_id?: string; deep_lookup?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -142,8 +190,17 @@ export async function POST(req: Request) {
   if (!userId) {
     return NextResponse.json({ error: "user_id required" }, { status: 400 });
   }
+  // deep_lookup=true → pool khaali ho to influencer public lookup (bina
+  // login) se asset resolve karne ki koshish (max 3 candidates, timeouts ke
+  // saath). Planner isey true bhejta hai.
+  const deepLookup = body.deep_lookup === true;
 
   // 1. Active campaigns (MAIN_HUB pool)
+  // 2026-09-21: protected campaigns kabhi pool me nahi aate —
+  // Charlie Berens (duplicate cancelled, do not revive),
+  // Social Commerce News (never revive/duplicate),
+  // FundingPips (safety-held: bio-link + requirements not normalized).
+  const PROTECTED_IDS = ["hub-9e87c2c6", "hub-1411db9c", "cr-c0c37381"];
   const { data: campaigns, error: campErr } = await sb
     .from("campaigns")
     .select(
@@ -153,6 +210,7 @@ export async function POST(req: Request) {
     )
     .eq("user_id", MAIN_HUB_USER_ID)
     .eq("active", true)
+    .not("id", "in", `(${PROTECTED_IDS.join(",")})`)
     .order("created_at", { ascending: false })
     .limit(50);
 
@@ -219,7 +277,36 @@ export async function POST(req: Request) {
     ugc_unsupported: 0,
   };
   for (const x of classified) counts[x.cls]++;
-  const pool = classified.filter((x) => x.cls === "clip_ready").map((x) => x.c);
+  let pool = classified.filter((x) => x.cls === "clip_ready");
+
+  // 4b. Deep lookup fallback (WP3): pool khaali aur deep_lookup=true →
+  // sirf-asset-kami wale join_only candidates pe influencer public lookup
+  // (max 3, timeout-guarded). Resolve ho to clip_ready me promote.
+  let deepPromoted = 0;
+  if (pool.length === 0 && deepLookup) {
+    const assetOnly = classified.filter(
+      (x) =>
+        x.cls === "join_only" &&
+        !x.asset.quarantined &&
+        x.reasons.some((r) => /resolved video asset/i.test(r))
+    ).slice(0, 3);
+    for (const x of assetOnly) {
+      try {
+        const deep = await resolveCampaignAssetDeep(x.c, 8000);
+        if (deep.eligible && !deep.quarantined) {
+          x.asset = deep;
+          x.cls = "clip_ready";
+          x.reasons = [...x.reasons, `deep lookup resolved: ${deep.assetUrl}`];
+          pool.push(x);
+          counts.clip_ready++;
+          counts.join_only--;
+          deepPromoted++;
+        }
+      } catch {
+        /* lookup fail = candidate skip, fail closed */
+      }
+    }
+  }
 
   if (pool.length === 0) {
     const why = classified
@@ -239,24 +326,28 @@ export async function POST(req: Request) {
 
   // 5. Payout-weighted random pick (sirf clip_ready me se)
   let totalWeight = 0;
-  const weights = pool.map((c) => {
-    const w = Math.max(0.1, Number(c.payout_per_1k_usd) || 0.1);
+  const weights = pool.map((x) => {
+    const w = Math.max(0.1, Number(x.c.payout_per_1k_usd) || 0.1);
     totalWeight += w;
     return w;
   });
   let roll = Math.random() * totalWeight;
-  let picked = pool[0];
+  let pickedX = pool[0];
   for (let i = 0; i < pool.length; i++) {
     roll -= weights[i];
     if (roll <= 0) {
-      picked = pool[i];
+      pickedX = pool[i];
       break;
     }
   }
+  const picked = pickedX.c;
 
-  // 6. Normalized campaign (sirf zaroori fields — ~3KB)
+  // 6. Normalized campaign — asset resolution + extracted requirements ke
+  // saath (planner/VM inhe notes me merge karta hai; full notes overwrite nahi).
+  // brief_url: resolved assetUrl pehle (verified > brief > scraped > lookup),
+  // phir legacy fallback.
   const notes = (picked.notes || {}) as Record<string, unknown>;
-  const pickedClass = classify(picked);
+  const assetUrl = pickedX.asset.assetUrl;
   return NextResponse.json({
     ok: true,
     campaign: {
@@ -270,18 +361,22 @@ export async function POST(req: Request) {
       requirements: picked.requirements,
       caption_template: picked.caption_template,
       hashtags: picked.hashtags,
-      brief_url: verifiedVideoUrl(picked) || picked.brief_url,
+      brief_url: assetUrl || verifiedVideoUrl(picked) || picked.brief_url,
       campaign_url: picked.campaign_url,
       joined: picked.joined,
       join_status: picked.join_status,
       notes_eligible: notes.eligible !== false,
-      has_brief: hasUsableBrief(picked),
-      classification: pickedClass.cls,
-      classification_reasons: pickedClass.reasons,
+      has_brief: pickedX.asset.eligible,
+      classification: pickedX.cls,
+      classification_reasons: pickedX.reasons,
+      asset: pickedX.asset,
+      extracted: pickedX.extracted,
+      deep_promoted: deepPromoted > 0,
     },
     pool_size: pool.length,
     with_brief: pool.length,
     counts,
     excluded_submitted: submittedIds.size,
+    deep_promoted: deepPromoted,
   });
 }

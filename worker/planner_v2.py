@@ -266,6 +266,19 @@ def _is_eligible(campaign: dict) -> bool:
     return n.get("eligible") is not False
 
 
+# 2026-09-21: protected campaigns — server pick inhe de to bhi
+# planner haath nahi lagayega (fail-closed skip). Koi bhi 409/revive
+# yahan se nahi hoga.
+# - hub-9e87c2c6 Charlie Berens: duplicate job correctly cancelled — do not revive
+# - hub-1411db9c Social Commerce News: old job/request never revive/duplicate
+# - cr-c0c37381 FundingPips: safety-held (bio-link + requirements not normalized)
+PROTECTED_CAMPAIGNS = frozenset({
+    "hub-9e87c2c6",
+    "hub-1411db9c",
+    "cr-c0c37381",
+})
+
+
 def select_campaign_via_server(uid: str) -> tuple[dict | None, str]:
     """Vercel server-side selection (2026-09-20).
 
@@ -296,6 +309,12 @@ def select_campaign_via_server(uid: str) -> tuple[dict | None, str]:
                 data = json.loads(resp.read().decode())
             if data.get("ok") and data.get("campaign"):
                 c = data["campaign"]
+                if c.get("id") in PROTECTED_CAMPAIGNS:
+                    # 2026-09-21: server ne protected campaign pick kiya —
+                    # revive/join/render kuch nahi, fail-closed skip.
+                    log(f"SERVER PICK BLOCKED: '{c.get('name')}' "
+                        f"({c.get('id')}) protected list me hai — skip")
+                    return None, "protected_campaign"
                 log(f"SERVER PICK: '{c.get('name')}' ({c.get('id')}) "
                     f"${c.get('payout_per_1k_usd')}/1k "
                     f"(pool={data.get('pool_size')}, brief={data.get('with_brief')}, "
