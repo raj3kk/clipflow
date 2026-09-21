@@ -68,3 +68,50 @@ export async function POST(req: Request) {
   }
   return NextResponse.json({ ok: true, version_code });
 }
+
+/**
+ * DELETE → release ko backend se PERMANENT delete karo:
+ *   /api/admin/app-releases?version_code=43
+ *
+ * app_releases se row delete hote hi /api/app/version aur jobs/heartbeat ka
+ * app_update field agle-latest release pe gir jata hai (ya release bache hi
+ * nahi to 404) — phone ko deleted version ka update prompt dobara kabhi
+ * nahi milega. Latest release delete karne pe pehle se update kar chuke
+ * phone pe koi asar nahi padta.
+ *
+ * NOTE: public/app/*.apk static file repo me rehti hai (orphan ho jati hai)
+ * — DB row hi "backend" hai; file hatani ho to repo se alag commit karo.
+ */
+export async function DELETE(req: Request) {
+  const gate = await requireAdmin();
+  if (gate instanceof NextResponse) return gate;
+  const sb = getSupabase();
+  if (!sb || !isConfigured()) {
+    return NextResponse.json({ error: "Supabase is not configured." }, { status: 503 });
+  }
+  const version_code = Number(new URL(req.url).searchParams.get("version_code"));
+  if (!Number.isInteger(version_code) || version_code <= 0) {
+    return NextResponse.json({ error: "version_code query param me positive integer do." }, { status: 400 });
+  }
+
+  // Kya ye latest release hai? (UI warning ke liye)
+  const { data: latest } = await sb
+    .from("app_releases")
+    .select("version_code")
+    .order("version_code", { ascending: false })
+    .limit(1);
+  const wasLatest = latest?.[0]?.version_code === version_code;
+
+  const { data, error } = await sb
+    .from("app_releases")
+    .delete()
+    .eq("version_code", version_code)
+    .select("version_code");
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  if (!data || data.length === 0) {
+    return NextResponse.json({ error: `version_code ${version_code} ka koi release nahi mila.` }, { status: 404 });
+  }
+  return NextResponse.json({ ok: true, version_code, was_latest: wasLatest });
+}
