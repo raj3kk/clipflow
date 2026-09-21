@@ -53,12 +53,18 @@ export async function wakeDevice(
 }
 
 /**
- * TESTING MODE (user-set 2026-09-20): "abhi check hoga, jb production ready
- * sara kch ok hoga tb lagayenge sara kch limitation" — testing ke dauraan
- * 4/24h cap AUR 1-hour success cooldown DONO disabled. Production-ready hone
- * pe isko false karke deploy karo — limitations wapas lag jayengi.
+ * UNLIMITED MODE (user-ordered 2026-09-21): "sara limitation remove kro from
+ * core — 24 hours 4 ya 1 day 4, jitna v limitations h sabko remove kro,
+ * unlimited". Isliye 4/24h cap AUR 1-hour success cooldown DONO permanently
+ * disabled — ye user ka explicit latest order hai (2026-09-20 wale
+ * testing-note ko supersede karta hai).
+ *
+ * NOTE: Instagram action-block pe 24h auto-pause AB BHI LAGA RAHEGA —
+ * wo throughput cap nahi, account-safety hai (user ka standing rule:
+ * "action block → stop immediately and notify"). IG khud block kare to
+ * hammer karna account ban karwa dega.
  */
-export const TESTING_NO_LIMITS = false;
+export const TESTING_NO_LIMITS = true;
 
 /**
  * Time-bounded cap lift (user-set 2026-09-20 23:05 IST): "Haan, 5-6 chalao —
