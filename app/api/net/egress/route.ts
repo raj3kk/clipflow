@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 import { getDeviceIdentity } from "@/lib/device_auth";
 
 /**
+ * USA egress guarantee: ye route HAMESHA iad1 (Ashburn, Virginia, USA) me
+ * execute ho — Vercel default kabhi bhi badle, Whop/ContentRewards traffic
+ * USA IP se hi niklega. (p43, 2026-09-21)
+ */
+export const preferredRegion = "iad1";
+
+/**
  * USA egress proxy (p35, 2026-09-20; p41 redirect cookie-jar fix).
  *
  * Phone ke WebView ke Whop/ContentRewards requests ko US IP se forward
@@ -177,6 +184,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       status: resp.status,
+      region: process.env.VERCEL_REGION ?? "unknown",
       headers: outHeaders,
       set_cookies: setCookies,
       body_base64: buf.toString("base64"),
