@@ -81,10 +81,9 @@ DEVICE_ID = os.environ.get(
 VENV_PY = os.path.expanduser("~/workspace/whop-edit-env/bin/python")
 CAP_MAX = 4
 CAP_WINDOW_H = 24
-# TESTING MODE (user-set 2026-09-20): "abhi check hoga, jb production ready
-# sara kch ok hoga tb lagayenge sara kch limitation" — testing me 4/24h cap,
-# 7-day campaign cooldown, aur 48h fail-blacklist SAB disabled. Production
-# pe isko False karo — limitations wapas lag jayengi.
+# UNLIMITED (user-ordered 2026-09-21): "sara limitation remove kro from core,
+# unlimited" — production cap (4 automation runs / rolling 24h) permanently
+# disabled. Ye user ka explicit latest order hai.
 TESTING_NO_LIMITS = True
 WHOP_DEFAULT_SUBMIT = "https://whop.com/content-rewards/"
 YT_PATTERNS = ("youtube.com/watch", "youtu.be/",
@@ -1060,6 +1059,22 @@ def enqueue(video_url: str, caption: str, whop_submit_url: str,
 # --------------------------------------------------------------------------
 # 11b. auto-join enqueue (Round-7)
 # --------------------------------------------------------------------------
+def live_automation_job(uid: str, cid: str) -> dict | None:
+    """Is campaign ka automation job abhi live hai? (lost-response reconcile:
+    plan-job POST ka response network blip me kho jaye to server phir bhi
+    job bana chuka hota hai — dobara enqueue karne se pehle check karo.)"""
+    rows = sb_retry("GET", "/rest/v1/device_jobs", query={
+        "user_id": f"eq.{uid}",
+        "type": "eq.automation",
+        "status": "in.(queued,claimed,dispatched,running)",
+        "payload->>campaign_slug": f"eq.{cid}",
+        "select": "id,status",
+        "order": "created_at.desc",
+        "limit": "1",
+    })
+    return rows[0] if rows else None
+
+
 def live_join_job(uid: str, cid: str) -> dict | None:
     """Is campaign ka join_campaign job abhi live hai?
     (dobara join job na bane — dedup)."""
@@ -1094,6 +1109,124 @@ def live_any_join_job(uid: str) -> dict | None:
         pass
     rows = sb_retry("GET", "/rest/v1/device_jobs", query=q)
     return rows[0] if rows else None
+
+
+# --------------------------------------------------------------------------
+# 2026-09-21 ROOT FIX (campaign stickiness): ek Run Now request ke retry me
+# server har tick RANDOM naya campaign de sakta hai — request ek campaign
+# join karke doosre campaign pe clip banane lagti thi (attempts jalte the,
+# koi campaign poori nahi hoti thi). Pin = is request ne kaunsa campaign
+# join kiya:
+#   1. live join_campaign job (join abhi chal raha hai) — sabse strong pin
+#   2. is request ke create hone ke BAAD succeeded join_campaign job
+# (schema change nahi chahiye — device_jobs hi pin ka source hai.)
+# --------------------------------------------------------------------------
+def get_pinned_campaign_id(req_id: str) -> str | None:
+    """Request ka durable pin — migration 2026-09-21 (campaign_id column)."""
+    try:
+        rows = sb_retry("GET", "/rest/v1/pipeline_requests",
+                        query={"id": f"eq.{req_id}",
+                               "select": "campaign_id", "limit": "1"})
+        return (rows[0].get("campaign_id") if rows else None) or None
+    except Exception as e:  # noqa: BLE001
+        log(f"pin read me dikkat (non-fatal): {type(e).__name__}")
+        return None
+
+
+def pin_campaign_for_request(req_id: str, cid: str) -> str | None:
+    """Pehli selection turant pin karo — WHERE campaign_id IS NULL (first-wins).
+
+    Race me do planner ek saath pin karen to pehla jeet ta hai; doosre ka
+    UPDATE 0 rows affect karta hai. Hamesha actual pin wapas padh ke return
+    karo taaki caller wahi campaign use kare jo pin hua."""
+    if not req_id or not cid:
+        return None
+    try:
+        sb_retry("PATCH", "/rest/v1/pipeline_requests",
+                 query={"id": f"eq.{req_id}", "campaign_id": "is.null"},
+                 body={"campaign_id": cid,
+                       "campaign_pinned_at": datetime.now(
+                           timezone.utc).isoformat()})
+    except Exception as e:  # noqa: BLE001
+        log(f"pin write me dikkat (non-fatal): {type(e).__name__}")
+    pinned = get_pinned_campaign_id(req_id)
+    if pinned:
+        log(f"PINNED: request {req_id[:8]}… → campaign {pinned}")
+    return pinned
+
+
+def sticky_campaign_for_request(uid: str, req_id: str) -> str | None:
+    """Is request ka pinned campaign id, ya None."""
+    try:
+        live = live_any_join_job(uid)
+        if live:
+            slug = (live.get("payload") or {}).get("campaign_slug")
+            if slug:
+                return slug
+        rows = sb_retry("GET", "/rest/v1/pipeline_requests",
+                        query={"id": f"eq.{req_id}",
+                               "select": "created_at", "limit": "1"})
+        req_ts = rows[0].get("created_at") if rows else None
+        q = {"user_id": f"eq.{uid}",
+             "type": "eq.join_campaign",
+             "status": "eq.succeeded",
+             "select": "payload,created_at",
+             "order": "created_at.desc",
+             "limit": "5"}
+        if req_ts:
+            q["created_at"] = f"gte.{req_ts}"
+        for j in sb_retry("GET", "/rest/v1/device_jobs", query=q):
+            slug = (j.get("payload") or {}).get("campaign_slug")
+            if slug:
+                return slug
+    except Exception as e:  # noqa: BLE001
+        log(f"sticky check me dikkat (non-fatal): {type(e).__name__}")
+    return None
+
+
+def _sticky_eligible(full: dict | None, submitted_ids: set) -> bool:
+    """Pinned campaign abhi bhi kaam ke layak hai?"""
+    if not full or not full.get("active"):
+        return False
+    cid = full.get("id") or ""
+    if cid in PROTECTED_CAMPAIGNS:
+        return False
+    if cid in submitted_ids:
+        return False
+    if not _is_eligible(full):
+        return False
+    # clip-ready evidence: brief_url ya full_brief — bina brief ke sticky
+    # pe atke rehne se behtar hai server naya pick kare.
+    notes = full.get("notes")
+    if isinstance(notes, str):
+        try:
+            notes = json.loads(notes or "{}")
+        except Exception:
+            notes = {}
+    has_brief = bool(full.get("brief_url")) or (
+        isinstance(notes, dict) and bool(notes.get("brief_url")
+                                         or notes.get("full_brief")))
+    return has_brief
+
+
+def join_succeeded_recently(uid: str, cid: str) -> bool:
+    """Phone ne is campaign ka join pehle hi succeeded kar diya tha
+    (lekin campaigns.joined row purani hai)? Reconciliation ka source."""
+    try:
+        since = (datetime.now(timezone.utc)
+                 - timedelta(days=7)).isoformat()
+        rows = sb_retry("GET", "/rest/v1/device_jobs", query={
+            "user_id": f"eq.{uid}",
+            "type": "eq.join_campaign",
+            "status": "eq.succeeded",
+            "payload->>campaign_slug": f"eq.{cid}",
+            "created_at": f"gte.{since}",
+            "select": "id",
+            "limit": "1",
+        })
+        return bool(rows)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def enqueue_join(uid: str, campaign: dict) -> dict:
@@ -1310,7 +1443,27 @@ def attempt_campaign(uid: str, campaign: dict, score: float,
         return "dryrun"
 
     set_stage("phone_ko_bhej_rahe")
-    res = enqueue(video_url, caption, whop_submit_url, campaign_slug=cid)
+    try:
+        res = enqueue(video_url, caption, whop_submit_url, campaign_slug=cid)
+    except Exception as e:
+        # 2026-09-21 ROOT FIX (lost-response): plan-job POST ka response
+        # network blip me kho sakta hai jabki server ne job bana diya ho
+        # (join path pe yehi bug 2026-09-20 me mila tha). Pehle reconcile
+        # karo — live job mil jaye to duplicate enqueue MAT karo.
+        log(f"plan-job enqueue exception: {type(e).__name__} — pehle "
+            f"reconcile karo")
+        try:
+            live = live_automation_job(uid, cid)
+        except Exception:
+            live = None
+        if live:
+            log(f"plan-job server pe mil gaya ({live['id'][:8]}…) — "
+                f"duplicate nahi, enqueued mano")
+            record_clip(uid, cid, brief_url, start, end,
+                        moment.get("hook_text") or "", caption, video_url)
+            set_stage("ho_gaya")
+            return "enqueued"
+        raise
     if res.get("needs_app_update"):
         # 2026-09-20: p33+ chahiye (wait_js). Purane app pe job fail hogi,
         # isliye enqueue hi mat karo — user app update karega.
@@ -1542,7 +1695,7 @@ def plan_once(dry_run: bool) -> str:
 
     # 1. cap guard (dry-run me sirf check+log — enqueue hota hi nahi,
     #    isliye cap violate nahi ho sakta)
-    #    TESTING MODE (2026-09-20): cap disabled — production pe wapas lagao.
+    #    UNLIMITED (user-ordered 2026-09-21): cap permanently disabled.
     n_used = 0 if TESTING_NO_LIMITS else cap_count(uid)
     if not TESTING_NO_LIMITS and n_used >= CAP_MAX and not dry_run:
         log(f"SKIP: cap full ({CAP_MAX}/{CAP_WINDOW_H}h) — silent")
@@ -1601,6 +1754,47 @@ def plan_once(dry_run: bool) -> str:
     if submitted_ids:
         log(f"permanent exclusion: {len(submitted_ids)} campaigns pehle submit ho chuke")
 
+    # 2026-09-21 ROOT FIX (durable campaign pinning — migration 2026-09-21):
+    # Ek request = ek campaign, GUARANTEED. Pehli selection turant
+    # pipeline_requests.campaign_id pe pin hoti hai; har retry/resume pehle
+    # pin dekhta hai. Pin eligible hai to WAHI campaign — server re-pick nahi.
+    # Pin ineligible ho jaye (protected/inactive/submitted/exhausted/
+    # non-compliant) to fail-closed: naya campaign silently pick NAHI hota.
+    # (Scheduled 6h sweep me req_id nahi hota — wahan purana behavior.)
+    req_id = os.environ.get("PLANNER_REQUEST_ID")
+    picked = None
+    server_reason = "sticky_none"
+    if req_id:
+        pinned_id = get_pinned_campaign_id(req_id)
+        if pinned_id:
+            _full = get_campaign_full(pinned_id)
+            if _sticky_eligible(_full, submitted_ids):
+                picked = _full
+                server_reason = "pinned"
+                log("PINNED: '%s' — request ka pin, wahi continue (server "
+                    "re-pick skip)" % _full.get("name"))
+            else:
+                log("PINNED campaign %s ab eligible nahi — fail-closed, "
+                    "naya pick nahi" % pinned_id[:8])
+                set_stage("ho_gaya")
+                return f"skipped:pinned_ineligible:{pinned_id[:8]}"
+        else:
+            # Pin nahi hai (purani request ya pehla pass) — sticky inference
+            # sirf backfill ke liye, phir TURANT pin karo.
+            sticky_id = sticky_campaign_for_request(uid, req_id)
+            if sticky_id:
+                _full = get_campaign_full(sticky_id)
+                if _sticky_eligible(_full, submitted_ids):
+                    actual = pin_campaign_for_request(req_id, sticky_id)
+                    if actual and actual != sticky_id:
+                        _full = get_campaign_full(actual)
+                    picked = _full
+                    server_reason = "sticky_pinned"
+                    log("STICKY→PINNED: '%s' — isi request ne join kiya tha, "
+                        "wahi continue (server re-pick skip)" % _full.get("name"))
+                else:
+                    log("sticky %s eligible nahi — server pick" % sticky_id[:8])
+
     # 2026-09-20: SERVER-SIDE SELECTION hi source of truth (Vercel endpoint).
     # VM ka Supabase network flaky hai — Vercel reliable hai. Server se
     # ~3KB me normalized campaign aata hai. Server classification
@@ -1609,7 +1803,23 @@ def plan_once(dry_run: bool) -> str:
     # 2026-09-20 FAIL-CLOSED: local pick_random_campaign fallback PERMANENTLY
     # HATA DIYA — wo server ka classification bypass karta tha. Server se
     # campaign nahi mila (refuse ya unreachable) to run SKIP, blind pick nahi.
-    picked, server_reason = select_campaign_via_server(uid)
+    if not picked:
+        picked, server_reason = select_campaign_via_server(uid)
+        # 2026-09-21: server pick TURANT pin karo — join/render se pehle.
+        if picked and req_id:
+            actual = pin_campaign_for_request(req_id, picked["id"])
+            if actual and actual != picked["id"]:
+                # Race: doosre ne pehle pin kar diya — jeeta hua pin use karo.
+                _full = get_campaign_full(actual)
+                if _sticky_eligible(_full, submitted_ids):
+                    picked = _full
+                    server_reason = "pinned_race"
+                    log("PIN race: doosre pass ka pin %s jeeta — wahi use "
+                        "karo" % actual[:8])
+                else:
+                    log("PIN race ka pin eligible nahi — fail-closed")
+                    set_stage("ho_gaya")
+                    return f"skipped:pinned_ineligible:{actual[:8]}"
     if not picked:
         log(f"SKIP: server-side selection ne campaign nahi diya "
             f"(reason={server_reason}) — local fallback permanently removed, "
@@ -1620,7 +1830,23 @@ def plan_once(dry_run: bool) -> str:
         return f"skipped:server_select:{server_reason}"
 
     # JOIN CHECK (2026-09-20): agar joined nahi to pehle join karo
-    if not is_joined(picked):
+    # 2026-09-21 ROOT FIX: phone join pehle hi succeeded kar chuka ho lekin
+    # campaigns row purani ho (reconciliation pending) — to dobara join
+    # enqueue MAT karo. Row yahin reconcile karke clip pipeline me badho.
+    _row_joined = is_joined(picked)
+    if not _row_joined and join_succeeded_recently(uid, picked["id"]):
+        try:
+            sb_retry("PATCH", "/rest/v1/campaigns",
+                     query={"id": f"eq.{picked['id']}"},
+                     body={"joined": True, "join_status": "joined"})
+            log("join pehle hi succeeded tha — campaigns.joined=true "
+                "reconcile kiya, clip pipeline me badho")
+            _row_joined = True
+        except Exception as e:  # noqa: BLE001
+            log(f"join reconcile patch fail ({type(e).__name__}) — "
+                "phir bhi clip pipeline try karo")
+            _row_joined = True
+    if not _row_joined:
         js = picked.get("join_status") or ""
         if js == "needs_user":
             log(f"SKIP join: '{picked.get('name')}' needs_user — user action pending")
@@ -1695,8 +1921,115 @@ def plan_once(dry_run: bool) -> str:
     except Exception as e:
         cause = f" | cause: {e.__cause__}" if e.__cause__ else ""
         log(f"campaign {picked.get('id')} error: {type(e).__name__}: {str(e)[:500]}{cause}")
-        return "skipped:error"
+        # 2026-09-21: machine-readable failure class/detail (secret-redacted).
+        return _error_outcome(e)
     return outcome
+
+
+def _error_outcome(e: BaseException) -> str:
+    """2026-09-21 ROOT FIX: broad-except se machine-readable outcome.
+
+    Pehle sirf `skipped:error` milta tha — failure class/detail gayab, isliye
+    har error ek jaisa dikhta tha aur deterministic vs transient ka faisla
+    andaze pe hota tha. Ab outcome me class + sanitized detail aata hai
+    (jaise `skipped:error:ValueError:brief_url khaali hai`), taaki watcher
+    ka deterministic/transient classifier sahi kaam kare.
+    Secrets kabhi outcome me nahi — key/token/password patterns redact."""
+    cls = type(e).__name__ or "Error"
+    msg = re.sub(r"\s+", " ", str(e)[:160]).strip()
+    low = msg.lower()
+    if any(p in low for p in ("key=", "token=", "secret=", "password=",
+                              "bearer ", "apikey", "api_key")):
+        msg = "[redacted]"
+    log(f"campaign error: {cls}: {msg[:120]}")
+    tail = f":{msg[:120]}" if msg else ""
+    return f"skipped:error:{cls}{tail}"
+
+
+def _acquire_planner_lock():
+    """Shared planner lock (/tmp/clipflow_planner_v2.lock) non-blocking.
+
+    2026-09-21 ROOT FIX: detached Run Now planner pehle ye lock bypass
+    karta tha — scheduled 6h sweep (run_planner.sh, flock -n) ke saath
+    overlap ho sakta tha. Ab planner_v2 khud lock leta hai; na mile to
+    skipped:planner_locked (continuation — attempt nahi jalta, agla tick
+    retry karega).
+    """
+    import fcntl
+    try:
+        lf = open("/tmp/clipflow_planner_v2.lock", "w")
+        fcntl.flock(lf.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return lf
+    except OSError:
+        return None
+
+
+def _install_exit_marker():
+    """2026-09-21 ROOT FIX (process metadata): har detached attempt ka
+    durable exit record — /tmp/clipflow_planner_<req8>_<attempt>.exit
+    (JSON: request_id, attempt, device_id, pid, started_at, ended_at,
+    exit_code). sys.exit() ke har raste pe likhta hai (normal, lock,
+    signal, infra, fatal). SIGKILL/OOM pe file BANTI HI NAHI — uska na
+    hona hi signal hai: watcher dead PID + no done: + no exit file =
+    error:killed (attempt restore, infra ki tarah)."""
+    req_id = os.environ.get("PLANNER_REQUEST_ID")
+    attempt = os.environ.get("PLANNER_ATTEMPT")
+    if not req_id or not attempt:
+        return
+    import atexit
+    import json as _json
+    dev = os.environ.get("PLANNER_DEVICE_ID", "")[:8]
+    started = datetime.now(timezone.utc).isoformat()
+    path = f"/tmp/clipflow_planner_{req_id[:8]}_{attempt}.exit"
+    state = {"code": None}
+    _orig_exit = sys.exit
+
+    def _exit(code=0):
+        state["code"] = code
+        _orig_exit(code)
+
+    sys.exit = _exit  # noqa: B023
+
+    def _write():
+        try:
+            with open(path, "w") as f:
+                _json.dump({
+                    "request_id": req_id,
+                    "attempt": attempt,
+                    "device_id": dev,
+                    "pid": os.getpid(),
+                    "started_at": started,
+                    "ended_at": datetime.now(timezone.utc).isoformat(),
+                    "exit_code": state["code"],
+                }, f)
+        except Exception:
+            pass
+
+    atexit.register(_write)
+
+
+def _install_signal_handlers():
+    """2026-09-21 ROOT FIX (silent death): SIGTERM/SIGINT pe chup-chaap
+    marne ke bajaye 'done: error:signal_<name>' likh ke exit 3 (infra).
+    Isse watcher attempt jalaye bina requeue karta hai, aur log me
+    saaf wajah milti hai (pehle log beech me kat jata tha — pata hi nahi
+    chalta tha planner ko kisne maara)."""
+    import signal
+
+    def _handler(signum, frame):
+        try:
+            name = signal.Signals(signum).name.lower()
+        except Exception:
+            name = str(signum)
+        print(f"[planner_v2] signal {name} mila — ruk raha hu", flush=True)
+        print(f"done: error:signal_{name}", flush=True)
+        sys.exit(3)
+
+    try:
+        signal.signal(signal.SIGTERM, _handler)
+        signal.signal(signal.SIGINT, _handler)
+    except Exception:
+        pass
 
 
 def main() -> None:
@@ -1712,6 +2045,16 @@ def main() -> None:
     if config.MISSING_CORE:
         log(f"FATAL: env missing: {config.MISSING_CORE}")
         sys.exit(2)
+    _install_signal_handlers()
+    _install_exit_marker()
+    # Shared planner lock — _lock ko poore run tak zinda rakhna zaroori
+    # hai (variable scope me rahe to GC lock release nahi karega).
+    _lock = _acquire_planner_lock()
+    if _lock is None:
+        print("[planner_v2] dusra planner already chal raha hai — skip",
+              flush=True)
+        print("done: skipped:planner_locked", flush=True)
+        sys.exit(0)
     try:
         outcome = plan_once(dry_run=args.dry_run)
     except Exception as e:  # noqa: BLE001
