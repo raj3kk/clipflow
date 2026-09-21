@@ -100,7 +100,9 @@ export const SKILLS: Record<SkillKey, Skill> = {
       "Budget dry-up stop rule: remaining budget nazdeek-khaali dikhe to posting roko " +
       "(late-verifying views unpaid reh jate hain). Brief doc brands kabhi bhi update " +
       "kar sakte hain — har run se pehle live brief dobara padho, cached brief pe " +
-      "bharosa nahi.",
+      "bharosa nahi. CR ToS (2026-09-21): payout WHOP CREDITS me, first-come-first-served " +
+      "(cutoff ke baad ke views ka paisa nahi); content types me 'other' bhi hota hai — " +
+      "sirf 'clipping' pick karo, 'ugc'/'other' veto.",
     preconditions: [
       "active campaigns ka pool load hona chahiye",
       "submitted-campaign exclusion data available hona chahiye (fail-closed: load na ho to koi pick nahi)",
@@ -215,7 +217,13 @@ export const SKILLS: Record<SkillKey, Skill> = {
       "HARD boundary (Whop clipping Terms): fake views, bots, artificial engagement, " +
       "stolen content, impersonation, copyright violation, campaign material misuse " +
       "-> account suspension/removal. Payout sirf valid traffic pe. Koi view-boosting " +
-      "shortcut kabhi nahi.",
+      "shortcut kabhi nahi. CR ToS (2026-09-21, official): (1) FTC disclosure MANDATORY " +
+      "— har post me #Sponsored ya #[Brand]Ad 'more' fold se PEHLE (caption me jodo); " +
+      "(2) Whop ke bahar koi compensation deal = suspension/termination; " +
+      "(3) violation pe credits ka WITHHOLDING/CLAWBACK + naya account ban nahi; " +
+      "(4) Content Rewards 18+ only; (5) Whop pe scraping/automated harvesting mana " +
+      "hai — sirf user ka real app WebView chalao; (6) termination pe turant posting " +
+      "band + content remove karo.",
     preconditions: [
       "campaign candidate ka requirements + caption_template + brief/notes data hona chahiye",
       "clip/post-type enqueue se PEHLE mandatory run",
@@ -407,9 +415,12 @@ export const SKILLS: Record<SkillKey, Skill> = {
       "Whop submit + live-Reel frame verification — post hua Reel kholke " +
       "frames check karo (~1s hook, 7s/15s/25s captions), phir hi submit. " +
       "Post se PEHLE verify karo ki posting account Whop se linked hai " +
-      "(unlinked account = submission untrackable = reject). View-dispute " +
-      "evidence: platform analytics ke timestamped screenshots 24h/72h/7d pe rakho " +
-      "(Whop tracker jeetta hai — ye time-series evidence hai).",
+      "(unlinked account = submission untrackable = reject). " +
+      "CR ToS (2026-09-21, official): submission states Pending/Approved/Flagged/Rejected; " +
+      "AI reviewer screen karta hai, brand ke 48h ke baad AUTO-APPROVE — lambi pending " +
+      "stuck nahi, dobara submit mat karo. Payout Whop Credits me (withdraw $10 min + KYC). " +
+      "CORRECTION: 24h/72h/7d screenshots koi official Whop rule NAHI — sirf brief " +
+      "mange to rakho (campaign-level practice).",
     preconditions: [
       "IG pe Reel live post ho chuka hona chahiye (reel URL mile)",
       "Whop submit link/session available hona chahiye",
@@ -420,7 +431,7 @@ export const SKILLS: Record<SkillKey, Skill> = {
       "har submit ka screenshot proof",
       "submit ke baad v2_submissions me record",
       "koi submit unlinked account se nahi",
-      "24h/72h/7d analytics screenshots rakhe",
+      "brief mange to analytics screenshots rakhe (official Whop rule nahi)",
     ],
     evaluate(input) {
       const reasons: string[] = [];
