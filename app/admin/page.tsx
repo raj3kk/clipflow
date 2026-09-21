@@ -314,7 +314,29 @@ function AppUpdateCard() {
   const [changelog, setChangelog] = useState("");
   const [force, setForce] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [delBusy, setDelBusy] = useState<number | null>(null);
   const [msg3, setMsg3] = useState("");
+
+  async function delRelease(version_code: number, version_name: string, wasForce: boolean) {
+    const warn = wasForce
+      ? `v${version_name} (code ${version_code}) FORCE update hai! Delete karne pe ye release backend se PERMANENT hat jayegi aur phone ko iska update prompt dobara nahi milega.`
+      : `v${version_name} (code ${version_code}) backend se PERMANENT delete ho jayegi.`;
+    if (!window.confirm(`${warn}\n\nPakka delete karna hai?`)) return;
+    setDelBusy(version_code);
+    setMsg3("");
+    const r = await fetch(`/api/admin/app-releases?version_code=${version_code}`, { method: "DELETE" });
+    const j = await r.json().catch(() => ({}));
+    setDelBusy(null);
+    if (!r.ok) {
+      setMsg3(j.error || "Delete nahi hua.");
+      return;
+    }
+    setMsg3(
+      `v${version_code} permanently delete ho gaya.` +
+        (j.was_latest ? " (ye latest tha — ab phone agle-latest release ko dekhega)" : "")
+    );
+    await refresh();
+  }
 
   async function refresh() {
     const r = await fetch("/api/admin/app-releases");
@@ -442,6 +464,14 @@ function AppUpdateCard() {
                 <span className="ml-2 text-xs font-semibold text-red-700 bg-red-50 px-2 py-0.5 rounded">FORCE</span>
               )}
               <span className="text-slate-600"> · {age(x.published_at)}</span>
+              <button
+                className="ml-2 text-xs text-red-600 hover:text-red-800 underline disabled:opacity-50"
+                disabled={delBusy === x.version_code}
+                onClick={() => delRelease(x.version_code, x.version_name, x.force_update)}
+                title="Backend se permanent delete"
+              >
+                {delBusy === x.version_code ? "Deleting…" : "Delete"}
+              </button>
               <div className="text-xs text-slate-500 break-all">{x.apk_url}</div>
               {x.changelog ? <div className="text-xs text-slate-600 whitespace-pre-line mt-1">{x.changelog}</div> : null}
             </li>
