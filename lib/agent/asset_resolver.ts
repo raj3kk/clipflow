@@ -56,6 +56,13 @@ export interface AssetResolution {
   /** patched URL — authorization tak blocked */
   quarantined: boolean;
   reasons: string[];
+  /**
+   * Deep-lookup diagnostics (fail-closed debug ke liye, 2026-09-21):
+   * influencer lookup me try kiye gaye @handles. Selector route isey
+   * no_clip_ready response me bhi expose karta hai taaki pata chale
+   * kyun koi candidate resolve nahi hua. Secret/raw brief content nahi.
+   */
+  deepHandles?: string[];
 }
 
 /**
@@ -398,6 +405,7 @@ export async function resolveCampaignAssetDeep(
   }
   return {
     ...sync,
+    deepHandles: handles,
     reasons: [
       ...sync.reasons,
       `influencer public lookup: ${handles.length} handle(s) tried ` +
