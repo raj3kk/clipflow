@@ -35,6 +35,30 @@ import {
 
 const MAIN_HUB_USER_ID = "00000000-0000-0000-0000-000000000000";
 
+/**
+ * Supabase query retry (2026-09-21 hardening):
+ * Egress proxy IncompleteRead / RemoteDisconnected ko transient samjho —
+ * 3 try, exponential backoff. Deterministic errors (PGRST, 42703, etc.)
+ * turant throw honge (retry nahi).
+ */
+async function sbRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
+  let lastErr: unknown = null;
+  for (let i = 0; i < 3; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      const msg = String((e as Error)?.message ?? e);
+      const transient =
+        /IncompleteRead|RemoteDisconnected|ECONNRESET|ETIMEDOUT|fetch failed|network/i.test(msg);
+      if (!transient || i === 2) throw e;
+      // backoff 1s, 2s
+      await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 interface Campaign {
   id: string;
   name: string | null;
@@ -180,7 +204,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Supabase not configured" }, { status: 500 });
   }
 
-  let body: { user_id?: string; deep_lookup?: boolean };
+  let body: { user_id?: string; deep_lookup?: boolean; request_id?: string };
   try {
     body = await req.json();
   } catch {
@@ -190,6 +214,7 @@ export async function POST(req: Request) {
   if (!userId) {
     return NextResponse.json({ error: "user_id required" }, { status: 400 });
   }
+  const requestId = (body.request_id || "").trim() || null;
   // deep_lookup=true → pool khaali ho to influencer public lookup (bina
   // login) se asset resolve karne ki koshish (max 3 candidates, timeouts ke
   // saath). Planner isey true bhejta hai.
@@ -201,18 +226,28 @@ export async function POST(req: Request) {
   // Social Commerce News (never revive/duplicate),
   // FundingPips (safety-held: bio-link + requirements not normalized).
   const PROTECTED_IDS = ["hub-9e87c2c6", "hub-1411db9c", "cr-c0c37381"];
-  const { data: campaigns, error: campErr } = await sb
-    .from("campaigns")
-    .select(
-      "id,name,sponsor,payout_per_1k_usd,budget_remaining_usd," +
-      "min_seconds,max_seconds,requirements,caption_template," +
-      "hashtags,brief_url,campaign_url,joined,join_status,notes"
-    )
-    .eq("user_id", MAIN_HUB_USER_ID)
-    .eq("active", true)
-    .not("id", "in", `(${PROTECTED_IDS.join(",")})`)
-    .order("created_at", { ascending: false })
-    .limit(50);
+  let campaigns: Campaign[] | null = null;
+  let campErr: { message: string } | null = null;
+  try {
+    const res = await sbRetry(async () => {
+      return await sb
+        .from("campaigns")
+        .select(
+          "id,name,sponsor,payout_per_1k_usd,budget_remaining_usd," +
+          "min_seconds,max_seconds,requirements,caption_template," +
+          "hashtags,brief_url,campaign_url,joined,join_status,notes"
+        )
+        .eq("user_id", MAIN_HUB_USER_ID)
+        .eq("active", true)
+        .not("id", "in", `(${PROTECTED_IDS.join(",")})`)
+        .order("created_at", { ascending: false })
+        .limit(50);
+    }, "campaigns");
+    campaigns = (res.data ?? []) as unknown as Campaign[];
+    campErr = res.error as { message: string } | null;
+  } catch (e) {
+    campErr = { message: String((e as Error)?.message ?? e).slice(0, 200) };
+  }
 
   if (campErr) {
     return NextResponse.json({ error: campErr.message }, { status: 500 });
@@ -223,21 +258,25 @@ export async function POST(req: Request) {
   // risk lene se achha hai aaj ka run skip ho jaye.
   const submittedIds = new Set<string>();
   try {
-    const { data: subs, error: subErr } = await sb
-      .from("submissions")
-      .select("post_id")
-      .eq("user_id", userId)
-      .limit(100);
+    const { data: subs, error: subErr } = await sbRetry(async () => {
+      return await sb
+        .from("submissions")
+        .select("post_id")
+        .eq("user_id", userId)
+        .limit(100);
+    }, "submissions");
     if (subErr) throw new Error(subErr.message);
     const pids = (subs ?? [])
       .map((r) => r.post_id as string)
       .filter(Boolean);
     if (pids.length > 0) {
-      const { data: posts, error: postErr } = await sb
-        .from("posts")
-        .select("campaign_id")
-        .in("id", pids)
-        .limit(100);
+      const { data: posts, error: postErr } = await sbRetry(async () => {
+        return await sb
+          .from("posts")
+          .select("campaign_id")
+          .in("id", pids)
+          .limit(100);
+      }, "posts");
       if (postErr) throw new Error(postErr.message);
       for (const p of posts ?? []) {
         if (p.campaign_id) submittedIds.add(p.campaign_id as string);
@@ -296,6 +335,7 @@ export async function POST(req: Request) {
     tried_handles: string[];
     outcome: "promoted" | "ineligible" | "rejected";
     detail: string;
+    authorization_evidence?: string | null;
   }
   const deepDiags: DeepDiag[] = [];
   if (pool.length === 0 && deepLookup) {
@@ -318,10 +358,10 @@ export async function POST(req: Request) {
     // Parallel — sabse tez successful lookup jeet-ta hai; lookup fail =
     // candidate skip (fail closed), koi exception route ko nahi todta.
     const settled = await Promise.allSettled(
-      assetOnly.map((x) => resolveCampaignAssetDeep(x.c, 8000))
+      deepCandidates.map((x) => resolveCampaignAssetDeep(x.c, 8000))
     );
-    for (let i = 0; i < assetOnly.length; i++) {
-      const x = assetOnly[i];
+    for (let i = 0; i < deepCandidates.length; i++) {
+      const x = deepCandidates[i];
       const s = settled[i];
       const diag: DeepDiag = {
         id: x.c.id,
@@ -330,6 +370,7 @@ export async function POST(req: Request) {
         tried_handles: [],
         outcome: "ineligible",
         detail: "",
+        authorization_evidence: null,
       };
       if (s.status === "rejected") {
         // Timeout / fetch crash — fail closed, candidate skip.
@@ -341,7 +382,8 @@ export async function POST(req: Request) {
       } else {
         const deep = s.value;
         diag.tried_handles = deep.deepHandles ?? [];
-        if (deep.eligible && !deep.quarantined) {
+        diag.authorization_evidence = deep.authorizationEvidence ?? null;
+        if (deep.eligible && !deep.quarantined && deep.authorizationEvidence) {
           x.asset = deep;
           x.cls = "clip_ready";
           x.reasons = [...x.reasons, `deep lookup resolved: ${deep.assetUrl}`];
@@ -350,7 +392,7 @@ export async function POST(req: Request) {
           counts.join_only--;
           deepPromoted++;
           diag.outcome = "promoted";
-          diag.detail = `resolved: ${(deep.assetUrl || "").slice(0, 120)}`;
+          diag.detail = `resolved: ${(deep.assetUrl || "").slice(0, 120)} | auth: ${deep.authorizationEvidence.slice(0, 80)}`;
         } else {
           diag.outcome = "ineligible";
           diag.detail = deep.reasons.slice(-2).join(" | ").slice(0, 220);
@@ -406,6 +448,57 @@ export async function POST(req: Request) {
   // phir legacy fallback.
   const notes = (picked.notes || {}) as Record<string, unknown>;
   const assetUrl = pickedX.asset.assetUrl;
+
+  // 2026-09-21: selector summary — pipeline_requests.notes me persist karo
+  // (agar request_id mila). Safe fields only: counts, top failures,
+  // selected asset ka authorization evidence. Secret/raw brief nahi.
+  const topFailures = classified
+    .filter((x) => x.cls !== "clip_ready")
+    .slice(0, 3)
+    .map((x) => ({
+      id: x.c.id,
+      name: (x.c.name || "").slice(0, 60),
+      cls: x.cls,
+      reason: (x.reasons[0] || "").slice(0, 120),
+    }));
+  const selectorSummary = {
+    selector_at: new Date().toISOString(),
+    counts,
+    pool_size: pool.length,
+    deep_lookup: deepLookup,
+    deep_promoted: deepPromoted,
+    selected: {
+      id: picked.id,
+      name: picked.name,
+      asset_url: (assetUrl || "").slice(0, 140),
+      asset_source: pickedX.asset.source,
+      authorization_evidence: pickedX.asset.authorizationEvidence || null,
+    },
+    top_failures: topFailures,
+  };
+  if (requestId) {
+    try {
+      // Best-effort: notes merge karo, route ko fail mat karo.
+      const { data: existing } = await sb
+        .from("pipeline_requests")
+        .select("notes")
+        .eq("id", requestId)
+        .single();
+      const prevNotes =
+        existing && typeof existing.notes === "object" && existing.notes
+          ? (existing.notes as Record<string, unknown>)
+          : {};
+      await sbRetry(async () => {
+        return await sb
+          .from("pipeline_requests")
+          .update({ notes: { ...prevNotes, selector_summary: selectorSummary } })
+          .eq("id", requestId);
+      }, "pipeline_requests notes");
+    } catch {
+      // best-effort only — ignore
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     campaign: {
@@ -428,6 +521,7 @@ export async function POST(req: Request) {
       classification: pickedX.cls,
       classification_reasons: pickedX.reasons,
       asset: pickedX.asset,
+      authorization_evidence: pickedX.asset.authorizationEvidence || null,
       extracted: pickedX.extracted,
       deep_promoted: deepPromoted > 0,
     },
@@ -436,5 +530,10 @@ export async function POST(req: Request) {
     counts,
     excluded_submitted: submittedIds.size,
     deep_promoted: deepPromoted,
+    deep_lookup: deepLookup,
+    // 2026-09-21: success pe bhi diagnostics — kaunse candidates promote
+    // hue / kyun nahi hue, sab visible.
+    deep_diagnostics: deepDiags,
+    selector_summary: selectorSummary,
   });
 }
