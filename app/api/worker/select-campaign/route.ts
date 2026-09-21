@@ -304,7 +304,17 @@ export async function POST(req: Request) {
         x.cls === "join_only" &&
         !x.asset.quarantined &&
         x.reasons.some((r) => /resolved video asset/i.test(r))
-    ).slice(0, 8);
+    );
+    // 2026-09-21: slice(0,8) se PEHLE rank karo — brief_url wale
+    // candidates pehle (doc-derived @handles name-derived garbage se
+    // zyada reliable hain). Bina ranking ke brief-less campaigns hi
+    // 8 slots kha jaate the.
+    assetOnly.sort((a, b) => {
+      const ab = (a.c.brief_url || "").trim() ? 1 : 0;
+      const bb = (b.c.brief_url || "").trim() ? 1 : 0;
+      return bb - ab;
+    });
+    const deepCandidates = assetOnly.slice(0, 8);
     // Parallel — sabse tez successful lookup jeet-ta hai; lookup fail =
     // candidate skip (fail closed), koi exception route ko nahi todta.
     const settled = await Promise.allSettled(
