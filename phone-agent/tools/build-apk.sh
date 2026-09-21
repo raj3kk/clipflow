@@ -12,8 +12,8 @@ rm -rf $OUT && mkdir -p $OUT/{aar,classes,dex,res}
 export JAVA_HOME=$TOOLS/jdk-17
 export PATH=$JAVA_HOME/bin:$PATH
 APPID="com.clipflow.agent"
-VERSION_CODE=44
-VERSION_NAME="0.1.0-p43"
+VERSION_CODE=60
+VERSION_NAME="0.1.0-p59"
 
 # BuildConfig.java sync (manual build me Gradle nahi hai)
 sed -i -e "s/VERSION_NAME = \"[^\"]*\"/VERSION_NAME = \"$VERSION_NAME\"/" \
@@ -89,8 +89,20 @@ echo "library R packages: $(find $OUT/gen2 -name 'R.java' | wc -l)"
 javac -d $OUT/classes $(find $OUT/gen2 -name "R.java") 2>&1 | head -5; test ${PIPESTATUS[0]} -eq 0
 
 echo "== 4. d8 =="
+# 2026-09-21 CORE FIX (NoClassDefFoundError: Lkotlin/enums/EnumEntriesKt):
+# deps/ me kotlin-stdlib 1.7.10 + jdk7/jdk8 1.6.21 the — inme EnumEntriesKt
+# (Kotlin 1.9+ ka enum `entries`) NAHI HAI. Code kotlinc 1.9 se compile hota
+# hai to dex me 1.9 stdlib hona chahiye. Purane stdlib jars ko d8 input se
+# bahar karo (duplicate-class error aayega warna) aur compiler ka bundled
+# kotlin-stdlib.jar (1.9+, merged: stdlib+jdk7+jdk8+common) dex karo.
+DEX_JARS=()
+for j in "${JARS[@]}"; do
+  case "$j" in *kotlin-stdlib*) continue;; *) DEX_JARS+=("$j");; esac
+done
+echo "dex jars: ${#DEX_JARS[@]} (stdlib filtered) + kotlinc stdlib"
 $BT/d8 --min-api 26 --lib $SDK/platforms/android-34/android.jar \
-  --output $OUT/dex $(find $OUT/classes -name "*.class") "${JARS[@]}" 2>&1 | tail -5
+  --output $OUT/dex $(find $OUT/classes -name "*.class") "${DEX_JARS[@]}" \
+  $TOOLS/kotlinc/lib/kotlin-stdlib.jar 2>&1 | tail -5
 
 echo "== 4b. assets =="
 # p39-knowledge: bundled agent_knowledge.json (koi code change ke bina
