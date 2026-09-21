@@ -449,9 +449,10 @@ export async function POST(req: Request) {
   const notes = (picked.notes || {}) as Record<string, unknown>;
   const assetUrl = pickedX.asset.assetUrl;
 
-  // 2026-09-21: selector summary — pipeline_requests.notes me persist karo
+  // 2026-09-21: selector summary — pipeline_requests.note me persist karo
   // (agar request_id mila). Safe fields only: counts, top failures,
   // selected asset ka authorization evidence. Secret/raw brief nahi.
+  // NOTE: column "note" hai (singular, text) — "notes" nahi (42703 fix).
   const topFailures = classified
     .filter((x) => x.cls !== "clip_ready")
     .slice(0, 3)
@@ -478,22 +479,27 @@ export async function POST(req: Request) {
   };
   if (requestId) {
     try {
-      // Best-effort: notes merge karo, route ko fail mat karo.
+      // Best-effort: note text me append karo, route ko fail mat karo.
       const { data: existing } = await sb
         .from("pipeline_requests")
-        .select("notes")
+        .select("note")
         .eq("id", requestId)
         .single();
-      const prevNotes =
-        existing && typeof existing.notes === "object" && existing.notes
-          ? (existing.notes as Record<string, unknown>)
-          : {};
+      const prevNote =
+        existing && typeof (existing as { note?: unknown }).note === "string"
+          ? ((existing as { note: string }).note + "\n")
+          : "";
+      const summaryLine =
+        `[selector ${selectorSummary.selector_at}] ` +
+        `counts=${JSON.stringify(counts)} pool=${pool.length} ` +
+        `selected=${picked.id} src=${pickedX.asset.source} ` +
+        `auth=${pickedX.asset.authorizationEvidence || "none"}`;
       await sbRetry(async () => {
         return await sb
           .from("pipeline_requests")
-          .update({ notes: { ...prevNotes, selector_summary: selectorSummary } })
+          .update({ note: (prevNote + summaryLine).slice(0, 2000) })
           .eq("id", requestId);
-      }, "pipeline_requests notes");
+      }, "pipeline_requests note");
     } catch {
       // best-effort only — ignore
     }
