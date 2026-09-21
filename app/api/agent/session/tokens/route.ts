@@ -44,6 +44,10 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
+  // DB check constraint: connections.service in
+  // ('instagram','whop','gmail','content_rewards') — phone wire value
+  // "contentrewards" ko yahan normalize karo (2026-09-21 fix).
+  const dbService = service === "contentrewards" ? "content_rewards" : service;
   if (!cookieHeader || cookieHeader.length > 16384) {
     return NextResponse.json(
       { error: "cookie_header missing or too large." },
@@ -76,7 +80,7 @@ export async function POST(req: Request) {
   const { error } = await sb.from("connections").upsert(
     {
       user_id: ident.userId,
-      service,
+      service: dbService,
       method: "web-session",
       label: "Phone WebView session (auto-synced)",
       status: "saved_unverified",

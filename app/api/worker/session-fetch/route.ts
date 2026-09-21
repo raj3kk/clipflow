@@ -58,6 +58,9 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
+  // DB check constraint ke hisaab se normalize (tokens route jaisa):
+  // wire "contentrewards" -> DB "content_rewards" (2026-09-21 fix).
+  const dbService = service === "contentrewards" ? "content_rewards" : service;
   let hostname: string;
   try {
     hostname = new URL(url).hostname;
@@ -89,7 +92,7 @@ export async function POST(req: Request) {
     .from("connections")
     .select("secret_enc")
     .eq("user_id", userId)
-    .eq("service", service)
+    .eq("service", dbService)
     .eq("method", "web-session")
     .order("created_at", { ascending: false })
     .limit(1)
