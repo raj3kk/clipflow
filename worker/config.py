@@ -357,7 +357,15 @@ def sb_request(method: str, path: str, body: dict | None = None,
                 time.sleep(wait)
                 last = e
                 continue
-            detail = e.read().decode(errors="replace")[:400]
+            detail_raw = e.read()
+            # 2026-09-21: error bodies bhi gzip me aa sakte hain — warna
+            # diagnostics me compressed binary dikhta hai.
+            try:
+                if e.headers and e.headers.get("Content-Encoding") == "gzip":
+                    detail_raw = gzip.decompress(detail_raw)
+            except Exception:
+                pass
+            detail = detail_raw.decode(errors="replace")[:400]
             raise RuntimeError(
                 f"Supabase {method} {path} -> {e.code}: {detail}") from e
         except Exception as e:  # noqa: BLE001
