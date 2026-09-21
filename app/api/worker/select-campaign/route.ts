@@ -281,7 +281,9 @@ export async function POST(req: Request) {
 
   // 4b. Deep lookup fallback (WP3): pool khaali aur deep_lookup=true →
   // sirf-asset-kami wale join_only candidates pe influencer public lookup
-  // (max 3, timeout-guarded). Resolve ho to clip_ready me promote.
+  // (max 8, parallel, timeout-guarded). Resolve ho to clip_ready me promote.
+  // 2026-09-21: 3→8 — brand-naam wale campaigns ka channel naam se nahi
+  // milta; brief-doc @handles se milta hai (asset_resolver).
   let deepPromoted = 0;
   if (pool.length === 0 && deepLookup) {
     const assetOnly = classified.filter(
@@ -289,21 +291,25 @@ export async function POST(req: Request) {
         x.cls === "join_only" &&
         !x.asset.quarantined &&
         x.reasons.some((r) => /resolved video asset/i.test(r))
-    ).slice(0, 3);
-    for (const x of assetOnly) {
-      try {
-        const deep = await resolveCampaignAssetDeep(x.c, 8000);
-        if (deep.eligible && !deep.quarantined) {
-          x.asset = deep;
-          x.cls = "clip_ready";
-          x.reasons = [...x.reasons, `deep lookup resolved: ${deep.assetUrl}`];
-          pool.push(x);
-          counts.clip_ready++;
-          counts.join_only--;
-          deepPromoted++;
-        }
-      } catch {
-        /* lookup fail = candidate skip, fail closed */
+    ).slice(0, 8);
+    // Parallel — sabse tez successful lookup jeet-ta hai; lookup fail =
+    // candidate skip (fail closed), koi exception route ko nahi todta.
+    const settled = await Promise.allSettled(
+      assetOnly.map((x) => resolveCampaignAssetDeep(x.c, 8000))
+    );
+    for (let i = 0; i < assetOnly.length; i++) {
+      const x = assetOnly[i];
+      const s = settled[i];
+      if (s.status !== "fulfilled") continue;
+      const deep = s.value;
+      if (deep.eligible && !deep.quarantined) {
+        x.asset = deep;
+        x.cls = "clip_ready";
+        x.reasons = [...x.reasons, `deep lookup resolved: ${deep.assetUrl}`];
+        pool.push(x);
+        counts.clip_ready++;
+        counts.join_only--;
+        deepPromoted++;
       }
     }
   }
