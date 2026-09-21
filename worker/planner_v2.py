@@ -974,12 +974,17 @@ def upload_clip(local_mp4: str, cid: str, start: int, end: int) -> str:
 # --------------------------------------------------------------------------
 def _post_worker(path: str, payload: dict) -> dict:
     """Worker-secret POST with retry. Returns parsed JSON, ya
-    {"ok": False, "capped": True} / {"ok": False, "conflict": True}."""
+    {"ok": False, "capped": True} / {"ok": False, "conflict": True}.
+
+    2026-09-21: tries 4→8 — egress proxy Vercel-bound POSTs ko bhi
+    mid-transfer kill karta hai (~25-30% per try); 4 tries me p(all fail)
+    ~1% hota hai jo bad burst me aksar milta tha. 8 tries ≈ 0.01%.
+    """
     url = config.CLIPFLOW_URL.rstrip("/") + path
     body = json.dumps(payload).encode()
     last: Exception | None = None
     tag = f"{path} →"
-    for i in range(4):
+    for i in range(8):
         req = urllib.request.Request(url, data=body, method="POST")
         req.add_header("Content-Type", "application/json")
         if config.WORKER_SECRET:
@@ -1003,7 +1008,7 @@ def _post_worker(path: str, payload: dict) -> dict:
                         "error": dj.get("error", detail)}
             if 500 <= e.code < 600 and i < 3:
                 wait = min(2 ** i, 15) + random.uniform(0, 1.5)
-                log(f"{tag} {e.code} (retry {i + 1}/4, {wait:.1f}s)")
+                log(f"{tag} {e.code} (retry {i + 1}/8, {wait:.1f}s)")
                 time.sleep(wait)
                 last = e
                 continue
@@ -1011,7 +1016,7 @@ def _post_worker(path: str, payload: dict) -> dict:
         except Exception as e:  # noqa: BLE001
             last = e
             wait = 3 * (i + 1) + random.uniform(0, 1.5)
-            log(f"{tag} retry {i + 1}/4: {type(e).__name__} ({wait:.1f}s)")
+            log(f"{tag} retry {i + 1}/8: {type(e).__name__} ({wait:.1f}s)")
             time.sleep(wait)
     raise RuntimeError(f"{path} network failed: {last}")
 
