@@ -3,34 +3,51 @@ import { getDeviceIdentity } from "@/lib/device_auth";
 
 /**
  * USA egress guarantee: ye route HAMESHA iad1 (Ashburn, Virginia, USA) me
- * execute ho — Vercel default kabhi bhi badle, Whop/ContentRewards traffic
- * USA IP se hi niklega. (p43, 2026-09-21)
+ * execute ho — Vercel default kabhi bhi badle, app ka traffic USA IP se hi
+ * niklega. (p43, 2026-09-21)
  */
 export const preferredRegion = "iad1";
 
 /**
- * USA egress proxy (p35, 2026-09-20; p41 redirect cookie-jar fix).
+ * USA egress proxy (p35, 2026-09-20; p41 redirect cookie-jar fix;
+ * p44 full-app: sirf whop/contentrewards nahi — app ke saare hosts).
  *
- * Phone ke WebView ke Whop/ContentRewards requests ko US IP se forward
- * karta hai taaki region-locked campaigns ("not available in your region")
- * join ho saken. Vercel iad1 (Ashburn, Virginia, USA) se egress hota hai.
- *
- * p41: phone ab MAIN-FRAME document loads bhi isi se proxy karta hai
- * (JobEngine.shouldInterceptRequest) — region lock page-load pe lagta hai.
- * Instagram/Supabase/Google egress se bahar hain (IG account India ka hai;
- * US datacenter IP se security challenge ka risk).
+ * Phone ke WebView + native HTTP clients ke requests US IP se forward karta
+ * hai ("pura app USA se"). Vercel iad1 (Ashburn, Virginia, USA) se egress.
  *
  * POST /api/net/egress  (x-device-id + x-device-key)
  *   { url, method?, headers?, body_base64? }
- *   → { ok:true, status, headers, body_base64 }
+ *   → { ok:true, status, headers, set_cookies, body_base64, final_url, region }
  *   → { ok:false, error } (502)
  *
  * Guards:
  * - Sirf active enrolled device (device_auth).
- * - SSRF: sirf whop.com / contentrewards.com (aur subdomains).
+ * - SSRF: explicit allowlist (neeche). Koi bhi host proxy nahi hota.
  * - Sirf safe HTTP methods; 25s timeout; max ~8MB response.
  */
-const ALLOWED_SUFFIXES = ["whop.com", "contentrewards.com"];
+const ALLOWED_SUFFIXES = [
+  "whop.com",
+  "contentrewards.com",
+  // p44 full-app: IG/FB, Google (OAuth/YouTube), Supabase, TikTok CDNs
+  "instagram.com",
+  "cdninstagram.com",
+  "fbcdn.net",
+  "facebook.com",
+  "supabase.co",
+  "googleapis.com",
+  "google.com",
+  "gstatic.com",
+  "googleusercontent.com",
+  "youtube.com",
+  "youtu.be",
+  "googlevideo.com",
+  "ytimg.com",
+  "tiktok.com",
+  "tiktokcdn.com",
+  "byteoversea.com",
+  "ibytedtos.com",
+  "vercel.app",
+];
 const ALLOWED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
@@ -188,6 +205,9 @@ export async function POST(req: Request) {
       headers: outHeaders,
       set_cookies: setCookies,
       body_base64: buf.toString("base64"),
+      // p44: redirect chain ka final URL — phone ke form-submit handler ko
+      // sahi location pe le jane ke liye (history.replaceState).
+      final_url: current,
     });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
