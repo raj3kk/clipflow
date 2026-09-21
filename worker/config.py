@@ -14,6 +14,7 @@ Security: never log or print decrypted secret values.
 from __future__ import annotations
 
 import base64
+import gzip
 import http.client
 import json
 import os
@@ -269,6 +270,7 @@ TRANSIENT_ERRORS = (
     socket.timeout,
     TimeoutError,
     ConnectionError,
+    TransientError,  # 2026-09-20: junk-200-body bhi retry ke layak hai
 )
 
 
@@ -300,11 +302,18 @@ def sb_headers(extra: dict | None = None) -> dict:
 
 def sb_request(method: str, path: str, body: dict | None = None,
                query: dict | None = None, timeout: int = 60,
-               tries: int = 6) -> dict:
+               tries: int = 10, headers: dict | None = None) -> dict:
     """Supabase REST call — transient errors pe backoff+jitter ke saath retry.
 
     4xx = permanent (turant raise). Connection blips / timeouts / 5xx =
     transient (tries tak retry, phir TransientError).
+
+    2026-09-20 CORE FIX: tries 6→10. Egress proxy se Supabase tak ka rasta
+    chronic flaky hai (~20% per-query transient, bad bursts me ~70%).
+    6 tries me p(all fail) ≈ 12% (bad burst) — planner FATAL ho jata tha.
+    10 tries me ≈ 2.8% — bache hue case ke liye planner exit-code 3 deta hai
+    (infra_unavailable) aur pipeline_watch attempt jalaye bina requeue karta
+    hai.
     """
     url = SUPABASE_URL + path
     if query:
@@ -313,13 +322,33 @@ def sb_request(method: str, path: str, body: dict | None = None,
     last: BaseException | None = None
     for i in range(tries):
         req = urllib.request.Request(url, data=data, method=method)
-        for k, v in sb_headers(
-                {"Content-Type": "application/json"} if data else {}).items():
+        hdrs = {"Content-Type": "application/json"} if data else {}
+        if headers:
+            hdrs.update(headers)
+        for k, v in sb_headers(hdrs).items():
             req.add_header(k, v)
+        # 2026-09-21 CORE FIX: egress proxy mid-transfer connection kill
+        # karta hai (IncompleteRead) — chhota transfer = kam exposure.
+        # PostgREST gzip support karta hai; 15KB JSON ~2-3KB me simat jata
+        # hai. urllib khud decompress NAHI karta — yahan haath se karo.
+        req.add_header("Accept-Encoding", "gzip")
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                raw = resp.read().decode()
-                return json.loads(raw) if raw else {}
+                raw_bytes = resp.read()
+                if resp.headers.get("Content-Encoding") == "gzip":
+                    raw_bytes = gzip.decompress(raw_bytes)
+                raw = raw_bytes.decode()
+                if not raw:
+                    return {}
+                parsed = json.loads(raw)
+                # 2026-09-20 CORE FIX: proxy kabhi 200 pe junk body bhejta hai
+                # (JSON string/number/null) — ye valid API response nahi hai.
+                # Transient maanke retry karo, warna aage "'str' object has no
+                # attribute 'get'" jaisi cryptic crash hoti hai.
+                if not isinstance(parsed, (dict, list)):
+                    raise TransientError(
+                        f"junk 200 body from {path}: {raw[:60]!r}")
+                return parsed
         except urllib.error.HTTPError as e:
             if 500 <= e.code < 600 and i < tries - 1:
                 wait = _retry_wait(i)
