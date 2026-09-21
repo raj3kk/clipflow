@@ -281,12 +281,48 @@ async function fetchText(url: string, timeoutMs: number): Promise<string | null>
 }
 
 /**
+ * Brief Google Doc ka plain text nikalo (public export, timeout-guarded).
+ * Brand ka apna brief doc hai — isme @handle mentions official hote hain.
+ */
+async function fetchBriefDocText(
+  briefUrl: string | null | undefined,
+  timeoutMs: number
+): Promise<string | null> {
+  if (!briefUrl) return null;
+  const m = briefUrl.match(/docs\.google\.com\/document\/d\/([A-Za-z0-9_-]+)/i);
+  if (!m) return null;
+  return fetchText(
+    `https://docs.google.com/document/d/${m[1]}/export?format=txt`,
+    timeoutMs
+  );
+}
+
+/** Doc text se @handle mentions nikalo (creator ka official handle). */
+function docHandleCandidates(text: string | null): string[] {
+  if (!text) return [];
+  const out: string[] = [];
+  const re = /(^|[\s("'])@([A-Za-z][A-Za-z0-9_.-]{1,28})/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const h = m[2].replace(/[.-]+$/, "");
+    if (h.length >= 3 && !out.includes(h)) out.push(h);
+    if (out.length >= 6) break;
+  }
+  return out;
+}
+
+/**
  * (d) Influencer public lookup — BINA login.
  * YouTube @handle page se channelId nikalo → public RSS feed se latest
  * videos → campaign keywords se match. Attributable official asset milta
  * hai (influencer ka apna channel). NOTE: ye brief-required MOMENT ko
  * replace NAHI karta — hard moment requirements render time pe fail-closed
  * rehte hain (requirement_extractor.hard_requirements).
+ *
+ * 2026-09-21: handle candidates sirf campaign naam se nahi — brief Google
+ * Doc ke text se @mentions bhi (doc me "@MacMula" jaise official handles
+ * hote hain). Campaign-naam se match karne wale handles pehle try hote
+ * hain (misattribution risk kam).
  */
 export async function resolveCampaignAssetDeep(
   c: CampaignAssetInput,
@@ -301,7 +337,25 @@ export async function resolveCampaignAssetDeep(
     .filter((w) => w.length > 3 && !/clipping|campaign|budget|official/.test(w))
     .slice(0, 6);
 
-  for (const handle of handleCandidates(c.name)) {
+  // 2026-09-21: brief doc se official @handles bhi candidate banao.
+  // Doc-text handles + naam-derived handles, dedup; naam-token se match
+  // karne wale doc handles pehle (agency handles baad me).
+  const nameTokens = (c.name || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length > 3);
+  const docText = await fetchBriefDocText(c.brief_url, 5000);
+  const docHandles = docHandleCandidates(docText).sort((a, b) => {
+    const score = (h: string) =>
+      nameTokens.some((t) => h.toLowerCase().includes(t)) ? 0 : 1;
+    return score(a) - score(b);
+  });
+  const handles: string[] = [];
+  for (const h of [...docHandles, ...handleCandidates(c.name)]) {
+    if (!handles.includes(h)) handles.push(h);
+  }
+
+  for (const handle of handles) {
     const page = await fetchText(`https://www.youtube.com/@${handle}`, timeoutMs);
     if (!page) continue;
     const ch = page.match(/"channelId"\s*:\s*"(UC[A-Za-z0-9_-]{20,})"/);
@@ -344,6 +398,11 @@ export async function resolveCampaignAssetDeep(
   }
   return {
     ...sync,
-    reasons: [...sync.reasons, "influencer public lookup se koi official channel/video nahi mila"],
+    reasons: [
+      ...sync.reasons,
+      `influencer public lookup: ${handles.length} handle(s) tried ` +
+        `(${handles.slice(0, 4).join(", ")}${handles.length > 4 ? "…" : ""}` +
+        `${docHandles.length > 0 ? ", doc se" : ""}) — koi official channel/video nahi mila`,
+    ],
   };
 }
