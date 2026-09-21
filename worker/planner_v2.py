@@ -283,7 +283,9 @@ def select_campaign_via_server(uid: str) -> tuple[dict | None, str]:
     """
     import urllib.request
     url = config.CLIPFLOW_URL.rstrip("/") + "/api/worker/select-campaign"
-    body = json.dumps({"user_id": uid}).encode()
+    # 2026-09-20 WP3: deep_lookup=true — pool khaali ho to server influencer
+    # public lookup (bina login) se asset resolve karne ki koshish karta hai.
+    body = json.dumps({"user_id": uid, "deep_lookup": True}).encode()
     for i in range(3):
         try:
             req = urllib.request.Request(url, data=body, method="POST")
@@ -298,11 +300,17 @@ def select_campaign_via_server(uid: str) -> tuple[dict | None, str]:
                     f"${c.get('payout_per_1k_usd')}/1k "
                     f"(pool={data.get('pool_size')}, brief={data.get('with_brief')}, "
                     f"class={c.get('classification')})")
-                # Planner ke purane format se compatible banao
+                # Planner ke purane format se compatible banao.
+                # 2026-09-20 WP3: notes MERGE hota hai — server ka asset
+                # resolution + extracted requirements preserve hote hain
+                # (pehle notes clobber ho jata tha).
                 c["notes"] = json.dumps({
                     "eligible": c.pop("notes_eligible", True),
                     "classification": c.get("classification", "clip_ready"),
                     "classification_reasons": c.get("classification_reasons", []),
+                    "asset": c.get("asset"),
+                    "extracted": c.get("extracted"),
+                    "deep_promoted": c.pop("deep_promoted", False),
                 })
                 return c, "ok"
             log(f"server select: {data.get('reason')} — local fallback HATA DIYA, fail-closed skip")
@@ -373,6 +381,32 @@ def verified_video_url(campaign: dict) -> str:
         if isinstance(l, str) and l.strip().startswith("http"):
             return l.strip()
     return ""
+
+
+# 2026-09-20 WP3: quarantined patched YouTube brief_urls — hub restore me
+# patch hue, authorization evidence nahi. Server (asset_resolver.ts) inhe
+# join_only bhejta hai; yahan defense-in-depth guard hai.
+# (lib/agent/asset_resolver.ts::QUARANTINED_YOUTUBE_IDS ka mirror — dono
+#  jagah update karo agar list badle.)
+QUARANTINED_YOUTUBE_IDS = frozenset({
+    "4Abm4WrMNJQ", "w_F0YTnadp8", "pYda8tcpfU4", "N4tM9cFZouU",
+    "spOmWw5ScDs", "OWwbaCXdkeY", "mzhpUxknIP0", "uGHSFKgCBHg",
+    "_wEzagimGjc", "MfT5HXJLx1E", "M6ldUVOyaz4",
+})
+
+_YT_ID_RE = None
+
+
+def _youtube_id(url: str) -> str:
+    """YouTube watch/shorts/embed/be URL se video ID, warna ''."""
+    global _YT_ID_RE
+    if _YT_ID_RE is None:
+        import re as _re
+        _YT_ID_RE = _re.compile(
+            r"(?:youtube\.com/(?:watch\?[^#]*v=|shorts/|embed/)|youtu\.be/)"
+            r"([A-Za-z0-9_-]{6,})", _re.IGNORECASE)
+    m = _YT_ID_RE.search(url or "")
+    return m.group(1) if m else ""
 
 
 def verified_requirements(campaign: dict) -> str:
@@ -876,19 +910,37 @@ def render_clip(src: str, start: int, end: int, tmp: str,
 # 9. caption
 # --------------------------------------------------------------------------
 def build_caption(campaign: dict, hook_text: str) -> str:
-    template = str(campaign.get("caption_template") or "")
-    tags = campaign.get("hashtags") or []
-    if isinstance(tags, str):
-        tags = [t.strip() for t in tags.replace(",", " ").split() if t.strip()]
-    tag_str = " ".join(t if str(t).startswith("#") else f"#{t}" for t in tags)
-    # 2026-09-20: brief ke required_tags (@mentions) bhi caption me — pehle
-    # ye missing the (sirf hashtags judte the, @tags nahi)
+    # 2026-09-20 WP3: server ka requirement extractor (notes.extracted) pehle —
+    # brief me exact caption ho to wahi, absent ho to generated (generated:true
+    # mark ke saath). Legacy column/text parsing fallback hai.
+    _ex = {}
     try:
-        _notes = json.loads(campaign.get("notes") or "{}")
-        _fb = _notes.get("full_brief") or {}
-        _req_tags = _fb.get("required_tags") or []
+        _ex = json.loads(campaign.get("notes") or "{}").get("extracted") or {}
     except Exception:
-        _req_tags = []
+        _ex = {}
+    if _ex:
+        _cap_f = _ex.get("caption_template") or {}
+        template = str(_cap_f.get("value") or campaign.get("caption_template") or "")
+        if _cap_f.get("generated"):
+            log(f"caption SERVER-GENERATED ({_cap_f.get('source')}) — brief me exact nahi tha")
+        _tags_f = _ex.get("hashtags") or {}
+        tags = [str(t) for t in (_tags_f.get("value") or []) if str(t).strip()]
+        _at_f = _ex.get("tags") or {}
+        _req_tags = [str(t) for t in (_at_f.get("value") or []) if str(t).strip()]
+    else:
+        template = str(campaign.get("caption_template") or "")
+        tags = campaign.get("hashtags") or []
+        if isinstance(tags, str):
+            tags = [t.strip() for t in tags.replace(",", " ").split() if t.strip()]
+        # 2026-09-20: brief ke required_tags (@mentions) bhi caption me — pehle
+        # ye missing the (sirf hashtags judte the, @tags nahi)
+        try:
+            _notes = json.loads(campaign.get("notes") or "{}")
+            _fb = _notes.get("full_brief") or {}
+            _req_tags = _fb.get("required_tags") or []
+        except Exception:
+            _req_tags = []
+    tag_str = " ".join(t if str(t).startswith("#") else f"#{t}" for t in tags)
     mention_str = " ".join(
         t if str(t).startswith("@") else f"@{t}"
         for t in _req_tags if str(t).strip())
@@ -991,6 +1043,27 @@ def live_join_job(uid: str, cid: str) -> dict | None:
     return rows[0] if rows else None
 
 
+def live_any_join_job(uid: str) -> dict | None:
+    """p42: DEVICE-WIDE single-flight — koi bhi campaign ka join_campaign
+    job live ho to naya random campaign pick mat karo. Pehle sirf same
+    campaign check hota tha, isliye COD live hote hue Charlie Berens ka
+    job queue ho gaya tha."""
+    q = {
+        "user_id": f"eq.{uid}",
+        "type": "eq.join_campaign",
+        "status": "in.(queued,claimed,dispatched,running)",
+        "select": "id,status,payload",
+        "order": "created_at.asc",
+        "limit": "1",
+    }
+    try:
+        q["device_id"] = f"eq.{DEVICE_ID}"
+    except Exception:
+        pass
+    rows = sb_retry("GET", "/rest/v1/device_jobs", query=q)
+    return rows[0] if rows else None
+
+
 def enqueue_join(uid: str, campaign: dict) -> dict:
     """POST /api/devices/<id>/join-campaign. Returns parsed JSON
     ({"ok":..., "deduped":..., "capped":..., "conflict":...}).
@@ -1044,10 +1117,27 @@ def attempt_campaign(uid: str, campaign: dict, score: float,
         f"payout=${campaign.get('payout_per_1k_usd')}/1k "
         f"join_status={campaign.get('join_status')}/joined={campaign.get('joined')}")
 
-    # Download source: phone-verified video link pehle (Whop campaign page se
-    # nikla hua official footage link — app ne server ko diya), warna brief_url.
+    # Download source: server ka asset resolution pehle (assetUrl =
+    # verified > brief > scraped > influencer lookup), warna legacy
+    # phone-verified link / brief_url fallback.
+    _asset = {}
+    try:
+        _asset = json.loads(campaign.get("notes") or "{}").get("asset") or {}
+    except Exception:
+        _asset = {}
     verified_src = verified_video_url(campaign)
-    brief_url = verified_src or (campaign.get("brief_url") or "").strip()
+    brief_url = (_asset.get("assetUrl") or "").strip() or verified_src or (campaign.get("brief_url") or "").strip()
+    if _asset:
+        log(f"asset: source={_asset.get('source')} kind={_asset.get('assetKind')} "
+            f"attributable={_asset.get('attributable')} "
+            f"reasons={str(_asset.get('reasons') or [])[:120]}")
+    # 2026-09-20 WP3 QUARANTINE GUARD: patched/unverified YouTube brief_url
+    # se download KABHI nahi — server classify inhe join_only bhejta hai,
+    # lekin defense-in-depth ke liye yahan bhi fail closed.
+    _qid = _youtube_id(brief_url)
+    if _asset.get("quarantined") or (_qid and _qid in QUARANTINED_YOUTUBE_IDS):
+        log(f"SKIP: asset quarantined (patched unverified YouTube {_qid}) — fail closed")
+        return "skipped:asset_quarantined"
     if verified_src:
         log(f"source: phone-verified video link ({verified_src[:70]}…)")
     vreq = verified_requirements(campaign)
@@ -1061,10 +1151,15 @@ def attempt_campaign(uid: str, campaign: dict, score: float,
     # specific link mangte hain. Bio link IG app me manually set hota hai —
     # bina uske submission reject ho sakta hai. Isliye bio-link-required
     # campaign ko skip karo aur activity me warn karo (fail-safe).
+    # 2026-09-20 WP3: notes.extracted.required_bio_link bhi check karo
+    # (server-side extractor full_brief se nikalta hai).
     try:
         _bn = json.loads(campaign.get("notes") or "{}")
         _bfb = _bn.get("full_brief") or {}
         _bio = str(_bfb.get("required_bio_link") or "").strip()
+        if not _bio:
+            _exb = ((_bn.get("extracted") or {}).get("required_bio_link") or {})
+            _bio = str(_exb.get("value") or "").strip()
         if _bio and _bio != "brief_unavailable" and _bio.startswith("http"):
             log(f"SKIP: bio link required ({_bio[:50]}…) — IG bio me manually "
                 f"set karna padega, bina uske reject hoga")
@@ -1405,8 +1500,11 @@ def plan_once(dry_run: bool) -> str:
     try:
         refresh_res = daily_discover_refresh(uid, dry_run=dry_run)
         if refresh_res == "refreshed":
-            set_stage("ho_gaya")
-            return "discover_requested:daily_refresh"
+            # 2026-09-21 CORE FIX: refresh ke baad early return NAHI —
+            # isi run me campaign attempt bhi karenge. Pehle ye early return
+            # on-demand pipeline request ko terminal-fail kar deta tha
+            # (attempt kharch, koi campaign try nahi).
+            log("daily refresh ho gaya — isi run me campaign attempt bhi karenge")
     except Exception as e:  # noqa: BLE001
         log(f"daily refresh me dikkat (non-fatal): {e}")
 
@@ -1502,6 +1600,17 @@ def plan_once(dry_run: bool) -> str:
         live = live_join_job(uid, picked["id"])
         if live:
             log(f"join already in flight: job {live['id'][:8]}…")
+            return "skipped:join_pending"
+        # p42: device-wide single-flight — kisi aur campaign ka join live
+        # ho to naya random pick enqueue mat karo, uska wait karo.
+        any_live = live_any_join_job(uid)
+        if any_live:
+            other = ((any_live.get("payload") or {}).get("campaign_slug") or "")[:8]
+            log(f"doosre campaign ka join live hai: job {any_live['id'][:8]}… "
+                f"({other}) — naya join nahi, wait karo")
+            activity(uid, "join_pending",
+                     f"live join {any_live['id'][:8]}… ({other}); "
+                     f"'{picked.get('name')}' wait karega")
             return "skipped:join_pending"
         try:
             res = enqueue_join(uid, picked)

@@ -539,6 +539,14 @@ def finalize_planner_outcome(req_id: str, outcome: str, detail: str,
             "Supabase se connection nahi hua (network blip) — "
             "thodi der me dobara koshish hogi, ye koshish nahi gini")
         return
+    # 2026-09-21: discover_requested (e.g. daily_refresh) kabhi terminal-fail
+    # nahi hona chahiye — ye maintenance outcome hai, campaign attempt nahi.
+    # (planner ab refresh ke baad attempt bhi continue karta hai; ye sirf
+    # purane logs/formats ke liye safety net hai.)
+    if outcome.startswith("discover_requested"):
+        requeue(req_id, "discover refresh hua — campaign attempt agle tick me")
+        log(f"{req_id}: {outcome} → requeue (maintenance, not terminal)")
+        return
     note = (outcome if outcome.startswith(("skipped:", "error:", "timeout"))
             else f"failed:{outcome}")
     if detail:
