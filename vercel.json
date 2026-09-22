@@ -1,8 +1,1 @@
-{
-  "crons": [
-    {
-      "path": "/api/devices/schedule-tick",
-      "schedule": "*/2 * * * *"
-    }
-  ]
-}
+{}
