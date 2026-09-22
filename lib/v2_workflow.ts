@@ -69,7 +69,9 @@ export function buildClipSteps(pkg: ClipPackage): Step[] {
     },
 
     // ---------- Phase 2: Instagram upload (Original = NO CROP) ----------
-    { phase: "ig-open", action: "navigate", url: "https://www.instagram.com/" },
+    // 2026-09-22 user fix: seedha /create/select/ kholo (upload ka sahi link).
+    // Homepage pe jaake Create button dhundhna galat jagah le ja raha tha.
+    { phase: "ig-open", action: "navigate", url: "https://www.instagram.com/create/select/" },
     // login check — app me IG login nahi to saaf error
     {
       phase: "ig-login-check",
@@ -92,19 +94,13 @@ export function buildClipSteps(pkg: ClipPackage): Step[] {
       message:
         "Instagram action blocked lag raha hai ('Try again later') — 24-48h ruko",
     },
-    // Create button mobile web me ICON hai ("Create" text nahi hota) — 2026-09-20
-    // fix: wait_text "Create" kabhi match nahi hota tha (screenshot proof).
-    // aria-label="New post" ya /create href se dhoondke click karo.
+    // 2026-09-22 user fix: /create/select/ seedha khulta hai — Create button
+    // dhundhne ki zaroorat nahi. File input ya "Select from computer" ka wait.
     {
       phase: "ig-create-wait",
       action: "wait_js",
-      js: "!!(document.querySelector('[aria-label=\"New post\"]')||document.querySelector('a[href*=\"/create\"]')||[...document.querySelectorAll('a')].find(a=>a.getAttribute('href')==='/create/select/'))",
+      js: "!!(document.querySelector('input[type=\"file\"]')||/select from computer/i.test(document.body?document.body.innerText:''))",
       timeout: 60000,
-    },
-    {
-      phase: "ig-create",
-      action: "eval",
-      js: `(function(){var b=document.querySelector('[aria-label="New post"]')||document.querySelector('a[href*="/create"]')||[...document.querySelectorAll('a')].find(a=>a.getAttribute('href')==='/create/select/');if(!b)return 'create-btn-not-found';b.click();return 'create-clicked';})()`,
     },
     // file chooser phone khud handle karta hai (reel.mp4)
     {
