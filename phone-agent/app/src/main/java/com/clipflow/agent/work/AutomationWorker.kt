@@ -332,28 +332,9 @@ class AutomationWorker(
                 }
                 val wv = AutomationWebView(desktopCtx)
                 LoginWebView.setup(wv)
-                wv.settings.userAgentString =
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-                        "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                        "Chrome/126.0.0.0 Safari/537.36"
-                // p64 TRUE-DESKTOP FIX (2026-09-22): sirf desktop UA string
-                // kaafi NAHI tha — WebView Sec-CH-UA-Mobile: ?1 client hint
-                // bhejta rehta hai, isliye Instagram server mobile-web bundle
-                // serve karta tha ("Select from device"). setUserAgentMetadata
-                // se client hints bhi desktop (mobile=false, platform=Windows)
-                // hote hain → IG asli desktop site deta hai
-                // ("Select from computer", stable desktop create flow).
-                // Purane WebView pe exception aaye to UA-string fallback rehta hai.
-                try {
-                    androidx.webkit.WebSettingsCompat.setUserAgentMetadata(
-                        wv.settings,
-                        androidx.webkit.UserAgentMetadata.Builder()
-                            .setMobile(false)
-                            .setPlatform("Windows")
-                            .setModel("")
-                            .build()
-                    )
-                } catch (_: Exception) { }
+                // p65: desktop UA + desktop Client Hints ab LoginWebView.setup()
+                // me hi lagte hain (GLOBAL DESKTOP MODE) — yahan duplicate
+                // code ki zaroorat nahi.
                 // hidden lekin laid-out (1920x1080, density 1:1) taaki screenshot
                 // draw() kaam kare aur desktop layout mile
                 wv.measure(
