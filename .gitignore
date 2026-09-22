@@ -1,8 +1,0 @@
-node_modules/
-.next/
-worker/.venv/
-state/
-*.pyc
-__pycache__/
-.env
-.env.local

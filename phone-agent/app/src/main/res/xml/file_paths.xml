@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<paths>
-    <!-- JobEngine upload files: <filesDir>/jobs/files/ -->
-    <files-path name="jobfiles" path="jobs/files/" />
-    <!-- Auto-update APK download: <filesDir>/updates/ -->
-    <files-path name="updates" path="updates/" />
-</paths>

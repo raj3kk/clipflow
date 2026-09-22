@@ -1,50 +1,14 @@
-# ClipFlow — Whop Clipping Automation
+# ClipFlow — Ground Zero (2026-09-22)
 
-Production dashboard + automation backend for the Whop Content Rewards clipping workflow:
+Sab kuch wipe kar diya gaya hai (user order, 2026-09-22 17:44 IST):
+- Supabase tables ka saara data (connections ke 5 rows chhodke)
+- Storage buckets (clips, device-shots) khaali
+- Ye repo ka saara code
 
-**Campaigns → render queue → preview → approve → Instagram post → Whop submit → tracking**
+Bacha hua:
+- Vercel / GitHub / Supabase / Firebase projects + connections + secrets
+- Live website deployment (purana build, [skip ci] se naya deploy nahi hua)
+- Phone me installed app
 
-## Live
-
-- App: `https://clipflow-xxx.vercel.app` (Vercel)
-- Repo: `raj3kk/clipflow`
-
-## Setup (one time)
-
-1. **Supabase**: create a NEW project at supabase.com → SQL editor → run `supabase/schema.sql`.
-2. **Vercel env vars**:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `SUPABASE_SERVICE_ROLE_KEY` (server-only)
-   - `INSTAGRAM_CONNECTED` = `true` once the Meta authorization for `@viralshortz_45` completes (currently stuck at the Accounts Center "already added" step — until then `/api/clips/[id]/post` honestly reports blocked).
-3. **Phone-automation worker** (v2, on the VM with the edit stack):
-   `worker/run_planner.sh` (cron, every 6h) → campaign pick → yt-dlp section
-   download → clip_factory 9:16 render → phone job enqueue.
-   `worker/run_pipeline_watch.sh` (cron, every 1 min) → Run Now triggers
-   (`pipeline_requests`) → planner run → stage tracking.
-   Env comes from `~/.config/clipflow/worker.env` (mode 600) — never in the repo.
-   The phone app is the only poster (IG upload + Whop submit).
-
-## Workflow
-
-1. **Campaigns** page — pick a campaign (rate, budget, requirements).
-2. **Clips** page — queue a render job (source URL + start/end seconds + hook).
-   Worker renders → preview frames appear → **Approve**.
-3. **Post to Instagram** — queued for the automation agent once `INSTAGRAM_CONNECTED=true`.
-4. **Submissions** page — record the Whop submission (URL + status) within 20 minutes of posting.
-
-## API (for the worker / agent)
-
-- `GET /api/campaigns` — active campaigns (seed fallback when DB unconfigured)
-- `GET/POST /api/clips` — list clips / queue a render job (15–60s enforced)
-- `GET /api/jobs?status=queued` — worker job queue
-- `PATCH /api/jobs/[id]` — worker updates `{status, video_url, preview_urls, error}`
-- `POST /api/clips/[id]/approve` — approve after preview
-- `POST /api/clips/[id]/post` — Instagram attempt (honest blocked status until connected)
-- `GET/POST /api/submissions` — Whop submission records
-- `GET /api/stats` — today's X/4 progress
-
-## Notes
-
-- Without Supabase env vars the UI runs in demo mode with a setup banner — no fake data is ever presented as real.
-- Video rendering stays on the VM (free ffmpeg + faster-whisper stack); Vercel only hosts the dashboard + API.
+Backup: ~/workspace/clipflow-reset-20260922/ (source tarball + DB JSON dump).
+Yahan se naye sire se rebuild hoga.
