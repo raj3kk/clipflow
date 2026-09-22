@@ -12,8 +12,8 @@ rm -rf $OUT && mkdir -p $OUT/{aar,classes,dex,res}
 export JAVA_HOME=$TOOLS/jdk-17
 export PATH=$JAVA_HOME/bin:$PATH
 APPID="com.clipflow.agent"
-VERSION_CODE=69
-VERSION_NAME="0.1.0-p68"
+VERSION_CODE=70
+VERSION_NAME="0.1.0-p69"
 
 # BuildConfig.java sync (manual build me Gradle nahi hai)
 sed -i -e "s/VERSION_NAME = \"[^\"]*\"/VERSION_NAME = \"$VERSION_NAME\"/" \
