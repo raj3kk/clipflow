@@ -70,6 +70,7 @@ object UpdateChecker {
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
+        .addInterceptor(UsEgressInterceptor({ UsEgressInterceptor.sharedStore })) // p63 layer 3
         .build()
 
     /**

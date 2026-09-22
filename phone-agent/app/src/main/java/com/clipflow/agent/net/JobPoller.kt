@@ -14,6 +14,7 @@ class JobPoller(private val deviceStore: com.clipflow.agent.data.DeviceStore) {
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS) // long-poll
+        .addInterceptor(UsEgressInterceptor(deviceStore)) // p63 layer 3: proxy policy
         .build()
 
     data class Job(

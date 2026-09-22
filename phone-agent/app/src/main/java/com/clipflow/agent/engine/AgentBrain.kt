@@ -153,6 +153,8 @@ object AgentBrain {
         maxIters: Int = 10,
         deadlineMs: Long = 6 * 60_000L,
         onThought: (iter: Int, thought: String) -> Unit = { _, _ -> },
+        /** WebView renderer mar gaya to loop turant roko (fail-closed). */
+        isDead: () -> Boolean = { false },
     ): AgentResult {
         val trail = mutableListOf<AgentStep>()
         // p42 FIX (2026-09-20): tapped identity ab "index:url" NAHI — semantic
@@ -172,6 +174,14 @@ object AgentBrain {
         var iter = 0
         while (iter < maxIters && System.currentTimeMillis() < deadline) {
             iter++
+            // renderer dead = aage badhna bekaar — turant fail-closed
+            if (try { isDead() } catch (_: Exception) { false }) {
+                return AgentResult(
+                    AgentOutcome.FAILED,
+                    "Brain: WebView renderer dead — join adhura raha",
+                    trail
+                )
+            }
             // ---- PERCEIVE ----
             val p = perceive(js)
             val sig = pageSignature(p)

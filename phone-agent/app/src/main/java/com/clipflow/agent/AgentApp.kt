@@ -47,5 +47,14 @@ class AgentApp : Application() {
         } catch (_: Throwable) {
             Log.w("AgentApp", "Firebase init failed — polling fallback rahega")
         }
+        // p63: OkHttp layer-3 proxy policy ke liye shared store bind karo.
+        // Koi bhi throw (ESP/Tink path) launch nahi rokega.
+        try {
+            com.clipflow.agent.net.UsEgressInterceptor.bindSharedStore(
+                com.clipflow.agent.data.DeviceStore(this)
+            )
+        } catch (_: Throwable) {
+            Log.w("AgentApp", "proxy store bind failed — interceptor direct rahega")
+        }
     }
 }

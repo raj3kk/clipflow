@@ -1528,12 +1528,13 @@ class MainActivity : Activity() {
         val proxyRegion = store.usaProxyRegion()
         val proxyVerifiedAt = store.usaProxyVerifiedAt()
         val proxyStatusText = if (proxyOn) {
-            "ON — Whop / Content Rewards USA (Virginia) se chalega" +
+            // p63: sirf allowlisted hosts proxy — baaki hamesha direct.
+            "ON — Whop/Content Rewards USA se, baaki direct" +
                 if (proxyRegion != null && proxyVerifiedAt > 0)
                     "\nLast verified: $proxyRegion • ${timeAgo(proxyVerifiedAt)}"
                 else "\nAbhi tak verify nahi hua — agle Whop page pe check hoga"
         } else {
-            "OFF — Whop seedha chalega (region block lag sakta hai)"
+            "OFF — sab kuch seedha chalega (Whop pe region block lag sakta hai)"
         }
         proxyCard.addView(TextView(this).apply {
             text = proxyStatusText
@@ -1549,8 +1550,8 @@ class MainActivity : Activity() {
                 store.setUsaProxyEnabled(on)
                 Toast.makeText(
                     this@MainActivity,
-                    if (on) "🇺🇸 USA Proxy ON — Whop USA se chalega"
-                    else "USA Proxy OFF — Whop direct chalega",
+                    if (on) "🇺🇸 USA Proxy ON — Whop/Content Rewards USA se, baaki direct"
+                    else "USA Proxy OFF — sab direct chalega",
                     Toast.LENGTH_SHORT
                 ).show()
                 if (currentTab == TAB_PROFILE) {
@@ -1560,6 +1561,50 @@ class MainActivity : Activity() {
             }
         })
         layout.addView(proxyCard)
+
+        // 📱 APP IMPORT (2026-09-22 rebuild): user apne installed apps me se
+        // chunta hai kaunsi apps automation ke liye imported hain.
+        // Searchable multi-select dialog (icons ke saath), selection
+        // DeviceStore me rehti hai — automation yahin se padhti hai.
+        val appsCard = card()
+        appsCard.addView(sectionTitle("📱 Apps"))
+        val appsCountTv = TextView(this).apply {
+            textSize = 15f
+            setTextColor(Color.parseColor(INK))
+            setPadding(0, 0, 0, dp(8))
+        }
+        fun refreshAppsCard() {
+            try {
+                val imported = com.clipflow.agent.apps.AppImporter.importedApps(store)
+                appsCountTv.text = if (imported.isEmpty()) {
+                    "Koi app import nahi — automation ke liye apps chuno"
+                } else {
+                    "${imported.size} apps imported:\n" +
+                        imported.take(6).joinToString(", ") { it.label } +
+                        if (imported.size > 6) " …" else ""
+                }
+            } catch (_: Exception) {
+                appsCountTv.text = "Apps load nahi hui"
+            }
+        }
+        refreshAppsCard()
+        appsCard.addView(appsCountTv)
+        appsCard.addView(outlineBtn("Apps chuno").apply {
+            setOnClickListener {
+                try {
+                    com.clipflow.agent.apps.AppImporter.showPicker(
+                        this@MainActivity, store
+                    ) { refreshAppsCard() }
+                } catch (e: Exception) {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Apps kholne me dikkat: ${e.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        })
+        layout.addView(appsCard)
 
         // P0 (2026-09-19) ACTIVE JOB CARD: job active ho to clearly dikhe —
         // "⚡ Kaam chal raha hai" + current step + elapsed time.

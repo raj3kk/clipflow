@@ -4,18 +4,41 @@ import android.content.Context
 import android.content.SharedPreferences
 
 /**
- * Device credentials ka store (app-private SharedPreferences).
+ * Device credentials ka store.
  *
- * NOTE (2026-09-18): pehle EncryptedSharedPreferences tha — kuch phones pe
- * launch-time crash ka sabse bada suspect (Tink/AndroidKeyStore path).
- * api_key ek per-device bearer token hai (server pe sirf hash rehta hai);
- * Firebase bhi FCM token plain prefs me rakhta hai. Isliye simple + stable
- * plain prefs — taaki app khulne me kabhi na atke.
+ * p59 me EncryptedSharedPreferences tha (Tink-backed). Rebuild me wahi
+ * wapas — lekin catch(Throwable) ke saath: Tink/AndroidKeyStore path pe
+ * koi bhi missing class (NoClassDefFoundError = Error, Exception nahi)
+ * aaye to plain prefs fallback, taaki app launch kabhi na atke
+ * (BrowseAgent v6 se seekha hua lesson).
+ *
+ * api_key ek per-device bearer token hai (server pe sirf hash rehta hai).
  */
 class DeviceStore(context: Context) {
 
-    private val prefs: SharedPreferences =
-        context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    internal val prefs: SharedPreferences = run {
+        val appCtx = context.applicationContext
+        try {
+            val masterKey = androidx.security.crypto.MasterKey.Builder(appCtx)
+                .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            androidx.security.crypto.EncryptedSharedPreferences.create(
+                appCtx,
+                PREFS_NAME,
+                masterKey,
+                androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+        } catch (t: Throwable) {
+            // Tink/KeyStore missing ya koi bhi Error → plain fallback
+            // (launch crash se bachna = sabse pehle).
+            try {
+                android.util.Log.w("DeviceStore", "ESP unavailable, plain prefs fallback: ${t.javaClass.simpleName}")
+            } catch (_: Exception) {
+            }
+            appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        }
+    }
 
     fun isEnrolled(): Boolean =
         prefs.contains(KEY_DEVICE_ID) && prefs.contains(KEY_API_KEY)
@@ -224,6 +247,12 @@ class DeviceStore(context: Context) {
         private const val KEY_USA_PROXY = "usa_proxy_enabled"
         private const val KEY_USA_PROXY_REGION = "usa_proxy_region"
         private const val KEY_USA_PROXY_TS = "usa_proxy_verified_at"
+        // p54 (2026-09-21): manual-demo tap learning opt-in
+        private const val KEY_LEARN_FROM_USER = "learn_from_user"
+        // p53/p59: session sync snapshot (JSON)
+        private const val KEY_SESSION_SYNC = "session_sync_json"
+        // 2026-09-22 rebuild: user-imported apps (JSON [{package,label}])
+        private const val KEY_IMPORTED_APPS = "imported_apps_json"
     }
 
     // ---------- In-app auto-update (round-6 Worker D) ----------
@@ -337,5 +366,36 @@ class DeviceStore(context: Context) {
     fun addCoin4hClaimed(n: Int) {
         if (n <= 0) return
         prefs.edit().putInt(KEY_COIN_4H, coin4hClaimed() + n).apply()
+    }
+
+    // ---------- Manual-demo tap learning (p54) ----------
+
+    /**
+     * User ne tap-learning ke liye opt-in kiya? AutomationWorker isi se
+     * decide karta hai ManualDemo.startRun(..., enabled) me.
+     * Default: true (pehle run pe user ko bataya jata hai).
+     */
+    fun learnFromUser(): Boolean = prefs.getBoolean(KEY_LEARN_FROM_USER, true)
+
+    fun setLearnFromUser(v: Boolean) {
+        prefs.edit().putBoolean(KEY_LEARN_FROM_USER, v).apply()
+    }
+
+    // ---------- Session sync snapshot (p53/p59) ----------
+
+    /** SessionSync.collectStatus() ka aakhri JSON snapshot. */
+    fun sessionSyncJson(): String? = prefs.getString(KEY_SESSION_SYNC, null)
+
+    fun saveSessionSyncJson(json: String) {
+        prefs.edit().putString(KEY_SESSION_SYNC, json).apply()
+    }
+
+    // ---------- App import (2026-09-22 rebuild) ----------
+
+    /** User ki chuni hui apps ka JSON snapshot. */
+    fun importedAppsJson(): String? = prefs.getString(KEY_IMPORTED_APPS, null)
+
+    fun saveImportedAppsJson(json: String) {
+        prefs.edit().putString(KEY_IMPORTED_APPS, json).apply()
     }
 }

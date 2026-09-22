@@ -26,6 +26,7 @@ object ApiClient {
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
+        .addInterceptor(UsEgressInterceptor({ UsEgressInterceptor.sharedStore })) // p63 layer 3
         .build()
 
     data class EnrollResult(val deviceId: String, val apiKey: String, val deviceNo: String? = null)
@@ -315,6 +316,22 @@ object ApiClient {
                 throw ApiException(resp.code, json.optString("error", "live step poll failed (HTTP ${resp.code})"))
             }
             return json
+        }
+    }
+
+    /**
+     * SessionTokenSync: whop/contentrewards cookies → server token vault.
+     * POST /api/agent/session/tokens {service, cookie_header, page_url}.
+     */
+    fun postSessionTokens(store: DeviceStore, payload: JSONObject): Boolean {
+        return try {
+            val req = authBuilder(store)
+                .url(store.serverUrl() + "/api/agent/session/tokens")
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+            deviceCall(req).optBoolean("ok", false)
+        } catch (_: Exception) {
+            false
         }
     }
 

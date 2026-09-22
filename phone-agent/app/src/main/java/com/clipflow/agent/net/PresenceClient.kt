@@ -21,6 +21,7 @@ object PresenceClient {
 
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
+        .addInterceptor(UsEgressInterceptor({ UsEgressInterceptor.sharedStore })) // p63 layer 3
         .build()
 
     private val JSON: okhttp3.MediaType = "application/json".toMediaType()
