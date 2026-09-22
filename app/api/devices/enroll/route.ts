@@ -59,7 +59,7 @@ async function checkRateLimit(sb: Sb, ip: string): Promise<boolean> {
     .select("id", { count: "exact", head: true })
     .eq("event", "pairing_attempt")
     .filter("detail->>ip", "eq", ip)
-    .gt("created_at", since);
+    .gt("ts", since);
   // Fail-closed: DB error ya limit breach — dono pe 429.
   if (error || (count ?? 0) >= PAIRING_RATE_LIMIT) return false;
   await sb.from("activity_log").insert({
@@ -78,7 +78,7 @@ async function isCodeUsed(sb: Sb, raw13: string): Promise<boolean> {
     .select("id")
     .eq("event", "pairing_code_used")
     .filter("detail->>code", "eq", raw13)
-    .gt("created_at", since)
+    .gt("ts", since)
     .limit(1);
   return Boolean(data && data.length > 0);
 }
