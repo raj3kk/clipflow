@@ -155,7 +155,7 @@ class JobEngine(
         /** Poore job ki deadline — isse zyada atka to fail-mark (stall safety). */
         const val JOB_TIMEOUT_MS = 20 * 60_000L
         /** Ek page load ka max wait — iske baad fail (hang nahi). */
-        const val PAGE_LOAD_TIMEOUT_MS = 60_000L
+        const val PAGE_LOAD_TIMEOUT_MS = 5 * 60_000L
         /** Ek JS eval ka max wait — callback kabhi na aaye (renderer dead,
          *  JS context toota) to 30s me fail, hamesha ke liye hang nahi. */
         const val JS_EVAL_TIMEOUT_MS = 30_000L
@@ -175,6 +175,13 @@ class JobEngine(
         const val DISCOVER_TIMEOUT_MS = 8 * 60_000L
         /** Join tap ke baad confirmation ka max wait. */
         const val JOIN_CONFIRM_TIMEOUT_MS = 15_000L
+        /**
+         * Browser Agent v1 (2026-09-21): live_session job ki max zindagi.
+         * Admin kabhi stop na kare to bhi 30 min me loop band (battery/net).
+         */
+        const val LIVE_SESSION_TIMEOUT_MS = 30 * 60_000L
+        /** Live session ka frame cadence (~10s — design doc §3.4). */
+        const val LIVE_SESSION_CADENCE_MS = 10_000L
     }
 
     /**
@@ -267,11 +274,31 @@ class JobEngine(
                 proofName: String,
                 openStep: Int,
                 brainStep: Int,
+                // p51: immutable campaign binding — expectedName diya to page ka
+                // title/text usse match hona chahiye, warna CAMPAIGN_MISMATCH fail.
+                expectedName: String? = null,
             ): AgentBrain.AgentResult {
                 step(openStep, "$phaseLabel-open")
                 loadUrl(pageUrl)
-                delay(2500)
+                waitForSettle() // p47: smart wait (fixed 2.5s hatao)
                 guard()
+                // p51: galat campaign pe join KABHI nahi — naam verify karo.
+                if (!expectedName.isNullOrBlank()) {
+                    val title = try { jsStr("document.title") } catch (_: Exception) { null }.orEmpty()
+                    val bodyHead = try { jsStr("document.body.innerText.slice(0,3000)") }
+                        catch (_: Exception) { null }.orEmpty()
+                    val needle = expectedName.take(25).lowercase()
+                    val hay = (title + "\n" + bodyHead).lowercase()
+                    if (needle.isNotEmpty() && needle !in hay) {
+                        throw JoinOutcome(
+                            "failed",
+                            "CAMPAIGN_MISMATCH: page '${title.take(60)}' me expected " +
+                                "campaign '${expectedName.take(60)}' nahi mila — " +
+                                "galat campaign pe join nahi karenge"
+                        )
+                    }
+                    vars["campaign_name_verified"] = expectedName.take(60)
+                }
                 shots += screenshot(File(shotsDir, "proof_${proofName}_page.png"))
                 vars["brain_goal"] = goal
                 val res = AgentBrain.runJoinAgent(
@@ -279,13 +306,15 @@ class JobEngine(
                     goal,
                     maxIters = 10,
                     deadlineMs = 5 * 60_000L,
-                ) { iter, thought ->
-                    guard()
-                    // onStep = phone heartbeat → server current_step → Live page:
-                    // agent ki soch turant Live pe dikhti hai.
-                    step(brainStep, "$phaseLabel-brain#$iter ${thought.take(80)}")
-                    vars["brain_thought"] = thought.take(200)
-                }
+                    isDead = { com.clipflow.agent.web.LoginWebView.consumeRenderGone() },
+                    onThought = { iter, thought ->
+                        guard()
+                        // onStep = phone heartbeat → server current_step → Live page:
+                        // agent ki soch turant Live pe dikhti hai.
+                        step(brainStep, "$phaseLabel-brain#$iter ${thought.take(80)}")
+                        vars["brain_thought"] = thought.take(200)
+                    },
+                )
                 // Agent ki soch Live page pe — user dekhe "dimaag" ne kya kiya
                 vars["brain_trail_$proofName"] = res.trail.takeLast(6)
                     .joinToString(" | ") { "#${it.iter}[${it.pageType}] ${it.decision.take(70)}" }
@@ -339,11 +368,14 @@ class JobEngine(
 
             // Phase 2 — CAMPAIGN: specific campaign ka member banna.
             // p39: server directive me valid goal ho to use prefer karo.
+            // p51: immutable binding — payload ka campaign_name page pe verify hoga.
+            val campaignName = job.optString("campaign_name", "").trim().ifEmpty { null }
             val campaignGoal =
                 if (directiveGoal == "community_join" || directiveGoal == "campaign_join") directiveGoal
                 else "campaign_join"
             applyAgentResult(
-                runAgentPhase("join-campaign", url, campaignGoal, "join_campaign", 0, 1),
+                runAgentPhase("join-campaign", url, campaignGoal, "join_campaign", 0, 1,
+                    expectedName = campaignName),
                 "Campaign"
             )
 
@@ -372,164 +404,6 @@ class JobEngine(
 
     // ---------- join flow ke JS snippets ----------
 
-    /**
-     * USA EGRESS INTERCEPTOR (p35, 2026-09-20).
-     * whop.com / contentrewards.com ke fetch/XHR ko Vercel (Virginia, USA)
-     * se proxy karta hai taaki "not available in your region" bypass ho.
-     * Native bridge: window.__usProxy.proxyFetch(reqJson) → resJson.
-     * Bridge na ho to direct fetch (fallback) — page kabhi nahi tootega.
-     */
-    private val JS_US_EGRESS = """
-        (function(){
-          if(window.__usProxyInstalled) return 'already';
-          window.__usProxyInstalled = true;
-          // p43: strict = fail-closed. Kotlin onPageFinished pe
-          // window.__usProxyStrict=true set karta hai jab Profile tab ka
-          // USA Proxy switch ON ho. Strict me proxy fail = reject/block
-          // (India IP se direct fallback NAHI).
-          var STRICT=false;
-          try{ STRICT=!!window.__usProxyStrict; }catch(e){}
-          var PROXY_HOSTS = ['whop.com','contentrewards.com'];
-          function needsProxy(url){
-            try{
-              var h = new URL(url, location.href).hostname.toLowerCase();
-              for(var i=0;i<PROXY_HOSTS.length;i++){
-                var t=PROXY_HOSTS[i];
-                if(h===t||h.slice(-t.length-1)==='.'+t) return true;
-              }
-            }catch(e){}
-            return false;
-          }
-          function b64enc(str){
-            return btoa(unescape(encodeURIComponent(str)));
-          }
-          function b64dec(b64){
-            var bin=atob(b64), n=bin.length, bytes=new Uint8Array(n);
-            for(var i=0;i<n;i++) bytes[i]=bin.charCodeAt(i);
-            return bytes;
-          }
-          function bodyToB64(body){
-            return new Promise(function(resolve){
-              if(body==null){ resolve(null); return; }
-              if(typeof body==='string'){ resolve(b64enc(body)); return; }
-              if(body instanceof URLSearchParams){ resolve(b64enc(body.toString())); return; }
-              if(body instanceof FormData){ resolve(null); return; } // proxy skip signal
-              var p;
-              try{
-                if(body instanceof Blob) p=body.arrayBuffer();
-                else if(body&&body.buffer instanceof ArrayBuffer) p=Promise.resolve(body.buffer);
-                else p=new Response(body).arrayBuffer();
-              }catch(e){ resolve(null); return; }
-              p.then(function(buf){
-                var bytes=new Uint8Array(buf), bin='', CH=8192, i;
-                for(i=0;i<bytes.length;i+=CH){
-                  bin+=String.fromCharCode.apply(null, bytes.subarray(i,i+CH));
-                }
-                resolve(btoa(bin));
-              }, function(){ resolve(null); });
-            });
-          }
-          function headersToObj(h){
-            var o={};
-            if(!h) return o;
-            try{
-              if(h instanceof Headers){ h.forEach(function(v,k){o[k]=v;}); }
-              else if(Array.isArray(h)){ h.forEach(function(p){o[p[0]]=p[1];}); }
-              else { for(var k in h) o[k]=h[k]; }
-            }catch(e){}
-            return o;
-          }
-          function viaProxy(url, method, headers, bodyB64){
-            return new Promise(function(resolve, reject){
-              var bridge=null;
-              try{ bridge=window.__usProxy; }catch(e){}
-              if(!bridge||!bridge.proxyFetch){ reject(new Error('no bridge')); return; }
-              var resJson;
-              try{
-                resJson=bridge.proxyFetch(JSON.stringify({url:url,method:method,headers:headers,body_base64:bodyB64}));
-              }catch(e){ reject(e); return; }
-              var r;
-              try{ r=JSON.parse(resJson); }catch(e){ reject(new Error('bad proxy json')); return; }
-              if(!r.ok){ reject(new Error('proxy: '+(r.error||'fail'))); return; }
-              var bodyBytes=r.body_base64?b64dec(r.body_base64):new Uint8Array(0);
-              var rh=new Headers();
-              var hh=r.headers||{};
-              for(var k in hh){ try{ rh.append(k, hh[k]); }catch(e){} }
-              resolve(new Response(bodyBytes,{status:r.status||200,headers:rh}));
-            });
-          }
-          var origFetch=window.fetch.bind(window);
-          window.fetch=function(input, init){
-            var url=typeof input==='string'?input:((input&&input.url)||'');
-            var method=((init&&init.method)||(input&&input.method)||'GET').toUpperCase();
-            if(!needsProxy(url)) return origFetch(input, init);
-            var self=this, args=arguments;
-            return (async function(){
-              var headers=headersToObj((init&&init.headers)||(input&&input.headers));
-              var body=init?init.body:(input&&input.body);
-              if(body instanceof FormData){
-                if(STRICT) throw new Error('proxy: FormData body not supported (fail-closed)');
-                return origFetch.apply(self,args); // direct fallback
-              }
-              try{
-                var b64=await bodyToB64(body);
-                if(b64===null&&body!=null){
-                  if(STRICT) throw new Error('proxy: body not serializable (fail-closed)');
-                  return origFetch.apply(self,args);
-                }
-                return await viaProxy(new URL(url,location.href).href,method,headers,b64);
-              }catch(e){
-                if(STRICT) throw e; // fail-closed: India IP leak nahi
-                return origFetch.apply(self,args); // proxy fail → direct
-              }
-            })();
-          };
-          // XHR: proxy via fetch-bridge, phir fake XHR response
-          var origOpen=XMLHttpRequest.prototype.open;
-          var origSend=XMLHttpRequest.prototype.send;
-          var origSetH=XMLHttpRequest.prototype.setRequestHeader;
-          XMLHttpRequest.prototype.open=function(method,url){
-            this.__upUrl=url; this.__upMethod=method; this.__upHeaders={};
-            return origOpen.apply(this,arguments);
-          };
-          XMLHttpRequest.prototype.setRequestHeader=function(k,v){
-            try{ (this.__upHeaders=this.__upHeaders||{})[k]=v; }catch(e){}
-            return origSetH.apply(this,arguments);
-          };
-          XMLHttpRequest.prototype.send=function(body){
-            var xhr=this, url=xhr.__upUrl||'';
-            if(!needsProxy(url)) return origSend.apply(this,arguments);
-            function fail(){ try{ if(xhr.onerror) xhr.onerror(new Event('error')); }catch(e){} }
-            if(body instanceof FormData){
-              if(STRICT){ fail(); return; } // fail-closed
-              return origSend.apply(this,arguments);
-            }
-            (async function(){
-              try{
-                var b64=await bodyToB64(body);
-                if(b64===null&&body!=null){
-                  if(STRICT){ fail(); return; } // fail-closed
-                  origSend.call(xhr,body); return;
-                }
-                var resp=await viaProxy(new URL(url,location.href).href,(xhr.__upMethod||'GET').toUpperCase(),xhr.__upHeaders||{},b64);
-                var text=await resp.text();
-                try{
-                  Object.defineProperties(xhr,{
-                    status:{value:resp.status,configurable:true},
-                    statusText:{value:'',configurable:true},
-                    responseText:{value:text,configurable:true},
-                    response:{value:text,configurable:true},
-                    readyState:{value:4,configurable:true}
-                  });
-                }catch(e){}
-                try{ if(xhr.onreadystatechange) xhr.onreadystatechange(); }catch(e){}
-                try{ if(xhr.onload) xhr.onload(); }catch(e){}
-              }catch(e){ fail(); }
-            })();
-          };
-          return 'installed';
-        })()
-    """.trimIndent()
 
     /** Page snapshot: login page? already joined? (JSON string deta hai). */
     private val JS_PAGE_SNAPSHOT = """
@@ -723,7 +597,7 @@ class JobEngine(
                     if (cid.isEmpty() || url.isEmpty()) continue
                     step(i, "verify-open $cid")
                     loadUrl(url)
-                    delay(2500)
+                    waitForSettle() // p47: smart wait (fixed 2.5s hatao)
                     guard()
                     shots += screenshot(File(shotsDir, "proof_verify_${i}_page.png"))
 
@@ -754,11 +628,13 @@ class JobEngine(
                         val ares = AgentBrain.runJoinAgent(
                             ::jsStr, "campaign_join",
                             maxIters = 8, deadlineMs = 4 * 60_000L,
-                        ) { iter, thought ->
-                            guard()
-                            vars["brain_thought"] = thought.take(200)
-                            try { onStep?.invoke(i, 99, "brain#$iter ${thought.take(60)}") } catch (_: Exception) { }
-                        }
+                            isDead = { com.clipflow.agent.web.LoginWebView.consumeRenderGone() },
+                            onThought = { iter, thought ->
+                                guard()
+                                vars["brain_thought"] = thought.take(200)
+                                try { onStep?.invoke(i, 99, "brain#$iter ${thought.take(60)}") } catch (_: Exception) { }
+                            },
+                        )
                         vars["brain_trail_verify_$i"] = ares.trail.takeLast(4)
                             .joinToString(" | ") { "#${it.iter}[${it.pageType}] ${it.decision.take(60)}" }
                             .take(400)
@@ -898,7 +774,7 @@ class JobEngine(
                 // Phir "Content Rewards" card TAP karo → asli campaigns page khulta hai
                 step(0, "discover-open")
                 loadUrl("https://whop.com/discover/")
-                delay(3000)
+                waitForSettle() // p47: smart wait (fixed 3s hatao)
                 guard()
                 val snap = JSONObject(jsStr(JS_PAGE_SNAPSHOT) ?: "{}")
                 if (snap.optBoolean("loginPage", false)) {
@@ -1100,18 +976,29 @@ class JobEngine(
             val inAppFile = File(context.filesDir, "live_inapp.png")
             var lastServerUpload = 0L
             while (isActive) {
+                // p52: har Throwable pakdo (Exception NAHI — Error bhi).
+                // Bitmap.createBitmap OOM (Error) pehle yahan se nikal ke
+                // structured concurrency se POORA engine scope cancel kar
+                // deta tha: worker silent-dead, heartbeat band, koi terminal
+                // report nahi (2026-09-21 JOIN_BUTTON incident). Ab preview
+                // kabhi engine ko nahi marega — worst case ye tick skip.
                 try {
                     delay(3000) // har 3 sec me in-app preview
                     val f = File(previewDir, "live.png")
-                    // Chhota screenshot (480px wide) — live view ke liye kaafi, fast upload
+                    // p52: seedha 480px pe draw — pehle 1920x1080 (~8.3MB)
+                    // bitmap banta tha har 3 sec me, jo memory pressure pe
+                    // OOM ka sabse bada candidate tha. Preview ke liye 480px
+                    // hi upload hota tha, isliye quality loss nahi.
                     val bmp = withContext(Dispatchers.Main) {
                         val w = if (webView.width > 0) webView.width else 1080
                         val h = if (webView.height > 0) webView.height else 1920
-                        val full = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                        webView.draw(Canvas(full))
                         val sw = 480
                         val sh = (h * sw / w)
-                        Bitmap.createScaledBitmap(full, sw, sh, true).also { full.recycle() }
+                        val small = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888)
+                        val c = Canvas(small)
+                        c.scale(sw.toFloat() / w, sh.toFloat() / h)
+                        webView.draw(c)
+                        small
                     }
                     withContext(Dispatchers.IO) {
                         FileOutputStream(f).use { bmp.compress(Bitmap.CompressFormat.PNG, 80, it) }
@@ -1125,7 +1012,7 @@ class JobEngine(
                         lastServerUpload = now
                         reporter?.uploadLivePreview(f)
                     }
-                } catch (_: Exception) { /* preview fail = silent */ }
+                } catch (_: Throwable) { /* preview fail = silent, engine kabhi nahi marega */ }
             }
         }
     }
@@ -1226,7 +1113,7 @@ class JobEngine(
             }
             "navigate" -> {
                 loadUrl(fill(s.getString("url")))
-                delay(2500) // page settle
+                waitForSettle() // p47: smart wait (fixed 2.5s hatao)
             }
             "click" -> {
                 val ok = jsBool(clickJs(s))
@@ -1309,15 +1196,374 @@ class JobEngine(
             "screenshot" -> {
                 shots += screenshot(File(shotsDir, s.getString("as")))
             }
+            // ---------- Browser Agent v1 (2026-09-21) ----------
+            // extract_structured { url, script, timeout_ms }:
+            //   URL load → evaluateJavascript(script) → result JSON string →
+            //   vars["extract_structured_result"] (+ reporter/job result me
+            //   structured payload server ko). script me JSON.stringify(...)
+            //   use karo taaki result ek JSON string ho.
+            "extract_structured" -> execExtractStructured(s, shots)
+            // social_reply { post_url, text, selectors[] } /
+            // social_message { profile_url, text, selectors[] }:
+            //   page kholo → selectors fallback order me reply/DM box
+            //   dhoondo → text type karo → dry_run ho to SEND MAT KARO
+            //   (sirf navigate+verify, result me "dry_run_ok").
+            "social_reply" -> execSocialAction(s, shots, kind = "reply")
+            "social_message" -> execSocialAction(s, shots, kind = "message")
             else -> throw Exception("unknown action: ${s.getString("action")}")
         }
+    }
+
+    // ---------- Browser Agent v1 actions (2026-09-21) ----------
+
+    /**
+     * IG action-block guard (standing rule — naye actions me bhi).
+     * Page pe restriction text mile to "action blocked: ..." throw karo —
+     * AutomationWorker.isBlocked() ise "blocked" status dega aur server
+     * 24h auto-pause lagayega (existing guard, wahi behavior).
+     */
+    private suspend fun checkActionBlock() {
+        val body = try {
+            jsStr("(document.body ? document.body.innerText : '')")
+        } catch (_: Exception) { null } ?: return
+        val t = body.lowercase()
+        val hit = t.contains("action blocked") ||
+            t.contains("try again later") ||
+            (t.contains("temporarily") && t.contains("restricted")) ||
+            t.contains("we suspect automated behavior")
+        if (hit) {
+            throw Exception(
+                "action blocked: page pe restriction text mila — " +
+                    "ye job 'blocked' report hoga (24h auto-pause)"
+            )
+        }
+    }
+
+    /**
+     * extract_structured: URL load → script eval → JSON result.
+     * eval pe existing 30s hard cap (JS_EVAL_TIMEOUT_MS) lagu hota hai —
+     * timeout_ms usse zyada ho to bhi 30s hi milega.
+     */
+    private suspend fun execExtractStructured(s: JSONObject, shots: MutableList<File>) {
+        val url = fill(s.optString("url", ""))
+        if (url.isEmpty()) throw Exception("extract_structured: url missing")
+        val script = fill(s.optString("script", ""))
+        if (script.isEmpty()) throw Exception("extract_structured: script missing")
+        loadUrl(url)
+        waitForSettle() // p47: smart wait (fixed 2.5s hatao)
+        checkActionBlock()
+        val raw = try {
+            jsStr(script)
+        } catch (e: Exception) {
+            throw Exception("extract_structured: js eval fail — ${e.message}")
+        } ?: throw Exception("extract_structured: script ne null diya")
+        // Result ek valid JSON string hona chahiye (script me JSON.stringify).
+        val trimmed = raw.trim()
+        val okJson = (trimmed.startsWith("{") || trimmed.startsWith("[")) && try {
+            if (trimmed.startsWith("{")) JSONObject(trimmed) else JSONArray(trimmed)
+            true
+        } catch (_: Exception) { false }
+        if (!okJson) {
+            throw Exception(
+                "extract_structured: result JSON nahi hai (script me JSON.stringify use karo)"
+            )
+        }
+        vars["extract_structured_result"] = raw.take(20000)
+        shots += screenshot(File(shotsDir, "proof_extract.png"))
+    }
+
+    /**
+     * social_reply / social_message: open → box dhoondo (selectors fallback,
+     * phir heuristic) → type → dry_run me SEND NAHI.
+     * Non-dry-run me send button click karne ki koshish; na mile to fail
+     * (typed text chhoda, bina bheje — send fail-safe).
+     */
+    private suspend fun execSocialAction(s: JSONObject, shots: MutableList<File>, kind: String) {
+        val urlKey = if (kind == "reply") "post_url" else "profile_url"
+        val url = fill(s.optString(urlKey, ""))
+        if (url.isEmpty()) throw Exception("social_$kind: $urlKey missing")
+        val text = fill(s.optString("text", ""))
+        if (text.isEmpty()) throw Exception("social_$kind: text missing")
+        val dryRun = s.optBoolean("dry_run", false)
+
+        loadUrl(url)
+        waitForSettle() // p47: smart wait (fixed 2.5s hatao)
+        checkActionBlock()
+        shots += screenshot(File(shotsDir, "proof_social_${kind}_page.png"))
+
+        // 1) selectors fallback order me try karo
+        var typed = false
+        var usedSel = ""
+        val sels = s.optJSONArray("selectors")
+        if (sels != null) {
+            for (i in 0 until sels.length()) {
+                val sel = sels.optJSONObject(i) ?: continue
+                val pseudo = JSONObject()
+                    .put("by", sel.optString("by", "css"))
+                    .put("value", sel.optString("value", ""))
+                if (pseudo.optString("value").isEmpty()) continue
+                try {
+                    if (jsBool(typeJs(pseudo, text))) {
+                        typed = true
+                        usedSel = "selector[$i]"
+                        break
+                    }
+                } catch (_: Exception) { /* agla selector */ }
+            }
+        }
+        // 2) heuristic fallback: visible contenteditable / textbox
+        if (!typed) {
+            typed = try { jsBool(jsWith(JS_TYPE_FALLBACK, text)) } catch (_: Exception) { false }
+            if (typed) usedSel = "heuristic"
+        }
+        if (!typed) {
+            throw Exception(
+                "social_$kind: reply/message box nahi mila (selectors + fallback dono fail)"
+            )
+        }
+        delay(800)
+        shots += screenshot(File(shotsDir, "proof_social_${kind}_typed.png"))
+
+        // DRY-RUN: navigate + type verify ho gaya — SEND MAT KARO.
+        if (dryRun) {
+            vars["social_${kind}_status"] = "dry_run_ok"
+            vars["social_${kind}_detail"] =
+                "navigate + type verify ho gaya; send NAHI kiya (dry_run=true)"
+            return
+        }
+        checkActionBlock()
+        // 3) send button dhoondho (Send/Reply/Post/Submit)
+        val sent = try { jsBool(JS_CLICK_SEND) } catch (_: Exception) { false }
+        if (!sent) {
+            throw Exception(
+                "social_$kind: text type ho gaya lekin send button nahi mila — " +
+                    "typed text chhoda, bina bheje (fail-safe)"
+            )
+        }
+        delay(2500)
+        checkActionBlock()
+        shots += screenshot(File(shotsDir, "proof_social_${kind}_sent.png"))
+        vars["social_${kind}_status"] = "sent"
+        vars["social_${kind}_detail"] = "text bheja gaya ($usedSel)".take(200)
+    }
+
+    /** text ko q(text) ke saath JS snippet me inject karne ka helper. */
+    private fun jsWith(snippet: String, text: String): String =
+        snippet.replace("%%TEXT%%", JSONObject.quote(text))
+
+    /**
+     * typeJs ke liye heuristic: pehla visible contenteditable / textarea /
+     * text-input dhoondho, focus + insertText. React-controlled inputs pe
+     * native setter + input event bhi dispatch karo.
+     */
+    private val JS_TYPE_FALLBACK = """
+        (function(T){
+          function visible(el){
+            var r=el.getBoundingClientRect();
+            return r.width>10&&r.height>10&&r.bottom>0&&r.right>0;
+          }
+          var cands=[...document.querySelectorAll(
+            '[contenteditable="true"],textarea,input[type="text"],input:not([type])')];
+          var el=cands.find(visible);
+          if(!el) return false;
+          el.scrollIntoView({block:'center'});
+          el.focus();
+          try{document.execCommand('selectAll',false,null);}catch(e){}
+          var ok=false;
+          try{ok=document.execCommand('insertText',false,T);}catch(e){}
+          if(!ok){
+            try{
+              var proto=el.isContentEditable?HTMLElement.prototype:
+                (el instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype);
+              var d=Object.getOwnPropertyDescriptor(proto,'value')||
+                    Object.getOwnPropertyDescriptor(HTMLElement.prototype,'innerText');
+              if(el.isContentEditable){el.innerText=T;}
+              else if(d&&d.set){d.set.call(el,T);}
+              else{el.value=T;}
+              el.dispatchEvent(new Event('input',{bubbles:true}));
+              el.dispatchEvent(new Event('change',{bubbles:true}));
+            }catch(e){return false;}
+          }
+          return true;
+        })(%%TEXT%%)
+    """.trimIndent()
+
+    /** Send/Reply/Post/Submit button: text ya aria-label match + click. */
+    private val JS_CLICK_SEND = """
+        (function(){
+          var els=[...document.querySelectorAll('button,a,[role=button],input[type=submit]')];
+          var norm=function(s){return (s||'').trim().replace(/\s+/g,' ').toLowerCase();};
+          var pats=['send','reply','post','submit','message'];
+          for(var p of pats){
+            for(var e of els){
+              var l=norm(e.innerText)||norm(e.getAttribute('aria-label'))||norm(e.value);
+              if(!l) continue;
+              if(l===p||l.indexOf(p)===0){
+                var r=e.getBoundingClientRect();
+                if(r.width<4||r.height<4) continue;
+                e.scrollIntoView({block:'center'});
+                e.click();
+                return true;
+              }
+            }
+          }
+          return false;
+        })()
+    """.trimIndent()
+
+    /**
+     * live_session job ka dedicated handler (Browser Agent v1, 2026-09-21).
+     * Server payload: { job_id }.
+     *
+     * Loop (~10s cadence):
+     *   1. screenshot → JPEG q60, 540px wide, ≤200KB → base64 →
+     *      POST /api/devices/:id/live/frame { job_id, frame }
+     *   2. GET /api/devices/:id/live/step?job_id= → { step } ho to ek step
+     *      execStep se execute karo (try/catch + vars me error).
+     *   3. { stop:true } → loop exit, job complete report.
+     *   4. frame POST 404 (ya step GET 404 lagataar 6 baar) = job server pe
+     *      nahi raha → exit (cancelled/deleted treat).
+     *
+     * Stall safety: 30-min cap, renderer-crash flag, har iteration me
+     * checkActionBlock (IG block → 24h auto-pause wahi guard).
+     */
+    suspend fun runLiveSession(job: JSONObject): RunResult =
+        withContext(Dispatchers.Main) {
+            val shots = mutableListOf<File>()
+            serverLessons?.take(1500)?.let { vars["memory_lessons"] = it }
+            try {
+                val jobId = job.optString("job_id", "")
+                    .ifEmpty { job.optString("id", "") }
+                    .trim()
+                if (jobId.isEmpty()) throw Exception("live_session: job_id missing")
+                val deadline = System.currentTimeMillis() + LIVE_SESSION_TIMEOUT_MS
+                var frames = 0
+                var step404s = 0
+                fun step(i: Int, action: String) {
+                    try { onStep?.invoke(i, 0, action) } catch (_: Exception) { }
+                }
+                while (System.currentTimeMillis() < deadline) {
+                    if (rendererCrashed) throw Exception(
+                        "WebView renderer crash ho gaya (live session) — job fail-mark ki gayi"
+                    )
+                    frames++
+                    step(frames, "live-frame#$frames")
+
+                    // 1) frame post (JPEG q60 540w, ≤200KB, base64)
+                    val frameB64 = try {
+                        captureLiveFrame()
+                    } catch (e: Exception) {
+                        vars["live_warn"] = "frame capture fail: ${e.message}".take(200)
+                        null
+                    }
+                    if (frameB64 != null) {
+                        try {
+                            withContext(Dispatchers.IO) {
+                                com.clipflow.agent.net.ApiClient.postLiveFrame(store, jobId, frameB64)
+                            }
+                        } catch (e: com.clipflow.agent.net.ApiException) {
+                            if (e.code == 404) {
+                                // server job ko nahi janta (endpoint purana ya
+                                // job cancelled) → loop exit, dobara post nahi.
+                                vars["live_status"] = "ended_server_gone"
+                                vars["live_frames"] = "$frames"
+                                return@withContext RunResult(true, vars.toMap(), shots, null)
+                            }
+                            vars["live_warn"] = "frame post fail: ${e.message}".take(200)
+                        } catch (e: Exception) {
+                            vars["live_warn"] = "frame post fail: ${e.message}".take(200)
+                        }
+                    }
+
+                    // 2) pending step poll
+                    val cmd = try {
+                        withContext(Dispatchers.IO) {
+                            com.clipflow.agent.net.ApiClient.getLiveStep(store, jobId)
+                        }
+                    } catch (_: Exception) {
+                        null // transient net blip — loop jari rakho
+                    }
+                    if (cmd == null) {
+                        // 404: server pe job khatam/cancelled — lagataar 6 baar
+                        // = pakka gaya, exit. (Server zinda ho to {ok:true} deta
+                        // hai, 404 nahi.)
+                        step404s++
+                        if (step404s >= 6) {
+                            vars["live_status"] = "ended_no_step_endpoint"
+                            vars["live_frames"] = "$frames"
+                            return@withContext RunResult(true, vars.toMap(), shots, null)
+                        }
+                    } else {
+                        step404s = 0
+                        if (cmd.optBoolean("stop", false)) {
+                            vars["live_status"] = "stopped"
+                            vars["live_frames"] = "$frames"
+                            return@withContext RunResult(true, vars.toMap(), shots, null)
+                        }
+                        val stepObj = cmd.optJSONObject("step")
+                        if (stepObj != null) {
+                            step(frames, "live-exec:${stepObj.optString("action", "?")}")
+                            val stepShots = mutableListOf<File>()
+                            try {
+                                execStep(stepObj, stepShots)
+                                shots += stepShots
+                                vars["live_last_step"] =
+                                    "${stepObj.optString("action", "?")}:ok".take(120)
+                            } catch (e: Exception) {
+                                vars["live_last_step"] =
+                                    "${stepObj.optString("action", "?")}:fail:${e.message}".take(200)
+                                // single step fail = loop continue (server ko
+                                // frame vars me dikhega); action-block ho to
+                                // loop se bahar (wahi 24h guard).
+                                if ((e.message ?: "").contains("action blocked")) throw e
+                            }
+                        }
+                    }
+                    // 3) action-block guard (standing rule)
+                    try { checkActionBlock() } catch (e: Exception) { throw e }
+                    delay(LIVE_SESSION_CADENCE_MS)
+                }
+                vars["live_status"] = "timeout_30min"
+                vars["live_frames"] = "$frames"
+                RunResult(true, vars.toMap(), shots, "live session 30-min cap — normal exit")
+            } catch (e: Exception) {
+                vars["live_status"] = "failed"
+                RunResult(false, vars.toMap(), shots, e.message)
+            }
+        }
+
+    /**
+     * Live frame: WebView draw → 540px wide scale → JPEG q60, ≤200KB tak
+     * quality ghatao → base64 (NO_WRAP). Design doc §3.4 ka format.
+     */
+    private suspend fun captureLiveFrame(): String = withContext(Dispatchers.Main) {
+        val w = if (webView.width > 0) webView.width else 1080
+        val h = if (webView.height > 0) webView.height else 1920
+        val full = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        webView.draw(Canvas(full))
+        val sw = 540
+        val sh = maxOf(1, (h * sw / w))
+        val scaled = Bitmap.createScaledBitmap(full, sw, sh, true)
+        full.recycle()
+        val baos = java.io.ByteArrayOutputStream()
+        var q = 60
+        scaled.compress(Bitmap.CompressFormat.JPEG, q, baos)
+        while (baos.size() > 200 * 1024 && q > 20) {
+            baos.reset()
+            q -= 10
+            scaled.compress(Bitmap.CompressFormat.JPEG, q, baos)
+        }
+        scaled.recycle()
+        android.util.Base64.encodeToString(baos.toByteArray(), android.util.Base64.NO_WRAP)
     }
 
     // ---------- WebView primitives (Main thread) ----------
 
     /**
-     * p18 STALL SAFETY: page load pe 60s timeout — onPageFinished kabhi na aaye
-     * (hang) to job yahin atak jata tha; ab timeout pe seedha fail hota hai.
+     * p18 STALL SAFETY (p57: 5 min — user order 2026-09-21): page load pe
+     * timeout — onPageFinished kabhi na aaye (hang) to job yahin atak jata
+     * tha; ab timeout pe seedha fail hota hai. Vercel USA relay se page
+     * reload me time lagta hai, isliye 60s se badha ke 5 min kiya.
      * Saath me onRenderProcessGone: renderer crash pe flag set (app crash NAHI
      * hogi — default behavior app process ko maarta hai; hum return true karke
      * job ko fail-mark karte hain taaki server ko report jaye).
@@ -1341,37 +1587,39 @@ class JobEngine(
             webView.webViewClient = object : android.webkit.WebViewClient() {
                 override fun onPageFinished(view: WebView?, u: String?) {
                     h.removeCallbacks(timeout)
-                    // p35: Whop/ContentRewards pages pe USA egress interceptor
-                    // lagao — region lock bypass. Instagram waghaira pe nahi
-                    // (JS khud host filter karta hai, ye extra safety hai).
-                    // p43: Profile tab ke USA Proxy switch se gated. ON pe
-                    // strict flag bhi set hota hai (fail-closed); OFF pe
-                    // interceptor lagta hi nahi (seedha direct).
-                    try {
-                        val host = (u ?: "").lowercase()
-                        if (host.contains("whop.com") || host.contains("contentrewards.com")) {
-                            if (store.usaProxyEnabled()) {
-                                view?.evaluateJavascript("window.__usProxyStrict=true;", null)
-                                view?.evaluateJavascript(JS_US_EGRESS, null)
-                            }
-                        }
-                    } catch (_: Exception) { }
+                    // p44: full-app USA egress — HAR page pe JS interceptor
+                    // install (koi host filter nahi). Switch OFF pe injectJs
+                    // kuch nahi karta (seedha direct).
+                    com.clipflow.agent.net.UsEgress.injectJs(view, store)
+                    // p61: automation WebView pe page load → session-TOKEN sync
+                    // (whop/contentrewards cookies → server, USA reads ke liye).
+                    // MainActivity WebView wala hook yahan nahi chalta, isliye
+                    // engine WebView me bhi — navigate job se sync trigger ho.
+                    try { com.clipflow.agent.net.SessionTokenSync.maybeSyncForUrl(context, store, u) } catch (_: Exception) { }
+                    finish(false)
                     finish(false)
                 }
-                // p41: MAIN-FRAME USA egress — whop.com/contentrewards.com ke
-                // document loads Vercel (Virginia, USA) se aate hain, taaki
-                // "not available in your region" page-load block bypass ho.
-                // Sirf GET navigations; POST ka body WebView expose nahi karta
-                // isliye wo direct jata hai. Koi bhi failure → null = direct
-                // load (page kabhi nahi tootega). Background thread pe chalta
-                // hai, isliye blocking proxyFetch safe hai.
+                // p44: FULL-APP USA egress — har GET (main-frame + subresource,
+                // koi bhi host) Vercel (Virginia, USA) se. Non-GET native →
+                // blocked page (backstop; in-page POSTs JS interceptor se
+                // body samet proxy hote hain). Fail → blocked page
+                // (fail-closed). Background thread pe chalta hai, isliye
+                // blocking proxyFetch safe hai.
                 override fun shouldInterceptRequest(
                     view: WebView?,
                     request: android.webkit.WebResourceRequest?
                 ): android.webkit.WebResourceResponse? {
                     return try {
-                        interceptMainFrameUs(request)
-                    } catch (_: Exception) { null }
+                        com.clipflow.agent.net.UsEgress.intercept(request, store)
+                    } catch (e: Exception) {
+                        // p45 fail-closed: proxy ON pe intercept exception =
+                        // blocked page (India IP se chup-chaap direct leak nahi).
+                        // Proxy OFF pe null = purana direct behavior.
+                        val proxyOn = try { store.usaProxyEnabled() } catch (_: Exception) { false }
+                        if (proxyOn) com.clipflow.agent.net.UsEgress.blockedResponse(
+                            "intercept exception: ${(e.message ?: "unknown").take(120)}"
+                        ) else null
+                    }
                 }
                 override fun onReceivedError(v: WebView?, req: android.webkit.WebResourceRequest?, err: android.webkit.WebResourceError?) {
                     h.removeCallbacks(timeout)
@@ -1398,97 +1646,24 @@ class JobEngine(
     }
 
     /**
-     * p41: main-frame document ko USA egress (Vercel iad1, Virginia) se lao.
-     *
-     * Sirf whop.com / contentrewards.com ke GET navigations intercept hote
-     * hain — Instagram, Supabase, Google waghaira hamesha direct (IG account
-     * India ka hai; achanak US datacenter IP se security challenge ka risk).
-     * Bridge response ke set-cookie CookieManager me likh deta hai, isliye
-     * Whop session bana rehta hai.
-     *
-     * p43: Profile tab ke USA Proxy switch se gated.
-     * - Switch OFF → null (direct, purana behavior).
-     * - Switch ON + proxy fail → BLOCKED page (fail-closed). India IP se
-     *   chup-chaap direct load NAHI hoga — "anyhow USA" guarantee.
+     * p47 SPEED: fixed delay(2500/3000) ki jagah smart settle wait.
+     * Page ka document.readyState poll karta hai (har 250ms) — 'complete'
+     * hote hi sirf 700ms JS settle karke aage badhta hai. Fast page pe
+     * ~1s me nikal jata hai (pehle 2.5-3s fixed tha). Slow page pe max
+     * 4s tak wait karta hai (fail-safe). Soch-samajh ke tez — safety intact.
      */
-    private fun interceptMainFrameUs(
-        request: android.webkit.WebResourceRequest?
-    ): android.webkit.WebResourceResponse? {
-        val req = request ?: return null
-        if (!req.isForMainFrame) return null
-        if ((req.method ?: "GET").uppercase() != "GET") return null
-        val uri = req.url ?: return null
-        val host = (uri.host ?: "").lowercase()
-        val proxyHost = host == "whop.com" || host.endsWith(".whop.com") ||
-                host == "contentrewards.com" || host.endsWith(".contentrewards.com")
-        if (!proxyHost) return null
-        if (!store.usaProxyEnabled()) return null // switch OFF → direct
-        val url = uri.toString()
-        val resJson = egressBridge.proxyFetch(
-            JSONObject()
-                .put("url", url)
-                .put("method", "GET")
-                .put("headers", JSONObject())
-                .toString()
-        )
-        val rj = JSONObject(resJson)
-        if (!rj.optBoolean("ok", false)) {
-            // p43 fail-closed: proxy fail = block, direct fallback NAHI.
-            vars["egress_doc"] = "us-proxy-blocked"
-            return proxyBlockedResponse(rj.optString("error", "proxy fail"))
+    private suspend fun waitForSettle(maxMs: Long = 4000L) {
+        val start = System.currentTimeMillis()
+        // Phase 1: document ready hone tak poll (max maxMs - 700ms)
+        while (System.currentTimeMillis() - start < maxMs - 700) {
+            val state = try { jsStr("document.readyState") } catch (_: Exception) { null }
+            if (state == "complete") break
+            delay(250)
         }
-        val status = rj.optInt("status", 200)
-        val b64 = rj.optString("body_base64", "")
-        val bodyBytes = if (b64.isEmpty()) ByteArray(0)
-        else android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-        val hh = rj.optJSONObject("headers") ?: JSONObject()
-        val hmap = mutableMapOf<String, String>()
-        val keys = hh.keys()
-        while (keys.hasNext()) {
-            val k = keys.next()
-            hmap[k] = hh.optString(k, "")
-        }
-        val ct = (hmap.entries.firstOrNull { it.key.equals("content-type", ignoreCase = true) }?.value
-            ?: "text/html").lowercase()
-        val mime = ct.substringBefore(";").trim().ifEmpty { "text/html" }
-        val enc = Regex("charset=([^;\\s]+)").find(ct)?.groupValues?.get(1)?.trim() ?: "utf-8"
-        vars["egress_doc"] = "us-proxy"
-        return android.webkit.WebResourceResponse(
-            mime, enc, status, reasonPhrase(status), hmap,
-            java.io.ByteArrayInputStream(bodyBytes)
-        )
+        // Phase 2: JS render ke liye chhota settle
+        delay(700)
     }
 
-    /**
-     * p43 fail-closed: USA Proxy ON tha lekin proxy request fail ho gayi.
-     * India IP se direct load karne ke bajaye ye blocked page dikhao taaki
-     * AgentBrain job ko saaf fail-mark kare (chup-chaap region leak nahi).
-     */
-    private fun proxyBlockedResponse(errDetail: String): android.webkit.WebResourceResponse {
-        val safe = errDetail.replace("<", "&lt;").take(160)
-        val html = """<html><head><meta charset="utf-8"></head><body style="font-family:sans-serif;padding:32px;color:#111">
-<h2>🇺🇸 USA Proxy blocked</h2>
-<p>Whop/ContentRewards ko USA proxy (Virginia) se load karna tha, lekin proxy fail ho gaya:</p>
-<p><code>$safe</code></p>
-<p>India IP se chup-chaap load <b>nahi</b> kiya gaya (fail-closed). Profile tab me USA Proxy OFF karke direct try kar sakte ho.</p>
-</body></html>"""
-        val bytes = html.toByteArray(Charsets.UTF_8)
-        return android.webkit.WebResourceResponse(
-            "text/html", "utf-8", 403, "Proxy Required",
-            mapOf("Content-Type" to "text/html; charset=utf-8"),
-            java.io.ByteArrayInputStream(bytes)
-        )
-    }
-
-    private fun reasonPhrase(status: Int): String = when (status) {
-        200 -> "OK"
-        301 -> "Moved Permanently"; 302 -> "Found"; 303 -> "See Other"
-        307 -> "Temporary Redirect"; 308 -> "Permanent Redirect"
-        400 -> "Bad Request"; 401 -> "Unauthorized"; 403 -> "Forbidden"
-        404 -> "Not Found"; 429 -> "Too Many Requests"
-        500 -> "Internal Server Error"; 502 -> "Bad Gateway"; 503 -> "Service Unavailable"
-        else -> ""
-    }
 
     /**
      * Round-7 (Worker A): evaluateJavascript ka callback kabhi na aaye
@@ -1528,6 +1703,10 @@ class JobEngine(
         return when (by) {
             "aria" -> "document.querySelector('[aria-label=' + $v + ']')"
             "text" -> """(function(){var els=[...document.querySelectorAll('button,a,[role=button]')];var f=els.find(e=>(e.innerText||'').trim()===$v);if(f)return f;var all=[...document.querySelectorAll('*')];return all.find(e=>e.childElementCount===0&&(e.innerText||'').trim()===$v)||null;})()"""
+            // p64: case-insensitive REGEX text match — desktop/mobile UI
+            // variants dono cover ("Select from computer|device" jaise).
+            // value ek JS regex source hai, bina slashes ke.
+            "text-regex" -> """(function(){var re;try{re=new RegExp($v,'i')}catch(e){return null}var els=[...document.querySelectorAll('button,a,[role=button]')];var f=els.find(function(e){return re.test((e.innerText||'').trim())});if(f)return f;var all=[...document.querySelectorAll('*')];return all.find(function(e){return e.childElementCount===0&&re.test((e.innerText||'').trim())})||null;})()"""
             else -> "document.querySelector($v)"
         }
     }
@@ -1576,7 +1755,19 @@ return true;})()""".trimIndent().replace("\n", "")
         val canvas = Canvas(bmp)
         webView.draw(canvas)
         withContext(Dispatchers.IO) {
-            FileOutputStream(dest).use { bmp.compress(Bitmap.CompressFormat.PNG, 90, it) }
+            // p50: report upload Vercel 4.5MB limit me rahe — 720px JPEG q75
+            // (pehle full-size PNG tha; bada multipart report hi nahi pahunchta tha).
+            val sw = 720
+            val sh = maxOf(1, (h * (sw.toFloat() / w)).toInt())
+            val scaled = Bitmap.createScaledBitmap(bmp, sw, sh, true)
+            try {
+                FileOutputStream(dest).use {
+                    scaled.compress(Bitmap.CompressFormat.JPEG, 75, it)
+                }
+            } finally {
+                try { scaled.recycle() } catch (_: Exception) { }
+                try { bmp.recycle() } catch (_: Exception) { }
+            }
         }
         dest
     }

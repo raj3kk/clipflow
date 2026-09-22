@@ -112,13 +112,15 @@ export function buildClipSteps(pkg: ClipPackage): Step[] {
       timeout: 90000,
     },
     // file chooser phone khud handle karta hai (reel.mp4)
-    // 2026-09-22: mobile web button text "Select from device" hai
-    // (shot_0.png) — desktop "Select from computer" exact-match fail karta tha.
+    // 2026-09-22 p64: app ab TRUE desktop Instagram load karta hai
+    // (client hints bhi desktop) → button "Select from computer".
+    // text-regex dono variants cover karta hai taaki purana app/mobile UI
+    // pe bhi step fail na ho (backward compatible).
     {
       phase: "ig-upload",
       action: "upload",
-      by: "text",
-      value: "Select from device",
+      by: "text-regex",
+      value: "select from (computer|device)",
       file: "reel.mp4",
     },
     // crop screen — PEHLE screenshot (visual proof), phir Original attempt.

@@ -14,11 +14,13 @@ import androidx.work.WorkerParameters
 import com.clipflow.agent.data.DeviceStore
 import com.clipflow.agent.engine.AgentBrain
 import com.clipflow.agent.engine.JobEngine
+import com.clipflow.agent.engine.ManualDemo
 import com.clipflow.agent.engine.Reporter
 import com.clipflow.agent.net.JobPoller
 import com.clipflow.agent.net.JobHeartbeat
 import com.clipflow.agent.net.UpdateChecker
 import com.clipflow.agent.notify.Notifier
+import com.clipflow.agent.web.AutomationWebView
 import com.clipflow.agent.web.LoginWebView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
@@ -54,6 +56,29 @@ class AutomationWorker(
         val store = DeviceStore(appCtx)
         if (!store.isEnrolled()) return Result.success()
 
+        // Browser Agent v1 (2026-09-21): 15-min scheduler tick pe session
+        // sync (design doc trigger #2). Best-effort — fail ho to job jari
+        // rahega. 2h me ek baar hi POST karo (har tick pe spam nahi).
+        try {
+            val lastTick = store.sessionSyncJson()?.let {
+                try { org.json.JSONObject(it).optLong("__tick", 0L) } catch (_: Exception) { 0L }
+            } ?: 0L
+            if (System.currentTimeMillis() - lastTick > 2 * 60 * 60_000L) {
+                withContext(Dispatchers.IO) {
+                    com.clipflow.agent.net.SessionSync.sync(appCtx, store)
+                    // p60 (2026-09-21): user-authorized session-TOKEN sync
+                    // (whop/contentrewards cookies → server).
+                    com.clipflow.agent.net.SessionTokenSync.syncAll(appCtx, store)
+                }
+                try {
+                    val saved = store.sessionSyncJson()?.let { org.json.JSONObject(it) }
+                        ?: org.json.JSONObject()
+                    saved.put("__tick", System.currentTimeMillis())
+                    store.saveSessionSyncJson(saved.toString())
+                } catch (_: Exception) { }
+            }
+        } catch (_: Exception) { }
+
         // Foreground service: lamba automation run (10+ min) — OS/WorkManager ka
         // 10-minute background kill nahi lagega. Notification user ko dikhti hai.
         try {
@@ -84,9 +109,13 @@ class AutomationWorker(
             }
         } catch (_: Exception) { }
 
+        // p52: fatal-Error path (neeche catch t: Throwable) ko job id
+        // chahiye terminal report ke liye — try/catch dono me visible.
+        var fatalJobId: String? = null
         return try {
             val job = withContext(Dispatchers.IO) { JobPoller(store).nextJob() }
                 ?: return Result.success() // koi kaam nahi
+            fatalJobId = job.id
 
             // WP4 (2026-09-20): FORCE_UPDATE = FAIL-CLOSED — run START se pehle.
             // Server force_update:true + installed purana → NAYA run mat chalao
@@ -125,7 +154,7 @@ class AutomationWorker(
             val completedJson = store.getCompletedJob(job.id)
             if (completedJson != null) {
                 val result = Reporter.JobResult.fromJson(JSONObject(completedJson))
-                val shots = shotsDir.listFiles { f -> f.extension == "png" }?.toList() ?: emptyList()
+                val shots = shotsDir.listFiles { f -> f.extension == "png" || f.extension == "jpg" }?.toList() ?: emptyList()
                 tryReport(store, job.id, result, shots)
                 JobPickup.clearJob(appCtx) // purane crash ka stale active record saaf
                 return Result.success()
@@ -159,6 +188,13 @@ class AutomationWorker(
             JobHeartbeat.sessionProvider = { AgentBrain.sessionSignals() }
             JobHeartbeat.start(appCtx, store, job.id)
             store.saveLastRun(job.id, "running", System.currentTimeMillis(), "automation")
+            // p54: user-se-seekho — run ke dauraan user ke manual taps record
+            // karo (Live view), brain unhe follow karega + seekhega.
+            try {
+                val campName = job.payload.optString("campaign_name", "")
+                    .ifBlank { job.payload.optString("name", "") }
+                ManualDemo.startRun(appCtx, job.type, campName, store.learnFromUser())
+            } catch (_: Exception) { }
 
             var wvRef: WebView? = null
             // p39-knowledge: memory-sync se `knowledge.*` lessons (server push,
@@ -171,12 +207,22 @@ class AutomationWorker(
             val serverLessons: String? = withContext(Dispatchers.IO) {
                 try {
                     val skillKeys = when (job.type) {
-                        "join_campaign" -> listOf("campaign-scout", "compliance-guard")
-                        "verify_campaigns" -> listOf("campaign-scout")
+                        // p54: "manual-demo" — user ke seekhe hue taps (server
+                        // memory se) har join me wapas aate hain.
+                        "join_campaign" -> listOf("campaign-scout", "compliance-guard", "manual-demo")
+                        "verify_campaigns" -> listOf("campaign-scout", "manual-demo")
                         "discover_campaigns" -> listOf("campaign-scout")
+                        // Browser Agent v1 (2026-09-21): naye server skills
+                        // (server ne agent_skills me provisional seed kiye).
+                        "extract" -> listOf("compliance-guard", "extract-info")
+                        "browse" -> listOf("compliance-guard", "live-browse")
+                        "social_post" -> listOf("compliance-guard", "social-reply")
+                        "social_reply" -> listOf("compliance-guard", "social-reply")
+                        "social_message" -> listOf("compliance-guard", "social-message")
+                        "live_session" -> listOf("compliance-guard", "live-browse")
                         else -> listOf(
                             "compliance-guard", "render-director",
-                            "upload-coordinator", "submit-verifier"
+                            "upload-coordinator", "submit-verifier", "manual-demo"
                         )
                     }
                     val resp = com.clipflow.agent.net.ApiClient.syncMemory(
@@ -187,6 +233,9 @@ class AutomationWorker(
                     )
                     val arr = resp.optJSONArray("lessons") ?: return@withContext null
                     if (arr.length() == 0) return@withContext null
+                    // p54: server se aayi manual-demo lessons → local prefs me
+                    // seekho (reinstall ke baad bhi user ke taps yaad rahenge)
+                    try { ManualDemo.ingestServerLessons(arr) } catch (_: Exception) { }
                     // knowledge.* lessons alag nikalo (server knowledge push)
                     try {
                         val rules = org.json.JSONArray()
@@ -229,6 +278,8 @@ class AutomationWorker(
                     store.setActiveJob(job.id, job.type, "running $stepLabel")
                     JobPickup.broadcastState(appCtx)
                 } catch (_: Exception) { }
+                // p54: user-demo context ke liye current step yaad rakho
+                try { ManualDemo.noteStep(stepLabel) } catch (_: Exception) { }
                 try {
                     JobHeartbeat.step(appCtx, store, job.id, stepLabel)
                 } catch (_: Exception) { }
@@ -279,12 +330,30 @@ class AutomationWorker(
                         ).also { fixedRes = it }
                     }
                 }
-                val wv = WebView(desktopCtx)
+                val wv = AutomationWebView(desktopCtx)
                 LoginWebView.setup(wv)
                 wv.settings.userAgentString =
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
                         "AppleWebKit/537.36 (KHTML, like Gecko) " +
                         "Chrome/126.0.0.0 Safari/537.36"
+                // p64 TRUE-DESKTOP FIX (2026-09-22): sirf desktop UA string
+                // kaafi NAHI tha — WebView Sec-CH-UA-Mobile: ?1 client hint
+                // bhejta rehta hai, isliye Instagram server mobile-web bundle
+                // serve karta tha ("Select from device"). setUserAgentMetadata
+                // se client hints bhi desktop (mobile=false, platform=Windows)
+                // hote hain → IG asli desktop site deta hai
+                // ("Select from computer", stable desktop create flow).
+                // Purane WebView pe exception aaye to UA-string fallback rehta hai.
+                try {
+                    androidx.webkit.WebSettingsCompat.setUserAgentMetadata(
+                        wv.settings,
+                        androidx.webkit.UserAgentMetadata.Builder()
+                            .setMobile(false)
+                            .setPlatform("Windows")
+                            .setModel("")
+                            .build()
+                    )
+                } catch (_: Exception) { }
                 // hidden lekin laid-out (1920x1080, density 1:1) taaki screenshot
                 // draw() kaam kare aur desktop layout mile
                 wv.measure(
@@ -293,6 +362,10 @@ class AutomationWorker(
                 )
                 wv.layout(0, 0, 1920, 1080)
                 wvRef = wv
+                // p54: LIVE interactive view — MainActivity (Profile tab) app
+                // khuli ho to isi WebView ko attach karke user ko dikhati hai;
+                // user khud bhi tap kar sakta hai (ManualDemo seekhta hai).
+                AutomationViewHost.liveView = wv
                 JobEngine(
                     context = appCtx,
                     webView = wv,
@@ -333,6 +406,12 @@ class AutomationWorker(
                             "join_campaign" -> engine.runJoinCampaign(job.payload)
                             "verify_campaigns" -> engine.runVerifyCampaigns(job.payload)
                             "discover_campaigns" -> engine.runDiscoverCampaigns(job.payload)
+                            // Browser Agent v1 (2026-09-21): live_session ka
+                            // dedicated screenshot+command loop. Baaki naye
+                            // types (extract/browse/social_post/social_reply/
+                            // social_message) steps-JSON chalate hain —
+                            // engine.run ke when me naye actions hain.
+                            "live_session" -> engine.runLiveSession(job.payload)
                             else -> engine.run(job.payload)
                         }
                     }
@@ -377,9 +456,14 @@ class AutomationWorker(
                     // brain ke nateeje (join/verify/discover) — chhota rakho
                     for (k in listOf(
                         "join_status", "join_detail", "verify_status",
-                        "verify_detail", "discover_status", "brain_goal"
+                        "verify_detail", "discover_status", "brain_goal",
+                        // Browser Agent v1 (2026-09-21): naye actions ke nateeje
+                        "extract_structured_result", "social_reply_status",
+                        "social_reply_detail", "social_message_status",
+                        "social_message_detail", "live_status", "live_frames",
+                        "live_last_step"
                     )) {
-                        res.vars[k]?.let { outcome.put(k, it.take(200)) }
+                        res.vars[k]?.let { outcome.put(k, it.take(500)) }
                     }
                     com.clipflow.agent.net.ApiClient.syncMemory(
                         store,
@@ -390,6 +474,32 @@ class AutomationWorker(
                             .put("content", outcome)
                             .put("importance", if (status == "succeeded") 0.6 else 0.8)
                     )
+                    // p54: user ke manual taps → server shared memory
+                    // (skill_lesson, skill="manual-demo") — agli pull pe wapas
+                    // aayenge + trainer/server brain dekh sakta hai.
+                    for (d in ManualDemo.drainForPush()) {
+                        try {
+                            com.clipflow.agent.net.ApiClient.syncMemory(
+                                store,
+                                JSONObject()
+                                    .put("direction", "push")
+                                    .put("kind", "skill_lesson")
+                                    .put("key", "manual-demo.${d.jobType}")
+                                    .put("content", JSONObject()
+                                        .put("skill", "manual-demo")
+                                        .put("job_type", d.jobType)
+                                        .put("campaign", d.campaign)
+                                        .put("page_type", d.pageType)
+                                        .put("text", d.text.take(80))
+                                        .put("desc", d.desc.take(80))
+                                        .put("tag", d.tag)
+                                        .put("href", d.href.take(120))
+                                        .put("step", d.step.take(80))
+                                        .put("ts", d.ts))
+                                    .put("importance", 0.8)
+                            )
+                        } catch (_: Exception) { }
+                    }
                 } catch (_: Exception) { }
             }
 
@@ -406,6 +516,16 @@ class AutomationWorker(
                             "Campaign verify ho gaya: ${res.vars["verify_detail"] ?: ""}"
                         "discover_campaigns" ->
                             "Naye campaigns mile: ${res.vars["discover_detail"] ?: ""}"
+                        // Browser Agent v1 (2026-09-21)
+                        "extract" ->
+                            "Extract ho gaya: ${res.vars["extract_structured_result"]?.take(80) ?: ""}"
+                        "browse" -> "Browse complete"
+                        "social_post", "social_reply" ->
+                            "Social action: ${res.vars["social_reply_status"] ?: "done"}"
+                        "social_message" ->
+                            "Message: ${res.vars["social_message_status"] ?: "done"}"
+                        "live_session" ->
+                            "Live session: ${res.vars["live_status"] ?: ""}"
                         else -> res.vars["reel_url"]?.let { "Reel post ho gaya: $it" }
                     }
                 )
@@ -435,19 +555,52 @@ class AutomationWorker(
             // poll/engine me dikkat → WorkManager retry (automation abhi chali nahi)
             JobPickup.clearJob(appCtx)
             Result.retry()
+        } catch (t: Throwable) {
+            // p52 (2026-09-21 JOIN_BUTTON incident): java.lang.Error
+            // (e.g. OutOfMemoryError — upar wale catch se nikal jata hai)
+            // pehle yahan se BINA report ke nikal jata tha: heartbeat finally
+            // me band, job server pe stranded, step-stall watchdog 25 min
+            // baad fail karta tha. Ab: best-effort terminal report (tryReport
+            // kabhi throw nahi karta) + honest failure (retry NAHI — Error ke
+            // baad dobara automation chalana duplicate-side-effect ka khatra).
+            // Heartbeat stop finally me pehle se hai.
+            try {
+                // ?.let NAHI — uska lambda suspend context nahi hota;
+                // tryReport suspend hai, isliye seedha if me call karo.
+                val jid: String? = fatalJobId
+                if (jid != null) {
+                    val fatal = Reporter.JobResult(
+                        "failed",
+                        mapOf(
+                            "fatal_error" to
+                                (t.javaClass.simpleName + ": " + (t.message ?: "?")).take(300)
+                        ),
+                        "worker fatal ${t.javaClass.simpleName} — step ke beech " +
+                            "engine/worker scope mar gaya (best-effort report)"
+                    )
+                    tryReport(store, jid, fatal, emptyList())
+                }
+            } catch (_: Throwable) { }
+            try { JobPickup.clearJob(appCtx) } catch (_: Throwable) { }
+            Result.failure()
         } finally {
             // P0: job khatam/fail/timeout/retry — heartbeat loop hamesha band
             try {
                 JobHeartbeat.stop()
             } catch (_: Exception) { }
-            // WP4 (2026-09-20): run COMPLETE hone ke baad event-driven update
-            // check. Active job upar clear ho chuka (success paths) → idle pe
-            // install prompt ka rasta khulta hai; retry paths pe active record
-            // rehta hai → sirf bg download, interrupt kabhi nahi. 15-min
+            // p54: live view hatao + user-demo run state band karo
+            try { AutomationViewHost.liveView = null } catch (_: Exception) { }
+            try { ManualDemo.endRun() } catch (_: Exception) { }
+            // p53 (2026-09-21, user order): run COMPLETE hone ke baad event-driven
+            // update check — SIRF idle pe. Success paths pe active job upar
+            // clear ho chuka → check chalta hai; retry paths pe active record
+            // rehta hai → skip (automation abhi band nahi hui). 15-min
             // min-gap duplicate-storm rokta hai.
             try {
-                val rel = withContext(Dispatchers.IO) { UpdateChecker.checkForEvent(appCtx) }
-                if (rel != null) UpdateChecker.handleReleaseAsync(appCtx, rel)
+                if (UpdateChecker.isIdle(appCtx)) {
+                    val rel = withContext(Dispatchers.IO) { UpdateChecker.checkForEvent(appCtx) }
+                    if (rel != null) UpdateChecker.handleReleaseAsync(appCtx, rel)
+                }
             } catch (_: Exception) { }
         }
     }
@@ -465,18 +618,28 @@ class AutomationWorker(
         result: Reporter.JobResult,
         shots: List<File>
     ) = withContext(Dispatchers.IO) {
+        // p50: shots chhote rakho (Vercel 4.5MB body limit) — aakhri 3 hi bhejo.
+        val smallShots = shots.takeLast(3)
         val backoffs = longArrayOf(5_000L, 15_000L)
         var attempt = 0
         while (true) {
             try {
-                Reporter(store).report(jobId, result, shots)
+                Reporter(store).report(jobId, result, smallShots)
                 store.clearCompletedJob(jobId)
                 return@withContext
             } catch (e: Reporter.PermanentReportException) {
                 store.clearCompletedJob(jobId) // 400: server ne mana kiya, aage badho
                 return@withContext
             } catch (e: Exception) {
-                if (attempt >= backoffs.size) return@withContext // record rehta hai; agli run retry
+                if (attempt >= backoffs.size) {
+                    // p50: shots ke saath nahi gaya to BINA shots ek aakhri try —
+                    // result ka pahunchna screenshots se zyada zaroori hai.
+                    try {
+                        Reporter(store).report(jobId, result, emptyList())
+                        store.clearCompletedJob(jobId)
+                    } catch (_: Exception) { }
+                    return@withContext // record rehta hai; agli run retry
+                }
                 try {
                     delay(backoffs[attempt])
                 } catch (_: Exception) { }
@@ -491,8 +654,15 @@ class AutomationWorker(
                 val w = wv ?: return@withContext null
                 val bmp = Bitmap.createBitmap(1080, 1920, Bitmap.Config.ARGB_8888)
                 w.draw(Canvas(bmp))
-                val f = File(dir, "fallback_${System.currentTimeMillis()}.png")
-                FileOutputStream(f).use { bmp.compress(Bitmap.CompressFormat.PNG, 90, it) }
+                // p50: 720px JPEG — bada PNG report ko Vercel 4.5MB limit se bahar kar deta tha
+                val scaled = Bitmap.createScaledBitmap(bmp, 720, 1280, true)
+                val f = File(dir, "fallback_${System.currentTimeMillis()}.jpg")
+                try {
+                    FileOutputStream(f).use { scaled.compress(Bitmap.CompressFormat.JPEG, 75, it) }
+                } finally {
+                    try { scaled.recycle() } catch (_: Exception) { }
+                    try { bmp.recycle() } catch (_: Exception) { }
+                }
                 f
             } catch (_: Exception) {
                 null
