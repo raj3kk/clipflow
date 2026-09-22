@@ -121,10 +121,19 @@ export function buildClipSteps(pkg: ClipPackage): Step[] {
       value: "Select from device",
       file: "reel.mp4",
     },
-    // crop screen — ORIGINAL select (bina crop)
-    { phase: "ig-crop", action: "wait_text", text: "Crop", timeout: 90000 },
-    { phase: "ig-original", action: "click", by: "text", value: "Original" },
-    { phase: "ig-proof-crop", action: "screenshot", as: "proof_crop_original.png" },
+    // crop screen — PEHLE screenshot (visual proof), phir Original attempt.
+    // 2026-09-22 lesson: mobile web pe "Original" text option ho bhi sakta hai,
+    // nahi bhi. Exact-text click fail = poora job fail (8c63d727: "click fail: Original").
+    // Fix: tolerant wait_js — "Original" label mile to click karo, na mile to
+    // default pe continue (9:16 source pe IG default full-frame hi rakhta hai).
+    // Cycle-button ko kabhi blind click mat karo (galat ratio select ho jayega).
+    { phase: "ig-proof-crop", action: "screenshot", as: "proof_crop_screen.png" },
+    {
+      phase: "ig-original",
+      action: "wait_js",
+      js: `(function(){var now=Date.now();if(!window.__acOrigT)window.__acOrigT=now;if(window.__acOrigC&&now-window.__acOrigC>2000)return true;if(now-window.__acOrigT>25000)return true;var els=document.querySelectorAll('button,[role="button"],[role="option"],li');for(var i=0;i<els.length;i++){var el=els[i];if(!el.getClientRects||el.getClientRects().length===0)continue;var t=(el.innerText||'').trim().toLowerCase();var al=(el.getAttribute('aria-label')||'').toLowerCase();if(t==='original'||t.indexOf('original')===0||al.indexOf('original')===0){if(!window.__acOrigC){window.__acOrigC=now;var b=(el.closest?el.closest('button,[role="button"]'):null)||el;b.click();}return false;}}return false;})()`,
+      timeout: 40000,
+    },
     { phase: "ig-next1", action: "click", by: "text", value: "Next" },
     // beech me trim/cover screen aaye to ek aur Next (best-effort)
     {
