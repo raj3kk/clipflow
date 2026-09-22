@@ -387,11 +387,11 @@ export function buildClipSteps(pkg: ClipPackage, campaignName?: string): Step[] 
     },
     // caption screen milestone proof
     shot("ig-caption", "proof_precaption"),
-    // caption type (proven eval) + VERIFY — pehle verify hota hi nahi tha
+    // caption type (3-signal fallback + VERIFY — pehle verify hota hi nahi tha)
     {
       phase: "ig-caption",
       action: "eval",
-      js: `(function(){var el=document.querySelector('[aria-label^="Write a caption"]');if(!el)return 'no-box';el.focus();try{document.execCommand('selectAll',false,null)}catch(e){}var ok=false;try{ok=document.execCommand('insertText',false,${captionQ})}catch(e){}el.dispatchEvent(new Event('input',{bubbles:true}));return ok?'typed':'fail';})()`,
+      js: `(function(){var el=document.querySelector('[aria-label^="Write a caption"]')||document.querySelector('textarea[aria-label*="caption" i]')||(function(){var cs=[...document.querySelectorAll('textarea,[contenteditable="true"],input[type="text"]')].filter(function(e){try{var r=e.getBoundingClientRect();return r.width>4&&r.height>4;}catch(x){return false;}});for(var i=0;i<cs.length;i++){var a=((cs[i].getAttribute('aria-label')||'')+' '+(cs[i].getAttribute('placeholder')||'')).toLowerCase();if(a.indexOf('caption')!==-1)return cs[i];}return null;})();if(!el)return 'no-box';el.focus();try{document.execCommand('selectAll',false,null)}catch(e){}var ok=false;try{ok=document.execCommand('insertText',false,${captionQ})}catch(e){}if(!ok){try{var proto=el instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;var setter=Object.getOwnPropertyDescriptor(proto,'value').set;setter.call(el,${captionQ});ok=true;}catch(e2){}}el.dispatchEvent(new Event('input',{bubbles:true}));return ok?'typed':'fail';})()`,
     },
     {
       phase: "ig-caption",
