@@ -430,6 +430,8 @@ class MainActivity : Activity() {
      * p68 (2026-09-22, user order — "webview me back forward reload
      * navigation add kro"): interactive WebViews (live preview + learn)
      * ke upar browser-jaisi navigation row — ◀ back, ▶ forward, ↻ reload.
+     * p69 (2026-09-22, user order — "scroll v ir sake webview"): ▲ scroll
+     * up + ▼ scroll down bhi — page-wise scroll (browser jaisa).
      * Search tab wali row jaisi styling. getWv har tap pe CURRENT WebView
      * deta hai (live preview me worker ka view attach/detach hota hai).
      */
@@ -451,6 +453,8 @@ class MainActivity : Activity() {
         val backBtn = navBtn("◀")
         val fwdBtn = navBtn("▶")
         val reloadBtn = navBtn("↻")
+        val upBtn = navBtn("▲")
+        val downBtn = navBtn("▼")
         backBtn.setOnClickListener {
             try { val wv = getWv(); if (wv?.canGoBack() == true) wv.goBack() }
             catch (_: Exception) { }
@@ -462,9 +466,18 @@ class MainActivity : Activity() {
         reloadBtn.setOnClickListener {
             try { getWv()?.reload() } catch (_: Exception) { }
         }
+        // p69: page-wise scroll up/down (browser jaisa).
+        upBtn.setOnClickListener {
+            try { getWv()?.pageUp(false) } catch (_: Exception) { }
+        }
+        downBtn.setOnClickListener {
+            try { getWv()?.pageDown(false) } catch (_: Exception) { }
+        }
         row.addView(backBtn)
         row.addView(fwdBtn)
         row.addView(reloadBtn)
+        row.addView(upBtn)
+        row.addView(downBtn)
         return row
     }
 
