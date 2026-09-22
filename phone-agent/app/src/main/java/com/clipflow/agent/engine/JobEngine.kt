@@ -96,6 +96,11 @@ class JobEngine(
     private val vars = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val shotsDir = File(workDir, "shots").apply { mkdirs() }
     private val filesDir = File(workDir, "files").apply { mkdirs() }
+    /**
+     * p70: current job ka id — shot_upload action POST /api/devices/jobs/{id}/shot
+     * ke liye. run()/runLiveSession() start pe set karte hain.
+     */
+    private var activeJobId: String = ""
     private val http = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
@@ -1017,9 +1022,15 @@ class JobEngine(
         }
     }
 
-    suspend fun run(job: JSONObject): RunResult = withContext(Dispatchers.Main) {
+    suspend fun run(job: JSONObject, jobId: String = ""): RunResult = withContext(Dispatchers.Main) {
         val shots = mutableListOf<File>()
         val warnings = mutableListOf<String>()
+        // p70: shot_upload action ko job id chahiye (POST /api/devices/jobs/{id}/shot)
+        activeJobId = jobId
+        // p66: naya run — purane job ka chooser state kabhi reuse na ho.
+        chrome.jobVideo = null
+        chrome.pendingFile = null
+        chrome.served = false
         // LIVE PREVIEW: job chalte hue har 15 sec me screenshot server ko
         val previewJob = startLivePreview(this)
         // p39: server brain se pull hue lessons (agar mile).
@@ -1054,7 +1065,7 @@ class JobEngine(
                     // optional step: fail ho to warning note karke aage badho
                     if (s.optBoolean("optional", false)) {
                         try {
-                            execStep(s, shots)
+                            execStep(s, shots, i, total)
                         } catch (e: Exception) {
                             val w = "step ${i} (${s.optString("phase", action)}): ${e.message}"
                             warnings += w.take(200)
@@ -1063,7 +1074,7 @@ class JobEngine(
                             } catch (_: Exception) { }
                         }
                     } else {
-                        execStep(s, shots)
+                        execStep(s, shots, i, total)
                         try {
                             onStepEnd?.invoke(i, total, action, true, null)
                         } catch (_: Exception) { }
@@ -1099,17 +1110,25 @@ class JobEngine(
             RunResult(false, vars.toMap(), shots, e.message)
         } finally {
             previewJob.cancel() // LIVE PREVIEW: job khatam → preview band
+            // p66: run khatam — job-bound video yahin bhool jao taaki agla
+            // run/manual tap purani footage na uthaye.
+            chrome.jobVideo = null
+            chrome.pendingFile = null
         }
     }
 
     // ---------- steps ----------
 
-    private suspend fun execStep(s: JSONObject, shots: MutableList<File>) {
+    private suspend fun execStep(s: JSONObject, shots: MutableList<File>, stepIndex: Int = 0, total: Int = 0) {
         when (s.getString("action")) {
             "download" -> {
                 val url = fill(s.getString("url"))
                 val name = s.getString("as")
-                download(url, File(filesDir, name))
+                val dest = File(filesDir, name)
+                download(url, dest)
+                // p66: current job ka video bind karo — manual "Select from
+                // device" tap par chooser isi exact file ko dega.
+                if (chrome.isVideoFile(dest)) chrome.jobVideo = dest
             }
             "navigate" -> {
                 loadUrl(fill(s.getString("url")))
@@ -1128,6 +1147,8 @@ class JobEngine(
             "upload" -> {
                 val file = File(filesDir, s.getString("file"))
                 if (!file.exists()) throw Exception("upload file missing: ${file.name}")
+                // p66: upload step ka exact file bhi job-bound rakho.
+                if (chrome.isVideoFile(file)) chrome.jobVideo = file
                 // Round-7 (Worker A) fix: served reset karo — warna doosre
                 // upload step pe purana 'true' dekhke chooser ka wait skip ho
                 // jata tha (file attach hue bina aage badh jata tha).
@@ -1195,6 +1216,36 @@ class JobEngine(
             }
             "screenshot" -> {
                 shots += screenshot(File(shotsDir, s.getString("as")))
+            }
+            // p70: mid-flow proof shot — turant server ko bhejta hai
+            // (POST /api/devices/jobs/{id}/shot, multipart: name/shot/step +
+            // optional phase/msg). Server device-shots me save karta hai taaki
+            // timeout/fail pe bhi evidence mile (pehle screenshots sirf job
+            // END pe report me aate the, fail pe evidence phone me atak jati thi).
+            // Upload transient fail → 1 retry; phir bhi fail → vars me note,
+            // step FAIL NAHI hota. screenshot capture khud throw kare to hi
+            // step fail hota hai.
+            "shot_upload" -> {
+                val asName = s.getString("as")
+                val phase = s.optString("phase", "")
+                val f = screenshot(File(shotsDir, "$asName.jpg"))
+                val act = s.optString("action", "shot_upload")
+                val stepLabel = if (total > 0) "step ${stepIndex + 1}/$total ($act)" else act
+                var err: String? = null
+                for (attempt in 0..1) {
+                    try {
+                        com.clipflow.agent.net.ApiClient.uploadJobShot(
+                            store, activeJobId, asName, f, stepLabel,
+                            phase.ifEmpty { null }, null
+                        )
+                        err = null
+                        break
+                    } catch (e: Exception) {
+                        err = (e.message ?: e.javaClass.simpleName).take(120)
+                    }
+                    if (attempt == 0) delay(2000)
+                }
+                if (err != null) vars["shot_$asName"] = "upload_fail:$err"
             }
             // ---------- Browser Agent v1 (2026-09-21) ----------
             // extract_structured { url, script, timeout_ms }:
@@ -1436,6 +1487,8 @@ class JobEngine(
                     .ifEmpty { job.optString("id", "") }
                     .trim()
                 if (jobId.isEmpty()) throw Exception("live_session: job_id missing")
+                // p70: shot_upload action ke liye
+                activeJobId = jobId
                 val deadline = System.currentTimeMillis() + LIVE_SESSION_TIMEOUT_MS
                 var frames = 0
                 var step404s = 0
@@ -1555,6 +1608,32 @@ class JobEngine(
         }
         scaled.recycle()
         android.util.Base64.encodeToString(baos.toByteArray(), android.util.Base64.NO_WRAP)
+    }
+
+    /**
+     * p70: heartbeat ke liye downscaled live frame — captureLiveFrame wala
+     * pattern, seedha 360px wide pe draw (startLivePreview jaisa memory-safe),
+     * JPEG q60 → base64 (NO_WRAP). JobHeartbeat.frameProvider yahi function
+     * hai (AutomationWorker set karta hai); frame throttle heartbeat me hota
+     * hai (20s me max 1). Fail ho to null — heartbeat kabhi nahi marega.
+     */
+    suspend fun webViewFrameB64(): String? = try {
+        withContext(Dispatchers.Main) {
+            val w = if (webView.width > 0) webView.width else 1080
+            val h = if (webView.height > 0) webView.height else 1920
+            val sw = 360
+            val sh = maxOf(1, (h * sw / w))
+            val small = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888)
+            val c = Canvas(small)
+            c.scale(sw.toFloat() / w, sh.toFloat() / h)
+            webView.draw(c)
+            val baos = java.io.ByteArrayOutputStream()
+            small.compress(Bitmap.CompressFormat.JPEG, 60, baos)
+            try { small.recycle() } catch (_: Exception) { }
+            android.util.Base64.encodeToString(baos.toByteArray(), android.util.Base64.NO_WRAP)
+        }
+    } catch (_: Throwable) {
+        null
     }
 
     // ---------- WebView primitives (Main thread) ----------
@@ -1776,6 +1855,9 @@ return true;})()""".trimIndent().replace("\n", "")
     inner class AutomationChromeClient : WebChromeClient() {
         @Volatile var pendingFile: File? = null
         @Volatile var served: Boolean = false
+        // p66: current job ka downloaded video. Manual "Select from device"
+        // tap par pendingFile null hota hai — tab yehi exact file lagao.
+        @Volatile var jobVideo: File? = null
 
         // p35: camera/mic getUserMedia hamesha silently deny — koi system
         // prompt nahi. Upload file chooser se hota hai (neeche), jise ye
@@ -1784,24 +1866,43 @@ return true;})()""".trimIndent().replace("\n", "")
             request.deny()
         }
 
+        fun isVideoFile(f: File): Boolean {
+            if (!f.isFile || f.length() <= 0) return false
+            return f.extension.lowercase() in setOf("mp4", "mov", "webm", "mkv", "3gp")
+        }
+
         override fun onShowFileChooser(
             view: WebView?, filePathCallback: ValueCallback<Array<Uri>>?,
             fileChooserParams: FileChooserParams?
         ): Boolean {
             val f = pendingFile
+            val j = jobVideo
             served = true
             Handler(Looper.getMainLooper()).post {
-                if (f != null && f.exists()) {
+                // p66: pehle automation upload step ka exact file; warna current
+                // job ka downloaded video (manual tap). Koi valid file nahi to cancel.
+                val target = when {
+                    f != null && f.exists() -> f
+                    j != null && j.exists() -> j
+                    else -> null
+                }
+                if (target != null) {
+                    try { vars["chooser_file"] = target.name } catch (_: Exception) { }
+                    try {
+                        vars["chooser_mode"] =
+                            if (f != null && f.exists()) "pending" else "job-video"
+                    } catch (_: Exception) { }
                     // FileProvider content:// URI (file:// API 24+ pe risky)
                     val uri = try {
                         androidx.core.content.FileProvider.getUriForFile(
-                            context, "${context.packageName}.fileprovider", f
+                            context, "${context.packageName}.fileprovider", target
                         )
                     } catch (_: Exception) {
-                        Uri.fromFile(f)
+                        Uri.fromFile(target)
                     }
                     filePathCallback?.onReceiveValue(arrayOf(uri))
                 } else {
+                    try { vars["chooser_file"] = "none" } catch (_: Exception) { }
                     filePathCallback?.onReceiveValue(null)
                 }
             }

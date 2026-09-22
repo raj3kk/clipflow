@@ -361,6 +361,18 @@ class AutomationWorker(
                         val mark = if (ok) "✓" else "✗"
                         val detail = if (!ok && !error.isNullOrBlank())
                             ": ${error.take(80)}" else ""
+                        // p70: step FAIL → server ko step-event bhi
+                        // ({t, step, phase:end, ok:false, msg}) taaki
+                        // live_steps me turant diagnosable ho
+                        if (!ok) {
+                            try {
+                                JobHeartbeat.event(
+                                    appCtx, store, job.id,
+                                    "step ${idx + 1}/$total ($action)",
+                                    "end", false, error?.take(120)
+                                )
+                            } catch (_: Exception) { }
+                        }
                         pushProgress("step ${idx + 1}/$total ($action) $mark$detail")
                     },
                     // LIVE PREVIEW (2026-09-20): web Live page pe phone ki screen dikhe
@@ -372,6 +384,10 @@ class AutomationWorker(
                     serverKnowledgeUpdates = knowledgeUpdatesJson,
                 )
             }
+            // p70: heartbeat ke liye downscaled live frame provider
+            // (engine.webViewFrameB64: 360px JPEG q60 → base64; 20s throttle
+            // JobHeartbeat me). Job khatm pe finally me null kiya jata hai.
+            JobHeartbeat.frameProvider = { engine.webViewFrameB64() }
 
             // p18 STALL SAFETY: engine ke andar 20-min step deadline hai; uske
             // upar 25-min ka backstop. supervisorScope taaki timeout ki
@@ -393,7 +409,7 @@ class AutomationWorker(
                             // social_message) steps-JSON chalate hain —
                             // engine.run ke when me naye actions hain.
                             "live_session" -> engine.runLiveSession(job.payload)
-                            else -> engine.run(job.payload)
+                            else -> engine.run(job.payload, job.id)
                         }
                     }
                 }
@@ -568,6 +584,11 @@ class AutomationWorker(
             // P0: job khatam/fail/timeout/retry — heartbeat loop hamesha band
             try {
                 JobHeartbeat.stop()
+            } catch (_: Exception) { }
+            // p70: frame provider hatao — agle job/engine se purana reference
+            // kabhi leak na ho
+            try {
+                JobHeartbeat.frameProvider = null
             } catch (_: Exception) { }
             // p54: live view hatao + user-demo run state band karo
             try { AutomationViewHost.liveView = null } catch (_: Exception) { }

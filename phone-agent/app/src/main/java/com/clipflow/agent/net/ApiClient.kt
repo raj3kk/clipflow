@@ -3,10 +3,14 @@ package com.clipflow.agent.net
 import com.clipflow.agent.BuildConfig
 import com.clipflow.agent.data.DeviceStore
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 /** HTTP code ke saath throw hone wala API error (401 = device unknown/deleted). */
@@ -24,7 +28,7 @@ object ApiClient {
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    data class EnrollResult(val deviceId: String, val apiKey: String)
+    data class EnrollResult(val deviceId: String, val apiKey: String, val deviceNo: String? = null)
 
     @Throws(Exception::class)
     fun enroll(serverUrl: String, code: String): EnrollResult {
@@ -42,7 +46,10 @@ object ApiClient {
             }
             return EnrollResult(
                 deviceId = json.getString("device_id"),
-                apiKey = json.getString("api_key")
+                apiKey = json.getString("api_key"),
+                // Browser Agent v1 (2026-09-21): enroll response me device_no
+                // ("AC-0007") aata hai. Server purana ho to field missing → null.
+                deviceNo = json.optString("device_no", "").ifEmpty { null },
             )
         }
     }
@@ -115,18 +122,64 @@ object ApiClient {
     /**
      * P0 (2026-09-19, round-6 Worker D): job execution heartbeat.
      * POST /api/devices/jobs/{id}/heartbeat, body {"step": "<label>"}.
+     * p70 (2026-09-22): body me optional `events` (step-event history,
+     *   [{t, step, phase, msg, ok}], max 20/call — server live_steps me
+     *   likhta hai) + `frame` (base64 JPEG, server live_frame me likhta hai).
+     *   Dono null ho to purana behavior (sirf step) — signature ke default
+     *   params pichle callers ko nahi todte.
      * Route device auth (X-Device-Id / X-Device-Key) se verify karta hai.
      * Failures caller (JobHeartbeat) me silent handle hoti hain.
      */
     @Throws(Exception::class)
-    fun postHeartbeat(store: DeviceStore, jobId: String, step: String, sessions: JSONObject? = null): JSONObject {
+    fun postHeartbeat(
+        store: DeviceStore,
+        jobId: String,
+        step: String,
+        sessions: JSONObject? = null,
+        events: JSONArray? = null,
+        frame: String? = null,
+    ): JSONObject {
         val bodyObj = JSONObject().put("step", step)
         if (sessions != null) bodyObj.put("sessions", sessions)
+        if (events != null) bodyObj.put("events", events)
+        if (frame != null) bodyObj.put("frame", frame)
         val body = bodyObj.toString()
             .toRequestBody("application/json".toMediaType())
         val req = authBuilder(store)
             .url(store.serverUrl() + "/api/devices/jobs/$jobId/heartbeat")
             .post(body)
+            .build()
+        return deviceCall(req)
+    }
+
+    /**
+     * p70 (2026-09-22): mid-flow proof shot upload.
+     * POST /api/devices/jobs/{id}/shot (device auth: X-Device-Id / X-Device-Key),
+     * multipart: name (text), shot (JPEG file), step (text),
+     * phase / msg (text, optional).
+     * Server turant device-shots me save karta hai — timeout/fail pe bhi
+     * evidence milti hai (pehle screenshots sirf job END pe report me aate the).
+     */
+    @Throws(Exception::class)
+    fun uploadJobShot(
+        store: DeviceStore,
+        jobId: String,
+        name: String,
+        shot: File,
+        step: String,
+        phase: String? = null,
+        msg: String? = null,
+    ): JSONObject {
+        if (jobId.isEmpty()) throw Exception("uploadJobShot: job_id missing")
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("name", name)
+            .addFormDataPart("shot", shot.name, shot.asRequestBody("image/jpeg".toMediaType()))
+            .addFormDataPart("step", step)
+        if (!phase.isNullOrEmpty()) body.addFormDataPart("phase", phase)
+        if (!msg.isNullOrEmpty()) body.addFormDataPart("msg", msg)
+        val req = authBuilder(store)
+            .url(store.serverUrl() + "/api/devices/jobs/$jobId/shot")
+            .post(body.build())
             .build()
         return deviceCall(req)
     }
@@ -165,8 +218,7 @@ object ApiClient {
      * p39: blocker/escalation — phone brain terminal fail ho to server ko
      * agent_issue file karo taaki assistant root-cause fix kar sake.
      * POST /api/agent/issues (device auth).
-     */
-    @Throws(Exception::class)
+     */    @Throws(Exception::class)
     fun fileAgentIssue(
         store: DeviceStore,
         severity: String,
@@ -185,6 +237,85 @@ object ApiClient {
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
         return deviceCall(req)
+    }
+
+    /**
+     * p60 (2026-09-21): WebView session-TOKEN sync — USER-AUTHORIZED.
+     * POST /api/agent/session/tokens (device auth).
+     * body: { service: "whop"|"contentrewards", cookie_header, page_url? }
+     * Sirf whop/contentrewards — Instagram kabhi nahi.
+     */
+    @Throws(Exception::class)
+    fun syncSessionTokens(store: DeviceStore, body: JSONObject): JSONObject {
+        val req = authBuilder(store)
+            .url(store.serverUrl() + "/api/agent/session/tokens")
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        return deviceCall(req)
+    }
+
+    /**
+     * Browser Agent v1 (2026-09-21): browser login-state sync.
+     * POST /api/devices/:id/sessions (device auth).
+     * body: { sessions: [{ site, logged_in, account_handle? }] }
+     *
+     * SECRET RULE: body me sirf site/logged_in/handle — cookies/tokens
+     * KABHI nahi (SessionSync me derive hota hai).
+     */
+    @Throws(Exception::class)
+    fun syncSessions(store: DeviceStore, body: JSONObject): JSONObject {
+        val deviceId = store.deviceId() ?: throw Exception("not enrolled")
+        val req = authBuilder(store)
+            .url(store.serverUrl() + "/api/devices/$deviceId/sessions")
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        return deviceCall(req)
+    }
+
+    /**
+     * Browser Agent v1: live_session job ka frame post.
+     * POST /api/devices/:id/live/frame (device auth), body { job_id, frame }
+     * (frame = base64 JPEG q60, 540px wide, ≤200KB).
+     */
+    @Throws(Exception::class)
+    fun postLiveFrame(store: DeviceStore, jobId: String, frameB64: String): JSONObject {
+        val deviceId = store.deviceId() ?: throw Exception("not enrolled")
+        val body = JSONObject().put("job_id", jobId).put("frame", frameB64)
+        val req = authBuilder(store)
+            .url(store.serverUrl() + "/api/devices/$deviceId/live/frame")
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        return deviceCall(req)
+    }
+
+    /**
+     * Browser Agent v1: live_session ke pending step ka poll.
+     * GET /api/devices/:id/live/step?job_id= (device auth).
+     * Contract: {ok, step?: <JobEngine step JSON>, stop?: true} — koi pending
+     * step nahi to {ok:true} (bina step ke). 404 = job server pe nahi
+     * (cancelled/deleted/endpoint purana) → null return karo, caller decide kare.
+     * Best-effort helper — 404 null deta hai, baaki errors throw hoti hain.
+     */
+    @Throws(Exception::class)
+    fun getLiveStep(store: DeviceStore, jobId: String): JSONObject? {
+        val deviceId = store.deviceId() ?: throw Exception("not enrolled")
+        val req = authBuilder(store)
+            .url(store.serverUrl() + "/api/devices/$deviceId/live/step?job_id=" +
+                java.net.URLEncoder.encode(jobId, "UTF-8"))
+            .get()
+            .build()
+        client.newCall(req).execute().use { resp ->
+            if (resp.code == 404) return null
+            val text = resp.body?.string().orEmpty()
+            val json = try { JSONObject(text) } catch (_: Exception) { JSONObject() }
+            if (resp.code == 401) {
+                throw ApiException(401, json.optString("error", "Device unknown/disconnected (401)"))
+            }
+            if (!resp.isSuccessful) {
+                throw ApiException(resp.code, json.optString("error", "live step poll failed (HTTP ${resp.code})"))
+            }
+            return json
+        }
     }
 
     @Throws(Exception::class)
