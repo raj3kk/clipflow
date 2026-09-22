@@ -18,11 +18,13 @@ export interface AppReleaseInfo {
 
 export async function getLatestRelease(sb: any): Promise<AppReleaseInfo | null> {
   try {
+    // NOTE: .limit(1) NAHI — is project pe PostgREST ka ?order=..&limit=1
+    // galat row lauta sakta hai. .range(0,0) + rows[0] use karo.
     const { data: rows } = await sb
       .from("app_releases")
       .select("version_code, version_name, apk_url, force_update")
       .order("version_code", { ascending: false })
-      .limit(1);
+      .range(0, 0);
     const r = rows?.[0] as
       | {
           version_code?: number;

@@ -12,6 +12,7 @@ import { validateClipPackage, buildAutomationPayload } from "@/lib/v2_workflow";
  * Schedule ticker — server khud schedule pe automation job banata hai.
  *
  * POST /api/devices/schedule-tick  (x-worker-secret)
+ * GET  /api/devices/schedule-tick  (Vercel Cron — Authorization: Bearer CRON_SECRET)
  *   → { ticked_at, devices_checked, created, skipped }
  *
  * Har 15 min me cron se hit hota hai. Har active device ke liye:
@@ -68,10 +69,7 @@ function tzParts(tz: string): { ymd: string; minutes: number } {
   };
 }
 
-export async function POST(req: Request) {
-  const denied = requireWorkerAuth(req);
-  if (denied) return denied;
-
+async function runTick() {
   const sb = getSupabase();
   if (!sb || !isConfigured()) {
     return NextResponse.json(
@@ -362,4 +360,27 @@ export async function POST(req: Request) {
     skipped,
     cleanup: { hard_deleted: hardDeleted },
   });
+}
+
+export async function POST(req: Request) {
+  const denied = requireWorkerAuth(req);
+  if (denied) return denied;
+  return runTick();
+}
+
+/**
+ * GET — Vercel Cron (vercel.json, har 2 min).
+ * Vercel Cron CRON_SECRET env var set hone pe har request me
+ * `Authorization: Bearer <CRON_SECRET>` header bhejta hai — usi se
+ * authenticate hota hai. Bina sahi secret ke 401.
+ */
+export const dynamic = "force-dynamic";
+
+export async function GET(req: Request) {
+  const secret = process.env.CRON_SECRET;
+  const auth = req.headers.get("authorization") ?? "";
+  if (!secret || auth !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+  return runTick();
 }

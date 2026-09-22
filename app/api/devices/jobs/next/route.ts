@@ -59,7 +59,9 @@ export async function GET(req: Request) {
   //       do worker ek hi job na chalaye (duplicate IG post ka khatra).
   const HOLD_FRESH_MS = 3 * 60 * 1000;
   const nowIso = new Date().toISOString();
-  const { data: held } = await sb
+  // NOTE: .limit(1).maybeSingle() NAHI — is project pe PostgREST ka
+  // ?order=..&limit=1 galat row lauta sakta hai. .range(0,0) + [0] use karo.
+  const { data: heldRows } = await sb
     .from("device_jobs")
     .select("id, type, payload, heartbeat_count, last_heartbeat, created_at")
     .eq("device_id", ident.deviceId)
@@ -68,8 +70,8 @@ export async function GET(req: Request) {
     // jaise queued path karta hai). NULL run_after = turant eligible.
     .or(`run_after.is.null,run_after.lte.${nowIso}`)
     .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
+    .range(0, 0);
+  const held = heldRows?.[0] ?? null;
 
   if (held) {
     const hbCount = held.heartbeat_count ?? 0;
@@ -93,15 +95,16 @@ export async function GET(req: Request) {
     });
   }
 
-  const { data: job } = await sb
+  // NOTE: .limit(1).single() NAHI — PostgREST quirk (upar dekho).
+  const { data: jobRows } = await sb
     .from("device_jobs")
     .select("id, type, payload, attempts, max_attempts")
     .eq("device_id", ident.deviceId)
     .eq("status", "queued")
     .lte("run_after", new Date().toISOString())
     .order("created_at", { ascending: true })
-    .limit(1)
-    .single();
+    .range(0, 0);
+  const job = jobRows?.[0] ?? null;
 
   if (!job) {
     return new NextResponse(null, { status: 204 });
