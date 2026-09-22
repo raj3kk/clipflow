@@ -141,7 +141,18 @@ export function buildClipSteps(pkg: ClipPackage): Step[] {
       action: "eval",
       js: "(function(){if(document.body.innerText.indexOf('Write a caption')===-1){var b=[...document.querySelectorAll('button')].find(e=>(e.innerText||'').trim()==='Next');if(b){b.click();return 'clicked';}}return 'already';})()",
     },
-    { phase: "ig-caption-wait", action: "wait_text", text: "Write a caption", timeout: 90000 },
+    // caption screen tak smart advance: beech me jo bhi intermediate screen
+    // aaye (filters/music/cover), uska Next click karke aage badho.
+    // 2026-09-22 lesson (job 71486af5): crop ke baad ek Next se caption nahi
+    // aaya — "wait_text timeout: Write a caption". Mobile web pe extra screens
+    // ho sakti hain; blind single-Next fragile hai.
+    { phase: "ig-proof-precaption", action: "screenshot", as: "proof_precaption.png" },
+    {
+      phase: "ig-caption-wait",
+      action: "wait_js",
+      js: `(function(){var now=Date.now();if(!window.__acCapT)window.__acCapT=now;if(now-window.__acCapT>120000)return false;var body=(document.body&&document.body.innerText)||'';if(body.indexOf('Write a caption')!==-1)return true;var cap=document.querySelector('[aria-label^="Write a caption"],textarea[aria-label*="caption" i]');if(cap)return true;if(!window.__acCapN||now-window.__acCapN>3000){var els=document.querySelectorAll('button,[role="button"],a');for(var i=0;i<els.length;i++){var el=els[i];if(!el.getClientRects||el.getClientRects().length===0)continue;var t=(el.innerText||'').trim().toLowerCase();var al=(el.getAttribute('aria-label')||'').toLowerCase();if(t==='next'||al==='next'){window.__acCapN=now;var b=(el.closest?el.closest('button,[role="button"],a'):null)||el;b.click();break;}}}return false;})()`,
+      timeout: 150000,
+    },
     {
       phase: "ig-caption",
       action: "eval",
