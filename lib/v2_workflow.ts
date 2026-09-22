@@ -99,15 +99,17 @@ export function buildClipSteps(pkg: ClipPackage): Step[] {
     {
       phase: "ig-create-wait",
       action: "wait_js",
-      js: "!!(document.querySelector('input[type=\"file\"]')||/select from computer/i.test(document.body?document.body.innerText:''))",
+      js: "!!(document.querySelector('input[type=\"file\"]')||/select from (computer|device)/i.test(document.body?document.body.innerText:''))",
       timeout: 60000,
     },
     // file chooser phone khud handle karta hai (reel.mp4)
+    // 2026-09-22: mobile web button text "Select from device" hai
+    // (shot_0.png) — desktop "Select from computer" exact-match fail karta tha.
     {
       phase: "ig-upload",
       action: "upload",
       by: "text",
-      value: "Select from computer",
+      value: "Select from device",
       file: "reel.mp4",
     },
     // crop screen — ORIGINAL select (bina crop)
