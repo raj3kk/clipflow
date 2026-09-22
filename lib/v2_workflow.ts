@@ -69,9 +69,12 @@ export function buildClipSteps(pkg: ClipPackage): Step[] {
     },
 
     // ---------- Phase 2: Instagram upload (Original = NO CROP) ----------
-    // 2026-09-22 user fix: seedha /create/select/ kholo (upload ka sahi link).
-    // Homepage pe jaake Create button dhundhna galat jagah le ja raha tha.
-    { phase: "ig-open", action: "navigate", url: "https://www.instagram.com/create/select/" },
+    // 2026-09-22 root-cause fix: /create/select/ pe SEEDHA navigate MAT karo —
+    // IG ka server us URL ko @create naam ke user ki PROFILE samajh ke render
+    // karta hai (shot_0.png proof). Sahi raasta: home feed kholo → bottom nav
+    // ka + (New post) button JS se click karo → SPA khud /create/select/ pe
+    // jaake asli "Create new post" dialog kholta hai.
+    { phase: "ig-open", action: "navigate", url: "https://www.instagram.com/" },
     // login check — app me IG login nahi to saaf error
     {
       phase: "ig-login-check",
@@ -94,13 +97,19 @@ export function buildClipSteps(pkg: ClipPackage): Step[] {
       message:
         "Instagram action blocked lag raha hai ('Try again later') — 24-48h ruko",
     },
-    // 2026-09-22 user fix: /create/select/ seedha khulta hai — Create button
-    // dhundhne ki zaroorat nahi. File input ya "Select from computer" ka wait.
+    // Create button icon hai (text nahi) — aria-label se dhundho.
+    // 2026-09-22 (attempt-3 lesson): wait aur click ko ALAG steps me mat todo —
+    // wait pass hone aur click chalne ke beech me IG ka SPA DOM badal deta hai
+    // (button transient dikha, click pe gayab → "button nahi mila").
+    // Fix: EK HI wait_js jisme side-effect hai — har 700ms poll pe:
+    //   1. dialog khula? (file input ya "select from device/computer" text) → true
+    //   2. nahi khula → + button dhundhke click karo (10s me ek baar retry)
+    // Atomic find+click, koi race nahi, dialog khulne tak khud verify.
     {
-      phase: "ig-create-wait",
+      phase: "ig-create-and-dialog",
       action: "wait_js",
-      js: "!!(document.querySelector('input[type=\"file\"]')||/select from (computer|device)/i.test(document.body?document.body.innerText:''))",
-      timeout: 60000,
+      js: `(function(){var now=Date.now();var b=document.body?document.body.innerText:'';if(document.querySelector('input[type="file"]')||/select from (computer|device)/i.test(b))return true;if(!window.__acPlusT||now-window.__acPlusT>10000){var btn=document.querySelector('[aria-label="New post"]')||[...document.querySelectorAll('a')].find(function(a){return (a.getAttribute('href')||'').indexOf('/create')===0;});if(btn){window.__acPlusT=now;btn.click();}}return false;})()`,
+      timeout: 90000,
     },
     // file chooser phone khud handle karta hai (reel.mp4)
     // 2026-09-22: mobile web button text "Select from device" hai
