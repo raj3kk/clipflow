@@ -1206,9 +1206,36 @@ class JobEngine(
                 throw Exception("wait_js timeout: ${cond.take(80)}")
             }
             "eval" -> { jsStr(fill(s.getString("js"))) }
+            // p70b (2026-09-22): strict eval — JS ka result step-fail signal
+            // de sakta hai. Spec: {action:"eval_strict", js:"...", as?: string}.
+            // JS agar string starting with "FAIL:" return kare (ya JS throw
+            // kare) to step us message ke saath FAIL hota hai. Success case
+            // ka result vars["as"] me bhi rakha jata hai (agar "as" diya ho)
+            // taaki agle steps {{var}} se use kar saken — isse workflow
+            // "failure message me ASLI screen ka naam" bana sakta hai
+            // (e.g. js: "window.__acScreen || 'FAIL:screen unknown'").
+            // Note: evaluateJavascript JS throw ko callback me "null" banke
+            // deta hai (propagate nahi karta) — isliye khud try/catch wrap
+            // karo taaki throw bhi FAIL: me badle.
+            "eval_strict" -> {
+                val js = fill(s.getString("js"))
+                val wrapped =
+                    "(function(){try{var r=($js);return r;}catch(e){return 'FAIL:'+((e&&e.message)?e.message:String(e));}})()"
+                val r = jsStr(wrapped)
+                if (r != null && r.startsWith("FAIL:")) {
+                    throw Exception(
+                        r.removePrefix("FAIL:").trim().ifEmpty { "eval_strict failed" }.take(200)
+                    )
+                }
+                val asName = s.optString("as", "")
+                if (asName.isNotEmpty()) vars[asName] = r ?: ""
+            }
             "assert" -> {
                 val ok = jsBool(fill(s.getString("js")))
-                if (!ok) throw Exception(s.optString("message", "assert failed"))
+                // p70b: message pe bhi fill() ({{var}} substitution) — workflow
+                // window.__acScreen jaise vars se nikla ASLI screen naam
+                // failure message me daal sake. Pehle message static tha.
+                if (!ok) throw Exception(fill(s.optString("message", "assert failed")))
             }
             "extract" -> {
                 val v = jsStr(fill(s.getString("js"))) ?: ""
