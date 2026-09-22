@@ -1,14 +1,88 @@
 import { NextResponse } from "next/server";
-import { createHash, randomBytes } from "crypto";
+import { randomBytes } from "crypto";
 import { getSupabase, isConfigured } from "@/lib/supabase";
 import { hashApiKey } from "@/lib/device_auth";
+import { ownerEmail } from "@/lib/admin";
+import {
+  verifyPairingCode,
+  normalizeCode,
+  PAIRING_RATE_LIMIT,
+  PAIRING_RATE_WINDOW_MS,
+} from "@/lib/pairing";
 
 /**
  * Phone app ka enroll: { code, device_name?, app_version? }
+ *
+ * Original ClipFlow contract (stateless HMAC pairing, lib/pairing.ts):
+ *   code missing            → 400
+ *   code galat/expired/used → 403  (401 NAHI)
+ *   30/min per IP           → 429
+ *
+ * Code me koi DB lookup nahi — HMAC verify hota hai. Single-use aur
+ * rate-limit existing `activity_log` table pe hain (koi nayi table ya
+ * column nahi): event='pairing_code_used' / 'pairing_attempt'.
+ *
  * Code verify → device row banao → device_id + api_key wapas.
  * api_key RAW sirf isi response me dikhegi (dobara kabhi nahi) —
  * phone ise apne encrypted storage me rakhta hai.
+ *
+ * Note: pairing codes admin-only generate hote hain, isliye naya
+ * device hamesha owner ke account se judta hai.
  */
+type Sb = NonNullable<ReturnType<typeof getSupabase>>;
+
+function clientIp(req: Request): string {
+  const fwd = req.headers.get("x-forwarded-for");
+  if (fwd) return fwd.split(",")[0].trim();
+  return req.headers.get("x-real-ip") ?? "unknown";
+}
+
+async function getOwnerUserId(sb: Sb): Promise<string | null> {
+  const email = ownerEmail();
+  let page = 1;
+  for (;;) {
+    const { data, error } = await sb.auth.admin.listUsers({ page, perPage: 100 });
+    if (error || !data?.users) return null;
+    const hit = data.users.find((u) => (u.email ?? "").toLowerCase() === email);
+    if (hit) return hit.id;
+    if (data.users.length < 100) return null;
+    page += 1;
+    if (page > 20) return null;
+  }
+}
+
+/** 30/min per IP — activity_log backed (cross-instance). */
+async function checkRateLimit(sb: Sb, ip: string): Promise<boolean> {
+  const since = new Date(Date.now() - PAIRING_RATE_WINDOW_MS).toISOString();
+  const { count, error } = await sb
+    .from("activity_log")
+    .select("id", { count: "exact", head: true })
+    .eq("event", "pairing_attempt")
+    .filter("detail->>ip", "eq", ip)
+    .gt("created_at", since);
+  // Fail-closed: DB error ya limit breach — dono pe 429.
+  if (error || (count ?? 0) >= PAIRING_RATE_LIMIT) return false;
+  await sb.from("activity_log").insert({
+    user_id: null,
+    actor: "pairing",
+    event: "pairing_attempt",
+    detail: { ip },
+  });
+  return true;
+}
+
+async function isCodeUsed(sb: Sb, raw13: string): Promise<boolean> {
+  const since = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const { data } = await sb
+    .from("activity_log")
+    .select("id")
+    .eq("event", "pairing_code_used")
+    .filter("detail->>code", "eq", raw13)
+    .gt("created_at", since)
+    .limit(1);
+  return Boolean(data && data.length > 0);
+}
+
 export async function POST(req: Request) {
   const sb = getSupabase();
   if (!sb || !isConfigured()) {
@@ -25,38 +99,46 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
   const code = String(body.code ?? "").trim();
-  if (code.length < 4) {
+  if (!code) {
     return NextResponse.json({ error: "code is required." }, { status: 400 });
   }
 
-  const codeHash = createHash("sha256").update(code).digest("hex");
-  const { data: codeRow, error: codeErr } = await sb
-    .from("device_enroll_codes")
-    .select("id, user_id, expires_at, used_at")
-    .eq("code_hash", codeHash)
-    .is("used_at", null)
-    .gt("expires_at", new Date().toISOString())
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
-
-  if (codeErr || !codeRow) {
+  if (!(await checkRateLimit(sb, clientIp(req)))) {
     return NextResponse.json(
-      { error: "Invalid or expired enroll code." },
-      { status: 401 }
+      { error: "Too many attempts. Try again in a minute." },
+      { status: 429, headers: { "Retry-After": "60" } }
     );
   }
 
-  await sb
-    .from("device_enroll_codes")
-    .update({ used_at: new Date().toISOString() })
-    .eq("id", codeRow.id);
+  const v = verifyPairingCode(code);
+  if (!v.ok) {
+    const msg =
+      v.reason === "expired"
+        ? "Pairing code expired. Generate a new one."
+        : "Invalid pairing code.";
+    return NextResponse.json({ error: msg }, { status: 403 });
+  }
+  const id = normalizeCode(code);
+  if (await isCodeUsed(sb, id)) {
+    return NextResponse.json(
+      { error: "Pairing code already used." },
+      { status: 403 }
+    );
+  }
+
+  const ownerId = await getOwnerUserId(sb);
+  if (!ownerId) {
+    return NextResponse.json(
+      { error: "Owner account not found." },
+      { status: 500 }
+    );
+  }
 
   const apiKey = randomBytes(32).toString("hex");
   const { data: device, error: devErr } = await sb
     .from("devices")
     .insert({
-      user_id: codeRow.user_id,
+      user_id: ownerId,
       device_name: String(body.device_name ?? "Android"),
       app_version: body.app_version ? String(body.app_version) : null,
       api_key_hash: hashApiKey(apiKey),
@@ -71,6 +153,14 @@ export async function POST(req: Request) {
       { status: 500 }
     );
   }
+
+  // single-use mark (best-effort; code 10 min me expire bhi hota hai)
+  await sb.from("activity_log").insert({
+    user_id: ownerId,
+    actor: "pairing",
+    event: "pairing_code_used",
+    detail: { code: id },
+  });
 
   return NextResponse.json({ device_id: device.id, api_key: apiKey });
 }

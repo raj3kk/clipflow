@@ -91,14 +91,24 @@ interface JobsResp {
 function EnrollBox({ onDone }: { onDone: () => void }) {
   const [code, setCode] = useState<string | null>(null);
   const [expires, setExpires] = useState<string | null>(null);
+  const [left, setLeft] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!expires) return;
+    const end = new Date(expires).getTime();
+    const tick = () => setLeft(Math.max(0, Math.round((end - Date.now()) / 1000)));
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [expires]);
 
   const make = async () => {
     setBusy(true);
     setErr(null);
     try {
-      const r = await fetch("/api/devices/enroll-code", { method: "POST" });
+      const r = await fetch("/api/pairing/generate", { method: "POST" });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? r.status);
       setCode(d.code);
@@ -124,11 +134,15 @@ function EnrollBox({ onDone }: { onDone: () => void }) {
         </button>
       ) : (
         <div>
-          <div className="font-mono text-4xl tracking-[0.3em] text-emerald-600 my-2">
+          <div className="font-mono text-3xl tracking-[0.2em] text-emerald-600 my-2">
             {code}
           </div>
           <p className="text-xs text-slate-500">
-            Expires: {expires ? fmtDT(expires) : "—"}
+            {left !== null && left > 0 ? (
+              <>Expires in {Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")}</>
+            ) : (
+              <>Expired — naya code banao.</>
+            )}
           </p>
         </div>
       )}
