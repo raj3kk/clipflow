@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDeviceIdentity, touchDevice } from "@/lib/device_auth";
 import { getSupabase, isConfigured } from "@/lib/supabase";
 import { getLatestRelease } from "@/lib/app_release";
+import { sanitizeLiveEvents, mergeLiveSteps } from "@/lib/device_jobs";
 
 /**
  * Phone job execution ke dauraan har ~5 min me heartbeat bhejta hai
@@ -24,7 +25,15 @@ import { getLatestRelease } from "@/lib/app_release";
  * legacy cutoff (claim-time se). Watchdog: pipeline_watch.py har 1 min +
  * schedule-tick har 15 min + jobs/next har poll.
  *
- * POST /api/devices/jobs/:id/heartbeat  { step?: string, sessions?: { ig?: boolean, whop?: boolean } }  →  { ok: true }
+ * POST /api/devices/jobs/:id/heartbeat  { step?: string, sessions?: { ig?: boolean, whop?: boolean }, frame?: string, events?: Array<{t, step, phase?, msg?, ok?}> }  →  { ok: true }
+ *
+ * 2026-09-22 OBSERVABILITY (ground-zero rebuild):
+ *   - `frame`: base64 JPEG string (~≤270KB chars) → device_jobs.live_frame
+ *     (text). Live page pe phone ka latest frame dikhta hai.
+ *   - `events`: max 20 per call, har entry {t: ISO, step, phase?, msg?, ok?}
+ *     → device_jobs.live_steps (jsonb) me append, last 120 rakhi jati hain.
+ *   Dono terminal-job path pe bhi likhe jate hain (forensics) — status rules
+ *   bilkul unchanged (koi resurrection nahi).
  *
  * p42: step ab 280 chars tak (pehle 64) — brain ki poori reasoning
  * (FAILED_NO_ACTION detail, tried candidates) Live page pe dikhegi.
@@ -52,6 +61,8 @@ export async function POST(
 
   let step: string | null = null;
   let sessions: { ig?: boolean; whop?: boolean } | null = null;
+  let frame: string | null = null;
+  let events: ReturnType<typeof sanitizeLiveEvents> = [];
   try {
     const body = await req.json();
     if (body && typeof body.step === "string") {
@@ -65,13 +76,19 @@ export async function POST(
       };
       if (sessions.ig === undefined && sessions.whop === undefined) sessions = null;
     }
+    // 2026-09-22 observability: live frame (base64 JPEG, ~≤270KB chars)
+    if (body && typeof body.frame === "string" && body.frame.length > 64) {
+      frame = body.frame.slice(0, 280000);
+    }
+    // 2026-09-22 observability: step transition events → live_steps
+    if (body) events = sanitizeLiveEvents(body.events, 20);
   } catch {
     /* body optional */
   }
 
   const { data: job } = await sb
     .from("device_jobs")
-    .select("id, status, heartbeat_count")
+    .select("id, status, heartbeat_count, live_steps")
     .eq("id", params.id)
     .eq("device_id", ident.deviceId)
     .single();
@@ -81,6 +98,15 @@ export async function POST(
   }
 
   const now = new Date().toISOString();
+  // Observability fields — terminal path pe bhi (forensics), status untouched.
+  const obsUpdate: Record<string, unknown> = {};
+  if (frame) obsUpdate.live_frame = frame;
+  if (events.length > 0) {
+    obsUpdate.live_steps = mergeLiveSteps(
+      (job as { live_steps?: unknown }).live_steps,
+      events
+    );
+  }
   // Round-7 (Worker A) fix: terminal job (succeeded/failed/timeout/cancelled)
   // pe late heartbeat aaye (duplicate worker / race) to use wapas "running"
   // mat karo — resurrection se Live page flicker hota hai aur reconcile
@@ -91,6 +117,7 @@ export async function POST(
       .update({
         last_heartbeat: now,
         heartbeat_count: (job.heartbeat_count ?? 0) + 1,
+        ...obsUpdate,
       })
       .eq("id", job.id);
     await touchDevice(ident.deviceId);
@@ -104,6 +131,7 @@ export async function POST(
   const update: Record<string, unknown> = {
     last_heartbeat: now,
     heartbeat_count: (job.heartbeat_count ?? 0) + 1,
+    ...obsUpdate,
   };
   // "running" sirf tab jab job dispatched/running hai. 'queued' job pe
   // heartbeat ka matlab phone abhi bhi purana attempt pakde hai (requeue ke

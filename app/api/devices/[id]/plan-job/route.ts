@@ -73,17 +73,20 @@ export async function POST(
   }
 
   // 2026-09-20: wait_js action sirf p33+ me hai (IG Create icon fix).
-  // Purane app pe naya workflow "unknown action" se fail hoga — isliye gate.
+  // 2026-09-22 v3 rebuild: `shot_upload` action sirf p70+ me hai
+  // (observability ground-zero reset — screenshot turant server pe).
+  // Purane app pe naya workflow "unknown action: shot_upload" se fail
+  // hoga — isliye gate.
   const ver = String((device as { app_version?: string }).app_version || "");
   const m = ver.match(/p(\d+)/);
   const pNum = m ? parseInt(m[1], 10) : 0;
-  if (pNum < 33) {
+  if (pNum < 70) {
     return NextResponse.json(
       {
-        error: `App update chahiye (p33+): device pe ${ver || "unknown"} hai. Admin panel se p33 publish karo, app auto-update karega.`,
+        error: `App update chahiye (p70+): device pe ${ver || "unknown"} hai. Admin panel se p70 publish karo, app auto-update karega.`,
         needs_app_update: true,
         current_version: ver,
-        min_version: "0.1.0-p33",
+        min_version: "0.1.0-p70",
       },
       { status: 409 }
     );
@@ -93,8 +96,27 @@ export async function POST(
     .update(pkg.video_url)
     .digest("hex")
     .slice(0, 16);
+  // 2026-09-22 v3: fail-closed campaign identity — whop-identity step page ke
+  // campaign naam ko payload ke campaign_name se match karta hai. Naam
+  // campaigns table se (server-side lookup — caller pe bharosa nahi).
+  let campaignName: string | null = null;
+  if (campaignSlug) {
+    const { data: camp } = await sb
+      .from("campaigns")
+      .select("name")
+      .eq("id", campaignSlug)
+      .eq("user_id", device.user_id)
+      .limit(1)
+      .single();
+    if (camp && typeof camp.name === "string" && camp.name.trim()) {
+      campaignName = camp.name.trim();
+    }
+  }
   const payload = {
-    ...buildAutomationPayload(pkg, { campaign_slug: campaignSlug ?? undefined }),
+    ...buildAutomationPayload(pkg, {
+      campaign_slug: campaignSlug ?? undefined,
+      campaign_name: campaignName ?? undefined,
+    }),
     trigger: "planner",
   };
   const res = await createAutomationJob(sb, device.user_id, device.id, "automation", payload, {

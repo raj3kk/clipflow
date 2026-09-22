@@ -586,6 +586,65 @@ export async function logActivity(
 }
 
 /**
+ * OBSERVABILITY (2026-09-22 rebuild — ground-zero reset).
+ *
+ * Root cause (jobs 7dd86beb / d0733fdc): dono ig-caption-wait pe mare, lekin
+ * live_steps/live_frame KHAALI rahe — (1) heartbeat route ye columns likhta
+ * hi nahi tha, (2) phone mid-flow screenshots sirf job END pe bhejta tha.
+ * Ab observability first-class hai:
+ *   - heartbeat body me optional `frame` (base64 JPEG) + `events` array
+ *   - POST /api/devices/jobs/:id/shot — turant screenshot upload
+ * Dono device_jobs.live_steps (jsonb array, last 120) / live_frame (text) me
+ * likhte hain. Live page inhe dikhata hai.
+ */
+export interface LiveStepEvent {
+  t: string;
+  step: string;
+  phase?: string;
+  msg?: string;
+  ok?: boolean;
+  shot?: string;
+}
+
+/** Phone se aaye raw events ko sanitize karo — max 20 per call. */
+export function sanitizeLiveEvents(raw: unknown, max = 20): LiveStepEvent[] {
+  const out: LiveStepEvent[] = [];
+  if (!Array.isArray(raw)) return out;
+  for (const e of raw.slice(0, max)) {
+    if (!e || typeof e !== "object") continue;
+    const o = e as Record<string, unknown>;
+    if (typeof o.t !== "string" || typeof o.step !== "string") continue;
+    const ev: LiveStepEvent = {
+      t: o.t.slice(0, 40),
+      step: o.step.slice(0, 120),
+    };
+    if (typeof o.phase === "string" && o.phase) ev.phase = o.phase.slice(0, 80);
+    if (typeof o.msg === "string" && o.msg) ev.msg = o.msg.slice(0, 300);
+    if (typeof o.ok === "boolean") ev.ok = o.ok;
+    if (typeof o.shot === "string" && o.shot) ev.shot = o.shot.slice(0, 200);
+    out.push(ev);
+  }
+  return out;
+}
+
+/**
+ * live_steps (jsonb) me naye events append karo — last 120 rakho, purani drop.
+ * `current` = DB se padha hua existing value. Best-effort: concurrent
+ * heartbeats me race ho sakti hai (koi event drop) — observability ke liye
+ * acceptable, correctness pe asar nahi.
+ */
+export function mergeLiveSteps(
+  current: unknown,
+  events: LiveStepEvent[]
+): LiveStepEvent[] {
+  const arr: LiveStepEvent[] = Array.isArray(current)
+    ? (current as LiveStepEvent[])
+    : [];
+  const merged = arr.concat(events);
+  return merged.length > 120 ? merged.slice(merged.length - 120) : merged;
+}
+
+/**
  * Stuck-job reconciliation — server-side, phone-poll se independent.
  *
  * P0 (2026-09-19): phone app execution ke dauraan heartbeat bhejta hai
