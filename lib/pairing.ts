@@ -93,7 +93,7 @@ export type VerifyResult =
 
 export function verifyPairingCode(input: string): VerifyResult {
   const raw = normalizeCode(input);
-  if (raw.length !== 13 || [...raw].some((c) => CROCKFORD.indexOf(c) < 0)) {
+  if (raw.length !== 13 || raw.split("").some((c) => CROCKFORD.indexOf(c) < 0)) {
     return { ok: false, reason: "format" };
   }
   const exp30 = fromCrockford(raw.slice(0, 6));
