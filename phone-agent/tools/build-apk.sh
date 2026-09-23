@@ -7,6 +7,13 @@
 #  - d8: purane kotlin-stdlib jars bahar, kotlinc ka bundled 1.9+ stdlib dex
 #    (EnumEntriesKt NoClassDefFoundError fix, 2026-09-21)
 #  - Tink (tink-android-1.8.0) dex me — EncryptedSharedPreferences ke liye
+#  - 2026-09-23 p72: androidx.arch.core:core-common-2.1.0.jar dex me —
+#    work-runtime 2.9.0 ka Room WorkDatabase InvalidationTracker
+#    SafeIterableMap load karta hai; jar missing tha to boot pe
+#    BootReceiver → NoClassDefFoundError crash (p71). Jar WhopClip ke
+#    working deps se liya (wahan same work-runtime 2.9.0 ke saath
+#    on-device verified). Saath me Scheduler/BootReceiver ke catch
+#    Exception → Throwable (Error kabhi crash na kare).
 #  - SAARI classes*.dex package hoti hain (sirf classes.dex/classes2.dex nahi)
 #  - Naya signing key (purana key kho gaya) — ~/.config/clipflow/ me, 600
 set -e
@@ -24,8 +31,8 @@ rm -rf "$OUT" && mkdir -p "$OUT"/{aar,classes,dex,res}
 export JAVA_HOME=$TOOLS/jdk-17
 export PATH=$JAVA_HOME/bin:$PATH
 APPID="com.clipflow.agent"
-VERSION_CODE=72
-VERSION_NAME="0.1.0-p71"
+VERSION_CODE=73
+VERSION_NAME="0.1.0-p72"
 APK_NAME="autoclip-$VERSION_NAME.apk"
 
 # BuildConfig.java sync (manual build me Gradle nahi hai)

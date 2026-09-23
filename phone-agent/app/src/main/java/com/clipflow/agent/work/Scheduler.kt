@@ -23,7 +23,17 @@ object Scheduler {
     private const val UNIQUE_NAME = "automation"
     private const val UNIQUE_ONCE_NAME = "automation-once"
 
-    /** WorkManager taiyaar karo. False = is phone pe init fail (app phir bhi chalegi). */
+    /**
+     * WorkManager taiyaar karo. False = is phone pe init fail (app phir bhi chalegi).
+     *
+     * 2026-09-23 FIX: catch Exception → Throwable. WorkManager.initialize() ke
+     * andar Room ka InvalidationTracker androidx.arch.core.internal.SafeIterableMap
+     * load karta hai; dex me ye class na ho to NoClassDefFoundError (ye Error hai,
+     * Exception NAHI) aata hai — purana catch ise pakadta nahi tha aur BootReceiver
+     * boot pe crash ho jata tha (p71). Ab koi bhi missing-class Error init ko
+     * false me badal deta hai, crash nahi hota. (core-common jar bhi dex me add
+     * kiya gaya hai taaki class mile.)
+     */
     fun ensureInitialized(context: Context): Boolean {
         return try {
             try {
@@ -35,7 +45,7 @@ object Scheduler {
                 )
             }
             true
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             false
         }
     }
@@ -64,7 +74,9 @@ object Scheduler {
                 req
             )
             true
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
+            // NoClassDefFoundError bhi yahin pakdo — schedule fail ho to false,
+            // BootReceiver kabhi crash na ho.
             false
         }
     }
@@ -80,7 +92,7 @@ object Scheduler {
         return try {
             WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_ONCE_NAME)
             schedule(context, 12)
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             false
         }
     }
@@ -90,6 +102,6 @@ object Scheduler {
             if (!ensureInitialized(context)) return
             WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_NAME)
             WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_ONCE_NAME)
-        } catch (_: Exception) { }
+        } catch (_: Throwable) { }
     }
 }

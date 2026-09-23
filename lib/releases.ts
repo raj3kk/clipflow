@@ -24,6 +24,15 @@ export interface ReleaseInfo {
 
 export const RELEASES: ReleaseInfo[] = [
   {
+    version_code: 73,
+    version_name: "0.1.0-p72",
+    apk_url: "https://clipflow-webbuilder1.vercel.app/app/autoclip-0.1.0-p72.apk",
+    sha256: "aeb491f364e651c533d79ff325d891084f89eb9a12ef4692228621d4c00dd4da",
+    changelog:
+      "p72 (boot-crash fix): work-runtime ka Room InvalidationTracker androidx.arch.core SafeIterableMap mangta hai — core-common jar dex me add kiya (p71 boot pe NoClassDefFoundError crash hota tha). Saath me Scheduler/BootReceiver me catch Throwable taaki koi missing class dobara boot crash na kare. Same signing key — purane p71 ke upar direct update hoga.",
+    force_update: true,
+  },
+  {
     version_code: 72,
     version_name: "0.1.0-p71",
     apk_url: "https://clipflow-webbuilder1.vercel.app/app/autoclip-0.1.0-p71.apk",

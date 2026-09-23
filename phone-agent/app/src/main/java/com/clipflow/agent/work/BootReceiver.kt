@@ -20,15 +20,17 @@ class BootReceiver : BroadcastReceiver() {
                 if (DeviceStore(context).sleepMode()) return
             } catch (_: Exception) { }
             // saved schedule turant lagao (service start hone se pehle bhi)
+            // 2026-09-23: Throwable pakdo — NoClassDefFoundError (Error, Exception nahi)
+            // boot pe receiver crash kar deta tha (p71 SafeIterableMap case).
             try {
                 val store = DeviceStore(context)
                 store.getSchedule()?.let {
                     Scheduler.scheduleNext(context, JSONObject(it))
                 } ?: Scheduler.schedule(context, 12)
-            } catch (_: Exception) {
+            } catch (_: Throwable) {
                 try {
                     Scheduler.schedule(context, 12)
-                } catch (_: Exception) { }
+                } catch (_: Throwable) { }
             }
             context.startForegroundService(Intent(context, RunnerService::class.java))
         }
