@@ -26,8 +26,11 @@ import {
  * api_key RAW sirf isi response me dikhegi (dobara kabhi nahi) —
  * phone ise apne encrypted storage me rakhta hai.
  *
- * Note: pairing codes admin-only generate hote hain, isliye naya
- * device hamesha owner ke account se judta hai.
+ * Device KISKE account se judega: code stateless hai, isliye generate
+ * route `activity_log` me event='pairing_code_issued' (detail.code) likhta
+ * hai. Yahan us code ka sabse taaza issuance dekh kar usi user_id se
+ * device jodte hain. Issuance na mile (purana admin flow / manual code)
+ * to owner account fallback — pehle jaisa behavior.
  */
 type Sb = NonNullable<ReturnType<typeof getSupabase>>;
 
@@ -83,6 +86,28 @@ async function isCodeUsed(sb: Sb, raw13: string): Promise<boolean> {
   return Boolean(data && data.length > 0);
 }
 
+/**
+ * Is code ko sabse taaza kisne issue kiya (10-min window)?
+ * Generate route har code ke liye event='pairing_code_issued' likhta hai.
+ * Na mile to null → caller owner fallback lega.
+ */
+async function getIssuingUserId(
+  sb: Sb,
+  raw13: string
+): Promise<string | null> {
+  const since = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const { data } = await sb
+    .from("activity_log")
+    .select("user_id")
+    .eq("event", "pairing_code_issued")
+    .filter("detail->>code", "eq", raw13)
+    .gt("ts", since)
+    .order("ts", { ascending: false })
+    .limit(1);
+  const uid = data?.[0]?.user_id ?? null;
+  return typeof uid === "string" && uid ? uid : null;
+}
+
 export async function POST(req: Request) {
   const sb = getSupabase();
   if (!sb || !isConfigured()) {
@@ -126,8 +151,11 @@ export async function POST(req: Request) {
     );
   }
 
-  const ownerId = await getOwnerUserId(sb);
-  if (!ownerId) {
+  // Device kiske account se judega: code jisne issue kiya uska user_id;
+  // issuance record na mile (purana/manual code) to owner fallback.
+  const bindUserId =
+    (await getIssuingUserId(sb, id)) ?? (await getOwnerUserId(sb));
+  if (!bindUserId) {
     return NextResponse.json(
       { error: "Owner account not found." },
       { status: 500 }
@@ -138,7 +166,7 @@ export async function POST(req: Request) {
   const { data: device, error: devErr } = await sb
     .from("devices")
     .insert({
-      user_id: ownerId,
+      user_id: bindUserId,
       device_name: String(body.device_name ?? "Android"),
       app_version: body.app_version ? String(body.app_version) : null,
       api_key_hash: hashApiKey(apiKey),
@@ -156,7 +184,7 @@ export async function POST(req: Request) {
 
   // single-use mark (best-effort; code 10 min me expire bhi hota hai)
   await sb.from("activity_log").insert({
-    user_id: ownerId,
+    user_id: bindUserId,
     actor: "pairing",
     event: "pairing_code_used",
     detail: { code: id },
