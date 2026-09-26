@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
 import { getSupabase, isConfigured } from "@/lib/supabase";
-import { injectPendingStep } from "@/lib/live_step";
+import { injectPendingStep, takePendingStep } from "@/lib/live_step";
 
 /**
  * ONE-TIME e2e test endpoint — pairing issuance-path + live-step queue.
@@ -169,6 +169,24 @@ export async function POST(req: Request) {
       );
     }
     return NextResponse.json({ ok: true, job_id: data.id });
+  }
+
+  if (action === "debug-take") {
+    // REAL lib takePendingStep ko temp endpoint se call karo
+    const jobId = String(body.job_id ?? "");
+    const deviceId = String(body.device_id ?? "");
+    const got = await takePendingStep(sb, { jobId, deviceId });
+    const { data: after } = await sb
+      .from("device_jobs")
+      .select("payload")
+      .eq("id", jobId)
+      .maybeSingle();
+    const ap = (after?.payload ?? {}) as Record<string, unknown>;
+    return NextResponse.json({
+      ok: true,
+      took: got,
+      pending_after: "pending_step" in ap,
+    });
   }
 
   if (action === "debug-clear") {
