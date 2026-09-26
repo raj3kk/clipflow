@@ -153,11 +153,26 @@ export async function injectPendingStep(
  * Clear id-matched hai — beech me aaya naya step clobber nahi hota:
  * filter miss hone pe dobara padhkar faisla karte hain, stale step
  * deliver nahi hota.
+ *
+ * TEMP-E2E-DEBUG: har take ko activity_log me log karo (e2e_step_debug).
+ * Ye block test ke baad HATAYA jayega.
  */
 export async function takePendingStep(
   sb: Sb,
   opts: { jobId: string; deviceId: string }
 ): Promise<{ kind: "step"; step: unknown } | { kind: "stop" } | null> {
+  async function dbg(stage: string, info: Record<string, unknown>) {
+    try {
+      await sb.from("activity_log").insert({
+        user_id: null,
+        actor: "e2e-debug",
+        event: "e2e_step_debug",
+        detail: { stage, job_id: opts.jobId, ...info },
+      });
+    } catch {
+      /* ignore */
+    }
+  }
   const { data: job } = await sb
     .from("device_jobs")
     .select("payload")
@@ -165,6 +180,10 @@ export async function takePendingStep(
     .eq("device_id", opts.deviceId)
     .maybeSingle();
   const pending = readPending(job?.payload);
+  await dbg("read", {
+    pending_id: pending?.id ?? null,
+    payload_keys: job?.payload && typeof job.payload === "object" ? Object.keys(job.payload as object) : null,
+  });
   if (!pending) return null;
 
   // Id-matched clear: sirf wahi row clear hogi jisme abhi bhi YE step hai.
@@ -177,10 +196,12 @@ export async function takePendingStep(
     .select("id");
 
   if (cleared && cleared.length > 0) {
+    await dbg("cleared", { cleared_rows: cleared.length, pending_id: pending.id });
     return pending.kind === "stop"
       ? { kind: "stop" }
       : { kind: "step", step: pending.step };
   }
+  await dbg("clear-miss", { pending_id: pending.id });
 
   // Filter miss = beech me payload badla. Dobara padho:
   const { data: rejob } = await sb

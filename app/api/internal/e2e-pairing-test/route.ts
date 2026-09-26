@@ -171,6 +171,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, job_id: data.id });
   }
 
+  if (action === "debug-logs") {
+    const { data } = await sb
+      .from("activity_log")
+      .select("ts, detail")
+      .eq("event", "e2e_step_debug")
+      .order("ts", { ascending: false })
+      .limit(20);
+    return NextResponse.json({ ok: true, rows: data ?? [] });
+  }
+
   if (action === "debug-take") {
     // REAL lib takePendingStep ko temp endpoint se call karo
     const jobId = String(body.job_id ?? "");
