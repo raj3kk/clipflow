@@ -24,6 +24,15 @@ export interface ReleaseInfo {
 
 export const RELEASES: ReleaseInfo[] = [
   {
+    version_code: 74,
+    version_name: "0.1.0-p73",
+    apk_url: "https://clipflow-webbuilder1.vercel.app/app/autoclip-0.1.0-p73.apk",
+    sha256: "77173ba890965e88ca26bf838e5e861c3b910dfb354cd33fef56abc47d5fe99d",
+    changelog:
+      "p73 (version bump): p72 code as-is, version 74. Same signing key — purane p72 ke upar direct update hoga.",
+    force_update: true,
+  },
+  {
     version_code: 73,
     version_name: "0.1.0-p72",
     apk_url: "https://clipflow-webbuilder1.vercel.app/app/autoclip-0.1.0-p72.apk",
