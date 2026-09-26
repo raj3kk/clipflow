@@ -116,3 +116,10 @@ export function verifyPairingCode(input: string): VerifyResult {
 /** Rate-limit tuning (enforced in enroll route via activity_log). */
 export const PAIRING_RATE_LIMIT = 30; // requests
 export const PAIRING_RATE_WINDOW_MS = 60_000; // per minute, per IP
+/**
+ * Code-fingerprint scoped limiter: IP rotation se immune.
+ * Har normalized code pe 10 attempts / 10 min — brute-forcer IP badal kar
+ * bhi nahi bach sakta; legit user (2-3 typo) kabhi nahi atkega.
+ */
+export const PAIRING_CODE_RATE_LIMIT = 10; // attempts
+export const PAIRING_CODE_RATE_WINDOW_MS = 10 * 60_000; // per 10 minutes, per code

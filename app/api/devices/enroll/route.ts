@@ -8,6 +8,8 @@ import {
   normalizeCode,
   PAIRING_RATE_LIMIT,
   PAIRING_RATE_WINDOW_MS,
+  PAIRING_CODE_RATE_LIMIT,
+  PAIRING_CODE_RATE_WINDOW_MS,
 } from "@/lib/pairing";
 
 /**
@@ -17,6 +19,7 @@ import {
  *   code missing            → 400
  *   code galat/expired/used → 403  (401 NAHI)
  *   30/min per IP           → 429
+ *   10/10min per code       → 429  (IP rotation se immune code fingerprint)
  *
  * Code me koi DB lookup nahi — HMAC verify hota hai. Single-use aur
  * rate-limit existing `activity_log` table pe hain (koi nayi table ya
@@ -54,22 +57,47 @@ async function getOwnerUserId(sb: Sb): Promise<string | null> {
   }
 }
 
-/** 30/min per IP — activity_log backed (cross-instance). */
-async function checkRateLimit(sb: Sb, ip: string): Promise<boolean> {
-  const since = new Date(Date.now() - PAIRING_RATE_WINDOW_MS).toISOString();
-  const { count, error } = await sb
+/**
+ * Rate limit — activity_log backed (cross-instance):
+ *   (a) 30/min per IP (pehle jaisa),
+ *   (b) 10/10min per normalized code — IP rotation se immune.
+ * (b) isliye: VM/proxy egress IP har connection pe badal sakta hai
+ * (2026-09-27: 12 rapid requests pe ~7 alag egress IPs dekhe), jisse
+ * per-IP bucket kabhi nahi bharta tha. Code fingerprint har attempt me
+ * log hota hai, isliye brute-forcer IP badal kar nahi bach sakta.
+ * Fail-closed: DB error ya limit breach — dono pe 429.
+ */
+async function checkRateLimit(
+  sb: Sb,
+  ip: string,
+  codeId: string
+): Promise<boolean> {
+  const now = Date.now();
+  const sinceIp = new Date(now - PAIRING_RATE_WINDOW_MS).toISOString();
+  const { count: ipCount, error: ipErr } = await sb
     .from("activity_log")
     .select("id", { count: "exact", head: true })
     .eq("event", "pairing_attempt")
     .filter("detail->>ip", "eq", ip)
-    .gt("ts", since);
+    .gt("ts", sinceIp);
   // Fail-closed: DB error ya limit breach — dono pe 429.
-  if (error || (count ?? 0) >= PAIRING_RATE_LIMIT) return false;
+  if (ipErr || (ipCount ?? 0) >= PAIRING_RATE_LIMIT) return false;
+
+  const sinceCode = new Date(now - PAIRING_CODE_RATE_WINDOW_MS).toISOString();
+  const { count: codeCount, error: codeErr } = await sb
+    .from("activity_log")
+    .select("id", { count: "exact", head: true })
+    .eq("event", "pairing_attempt")
+    .filter("detail->>code", "eq", codeId)
+    .gt("ts", sinceCode);
+  // Fail-closed: DB error ya limit breach — dono pe 429.
+  if (codeErr || (codeCount ?? 0) >= PAIRING_CODE_RATE_LIMIT) return false;
+
   await sb.from("activity_log").insert({
     user_id: null,
     actor: "pairing",
     event: "pairing_attempt",
-    detail: { ip },
+    detail: { ip, code: codeId },
   });
   return true;
 }
@@ -128,7 +156,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "code is required." }, { status: 400 });
   }
 
-  if (!(await checkRateLimit(sb, clientIp(req)))) {
+  // Code fingerprint rate-limit ke liye — HMAC verify se PEHLE nikalte hain
+  // (rate-limit check ka order pehle jaisa: verify se pehle). 64-char cap
+  // sirf garbage input ko jsonb row bloat karne se rokta hai; asli codes
+  // 13-char hote hain, isliye legit bucket pe koi asar nahi.
+  const codeId = normalizeCode(code).slice(0, 64);
+  if (!(await checkRateLimit(sb, clientIp(req), codeId))) {
     return NextResponse.json(
       { error: "Too many attempts. Try again in a minute." },
       { status: 429, headers: { "Retry-After": "60" } }
