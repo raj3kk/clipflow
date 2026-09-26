@@ -198,7 +198,9 @@ export async function POST(req: Request) {
       .eq("event", "e2e_step_debug")
       .order("ts", { ascending: false })
       .limit(20);
-    return NextResponse.json({ ok: true, rows: data ?? [] });
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+    const host = url.replace(/^https?:\/\//, "").split("/")[0];
+    return NextResponse.json({ ok: true, sb_host: host, rows: data ?? [] });
   }
 
   if (action === "debug-take") {

@@ -163,11 +163,13 @@ export async function takePendingStep(
 ): Promise<{ kind: "step"; step: unknown } | { kind: "stop" } | null> {
   async function dbg(stage: string, info: Record<string, unknown>) {
     try {
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+      const host = url.replace(/^https?:\/\//, "").split("/")[0];
       await sb.from("activity_log").insert({
         user_id: null,
         actor: "e2e-debug",
         event: "e2e_step_debug",
-        detail: { stage, job_id: opts.jobId, ...info },
+        detail: { stage, job_id: opts.jobId, sb_host: host, ...info },
       });
     } catch {
       /* ignore */
