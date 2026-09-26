@@ -171,6 +171,40 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, job_id: data.id });
   }
 
+  if (action === "debug-clear") {
+    // takePendingStep ke EXACT update ko isolate karke test karo
+    const jobId = String(body.job_id ?? "");
+    const { data: job } = await sb
+      .from("device_jobs")
+      .select("payload")
+      .eq("id", jobId)
+      .maybeSingle();
+    const p = (job?.payload ?? {}) as Record<string, unknown>;
+    const pend = (p["pending_step"] ?? {}) as Record<string, unknown>;
+    const pid = String(pend["id"] ?? "");
+    const base: Record<string, unknown> = { ...p };
+    delete base["pending_step"];
+    const upd = await sb
+      .from("device_jobs")
+      .update({ payload: base })
+      .eq("id", jobId)
+      .filter("payload->pending_step->>id", "eq", pid)
+      .select("id");
+    const { data: after } = await sb
+      .from("device_jobs")
+      .select("payload")
+      .eq("id", jobId)
+      .maybeSingle();
+    const ap = (after?.payload ?? {}) as Record<string, unknown>;
+    return NextResponse.json({
+      ok: true,
+      pending_id: pid || null,
+      update_error: upd.error?.message ?? null,
+      cleared_rows: upd.data?.length ?? null,
+      pending_after: "pending_step" in ap,
+    });
+  }
+
   if (action === "debug-job") {
     const jobId = String(body.job_id ?? "");
     const { data: job, error: jobErr } = await sb
