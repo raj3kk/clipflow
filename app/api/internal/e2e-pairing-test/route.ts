@@ -171,8 +171,31 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, job_id: data.id });
   }
 
-  if (action === "inject-step") {
+  if (action === "debug-job") {
     const jobId = String(body.job_id ?? "");
+    const { data: job, error: jobErr } = await sb
+      .from("device_jobs")
+      .select("id, status, payload")
+      .eq("id", jobId)
+      .maybeSingle();
+    // Chained JSON filter probe (read-only): kya PostgREST
+    // `payload->pending_step->>id` parse karta hai?
+    const probe = await sb
+      .from("device_jobs")
+      .select("id")
+      .eq("id", jobId)
+      .filter("payload->pending_step->>id", "neq", "00000000-0000-0000-0000-000000000000");
+    return NextResponse.json({
+      ok: true,
+      job_error: jobErr?.message ?? null,
+      payload: job?.payload ?? null,
+      status: job?.status ?? null,
+      probe_error: probe.error?.message ?? null,
+      probe_rows: probe.data?.length ?? null,
+    });
+  }
+
+  if (action === "inject-step") {    const jobId = String(body.job_id ?? "");
     const deviceId = String(body.device_id ?? "");
     const userId = String(body.user_id ?? "");
     if (!jobId || !deviceId || !userId) {
