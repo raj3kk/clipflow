@@ -171,6 +171,26 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, job_id: data.id });
   }
 
+  if (action === "debug-list-jobs") {
+    const deviceId = String(body.device_id ?? "");
+    const { data } = await sb
+      .from("device_jobs")
+      .select("id, status, payload")
+      .eq("device_id", deviceId)
+      .order("created_at", { ascending: true });
+    const rows = (data ?? []).map((j) => {
+      const p = (j.payload ?? {}) as Record<string, unknown>;
+      const ps = (p["pending_step"] ?? null) as Record<string, unknown> | null;
+      return {
+        id: j.id,
+        status: j.status,
+        pending_id: ps ? String(ps["id"] ?? null) : null,
+        pending_step_action: ps ? JSON.stringify((ps["step"] as Record<string, unknown> | undefined)?.["action"] ?? null) : null,
+      };
+    });
+    return NextResponse.json({ ok: true, count: rows.length, rows });
+  }
+
   if (action === "debug-logs") {
     const { data } = await sb
       .from("activity_log")
