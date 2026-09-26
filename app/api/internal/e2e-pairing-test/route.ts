@@ -302,6 +302,30 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, step_id: res.step_id });
   }
 
+  if (action === "cleanup-all-e2e") {
+    // Saare e2e nishan: e2e_test flag wale activity_log rows + e2e_step_debug rows
+    const { data: d1 } = await sb
+      .from("activity_log")
+      .delete()
+      .filter("detail->e2e_test", "eq", "true")
+      .select("id");
+    const { data: d2 } = await sb
+      .from("activity_log")
+      .delete()
+      .eq("event", "e2e_step_debug")
+      .select("id");
+    const { data: remaining } = await sb
+      .from("devices")
+      .select("id")
+      .like("device_name", "VIRTUAL-TEST-%");
+    return NextResponse.json({
+      ok: true,
+      e2e_flagged_deleted: d1?.length ?? 0,
+      debug_rows_deleted: d2?.length ?? 0,
+      remaining_virtual_devices: remaining?.length ?? 0,
+    });
+  }
+
   if (action === "cleanup") {
     const run = String(body.run ?? "");
     const codes = Array.isArray(body.codes) ? body.codes.map(String) : [];
